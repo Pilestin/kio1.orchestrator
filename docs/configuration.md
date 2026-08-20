@@ -24,6 +24,11 @@ All application settings are stored in `config.json` at the project root.
 | `telemetry.otlp_bearer_token` | string | Bearer token sent as `Authorization: Bearer <token>` to the Collector, if it requires authentication (default: `""`, no header sent) |
 | `telemetry.metric_export_interval_ms` | int | Positive metric-export interval in milliseconds (default: `5000`) |
 | `telemetry.trace_sample_ratio` | number | Fraction of traces sampled, from `0.0` to `1.0` (default: `1.0`) |
+| `dispatch` | object | Optional workflow dispatch configuration; dispatch is disabled when omitted |
+| `dispatch.enabled` | boolean | Sends generated plans to KIO agents (default: `false`) |
+| `dispatch.request_timeout` | number | Positive per-agent reply timeout in seconds (default: `60`) |
+| `dispatch.max_parallel_steps` | int | Positive bound on concurrent dispatches in `parallel` mode (default: `4`) |
+| `dispatch.agents` | object | Agent id to endpoint mapping; see [Workflow Dispatch](workflow-dispatch.md) |
 
 ## Example `config.json`
 
@@ -154,6 +159,16 @@ If the OTLP Collector requires authentication, set `telemetry.otlp_bearer_token`
 `metric_export_interval_ms` controls how frequently metrics are sent. Smaller values update Prometheus more frequently but increase export activity.
 
 For setup, querying, retention, and safe shutdown instructions, see the [Observability Guide](observability.md).
+
+## Workflow Dispatch
+
+The `dispatch` object is optional. When it is omitted or `dispatch.enabled` is `false`, KIO1 prints the generated workflow plan and stops, which is the behaviour it had before the dispatch layer existed.
+
+When enabled, each plan step is turned into an execution message and posted to the agent configured under `dispatch.agents`. Steps addressed to agents that are not configured are reported as `skipped`; they are not errors, because a plan spanning KIO2-KIO13 will always name agents that are not deployed yet.
+
+Enabling dispatch with an empty `dispatch.agents` object is rejected at startup, since there would be nowhere to send any step.
+
+For the message format, reply contract, execution modes, and telemetry, see [Workflow Dispatch](workflow-dispatch.md).
 
 ## Security
 

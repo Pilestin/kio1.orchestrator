@@ -2,7 +2,7 @@
 
 ## Overview
 
-KIO1 Orchestrator is a terminal application that accepts natural-language user requests and produces structured JSON workflow plans. It supports Ollama, OpenAI, and Anthropic through dynamically loaded provider modules. Optional OpenTelemetry instrumentation exports privacy-safe traces and metrics.
+KIO1 Orchestrator is a terminal application that accepts natural-language user requests, produces structured JSON workflow plans, and optionally dispatches each plan step to the KIO agent that carries it out. It supports Ollama, OpenAI, and Anthropic through dynamically loaded provider modules. Optional OpenTelemetry instrumentation exports privacy-safe traces and metrics.
 
 ## System Diagram
 
@@ -16,6 +16,12 @@ graph TD
     Main --> Formatter[formatter.py]
     Main --> SessionLogger[session_logger.py]
     Main --> Telemetry[telemetry.py]
+    Main --> Executor[workflow_executor.py]
+    Executor --> Planner[workflow_planner.py]
+    Executor --> Registry[agent_registry.py]
+    Executor --> Transport[agent_transport.py]
+    Transport -->|HTTP POST| Agents[KIO2 - KIO13 agents]
+    Executor --> Telemetry
     SessionLogger -->|write| LogFiles[logs/*.log]
     ProviderClient -->|dynamic import| OllamaClient[ollama_client.py]
     ProviderClient -->|dynamic import| OpenAIClient[openai_client.py]
@@ -32,7 +38,7 @@ graph TD
     AnthropicClient --> Telemetry
     Telemetry -->|OTLP/HTTP| Collector[OpenTelemetry Collector]
     Collector -->|traces| Tempo[Grafana Tempo]
-    Collector -->|metrics| Prometheus[Prometheus]
+    Collector -->|metrics| VictoriaMetrics[VictoriaMetrics]
 ```
 
 ## Components
@@ -50,7 +56,11 @@ graph TD
 | `chat_history.py` | Manages JSONL-based conversation persistence |
 | `formatter.py` | Pretty-prints JSON responses for terminal display |
 | `telemetry.py` | Initializes OpenTelemetry, creates spans and metrics, records metadata, and flushes exporters |
-| `observability/` | Defines the persistent Collector, Tempo, and Prometheus services |
+| `workflow_planner.py` | Validates a workflow plan and turns its steps into protocol execution messages |
+| `agent_registry.py` | Maps `agent_id` values from a plan to configured, reachable agent endpoints |
+| `agent_transport.py` | Delivers one execution message to one agent; HTTP today, swappable |
+| `workflow_executor.py` | Runs a routed plan sequentially or in parallel and collects per-step results |
+| `dummy_agent.py` | Dependency-free stub agent used to validate the protocol end to end |
 
 ## Data Flow
 
@@ -61,7 +71,8 @@ graph TD
 5. Each user request runs inside a turn trace containing the provider request and response-formatting spans.
 6. Provider response metadata, token usage, workflow structure, and request durations are recorded without prompt or response content.
 7. User and assistant messages are appended to the chat file after each exchange.
-8. On exit, the session-completed metric is recorded and pending telemetry is flushed.
+8. When `dispatch.enabled` is `true`, the plan is validated, routed against the agent registry, and its steps are delivered to the configured agents; results are printed as a per-step summary.
+9. On exit, the session-completed metric is recorded and pending telemetry is flushed.
 
 ## Design Decisions
 
@@ -72,6 +83,9 @@ graph TD
 - **Per-session logging**: Each run writes `logs/log_<session_id>.log` at `DEBUG`, paired with its `chats/chat_<session_id>.jsonl` by a shared id. Only `ERROR` reaches the console, keeping interactive output clean.
 - **Message content at DEBUG only**: `INFO` records carry metadata (provider, model, durations, token counts); user queries and model responses appear only at `DEBUG`, which never reaches stderr.
 - **Optional telemetry**: OpenTelemetry is disabled by default, allowing KIO1 to run without Docker or a Collector.
+- **Optional dispatch**: Plan dispatch is disabled by default, so KIO1 stays usable as a plan-only tool while KIO agents are still being brought up. A plan step addressed to an undeployed agent is skipped, not failed.
+- **Transport behind an interface**: The shared documents describe two different transports (direct HTTP in the KIO1-KIO10 protocol, NATS JetStream in the observability guide). `AgentTransport` isolates that choice from the planner and executor.
+- **Dependency-free dispatch**: The HTTP transport and the stub agent use `urllib.request` and `http.server`, matching the existing Ollama client and adding no new runtime dependencies.
 - **Privacy-aware instrumentation**: Telemetry contains operational metadata but excludes prompts, responses, exception messages, and stack traces.
 - **Persistent observability storage**: Collector queues, Tempo traces, and Prometheus metrics use named Docker volumes that survive container recreation.
 

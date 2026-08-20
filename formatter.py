@@ -28,25 +28,44 @@ def format_json(raw_json: str) -> str:
         ValueError: If the content parses as neither JSON nor a Python literal.
     """
     with trace_operation("kio1.response.format"):
-        normalized_content = _strip_markdown_fence(raw_json)
-        try:
-            parsed: Any = json.loads(normalized_content)
-        except json.JSONDecodeError:
-            logger.warning(
-                "Standard JSON parsing failed, falling back to ast.literal_eval"
-            )
-            try:
-                parsed = ast.literal_eval(normalized_content)
-            except (ValueError, SyntaxError) as error:
-                raise ValueError(
-                    f"Content is neither valid JSON nor a Python literal: {error}"
-                ) from error
-
-            record_format_fallback()
-
+        parsed = parse_response(raw_json)
         _record_workflow_metadata(parsed)
 
         return json.dumps(parsed, indent=2, ensure_ascii=False)
+
+
+def parse_response(raw_json: str) -> Any:
+    """Decode a model response into a Python value.
+
+    Falls back to `ast.literal_eval` if standard JSON parsing fails
+    (e.g., when the model returns single-quoted Python dicts).
+
+    Args:
+        raw_json: A raw JSON string from the model.
+
+    Returns:
+        The decoded value.
+
+    Raises:
+        ValueError: If the content parses as neither JSON nor a Python literal.
+    """
+    normalized_content = _strip_markdown_fence(raw_json)
+
+    try:
+        return json.loads(normalized_content)
+    except json.JSONDecodeError:
+        logger.warning("Standard JSON parsing failed, falling back to ast.literal_eval")
+
+    try:
+        parsed: Any = ast.literal_eval(normalized_content)
+    except (ValueError, SyntaxError) as error:
+        raise ValueError(
+            f"Content is neither valid JSON nor a Python literal: {error}"
+        ) from error
+
+    record_format_fallback()
+
+    return parsed
 
 
 def _record_workflow_metadata(parsed: Any) -> None:

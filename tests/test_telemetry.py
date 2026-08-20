@@ -908,9 +908,7 @@ def test_record_kpi_snapshot_records_every_d11_kpi() -> None:
         "kpi_refactoring",
         "kpi_tech_debt",
     ):
-        getattr(instruments, histogram_name).record.assert_called_once_with(
-            1.0, labels
-        )
+        getattr(instruments, histogram_name).record.assert_called_once_with(1.0, labels)
 
     instruments.kpi_customer_reported_issues.add.assert_not_called()
     instruments.kpi_cross_arch_build.add.assert_not_called()

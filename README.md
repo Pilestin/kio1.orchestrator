@@ -58,6 +58,18 @@ docker compose -f observability/compose.telemetry.yaml up -d
 
 See the [Observability Guide](docs/observability.md) for configuration, querying, retention, and safe-shutdown instructions. -->
 
+## Workflow Dispatch
+
+KIO1 can send the steps of a generated plan to the KIO agents that carry them out, following the `KIO1 - KIO10` integration protocol. Dispatch is disabled by default; enable it with `dispatch.enabled` in `config.json` and list the reachable agents under `dispatch.agents`.
+
+A dependency-free stub agent is included for validating the protocol before real agents exist:
+
+```bash
+python dummy_agent.py --agent-id KIO2 --port 8102
+```
+
+See the [Workflow Dispatch Guide](docs/workflow-dispatch.md) for the message format, reply contract, execution modes, and known gaps.
+
 ## Running Tests
 
 ```bash
@@ -75,4 +87,5 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Chat History Format](docs/chat-history.md) — JSONL session file specification
 - [Development Guide](docs/development.md) — Setup, testing, and contribution guidelines
 - [Troubleshooting](docs/troubleshooting.md) — Common errors and how to resolve them
+- [Workflow Dispatch](docs/workflow-dispatch.md) — Sending plan steps to KIO agents
 - [Observability](docs/observability.md) — Tracing, metrics, storage, querying, and safe shutdown

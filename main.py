@@ -1,6 +1,6 @@
 import logging
 import sys
-from formatter import format_json
+from formatter import format_json, parse_response
 
 from chat_history import (
     append_assistant_message,
@@ -22,6 +22,7 @@ from telemetry import (
     trace_provider_preload,
     trace_turn,
 )
+from workflow_executor import dispatch_plan, render_summary
 
 logger = logging.getLogger("main")
 
@@ -129,6 +130,15 @@ def main() -> None:
                     append_user_message(chat_file, query)
                     append_assistant_message(chat_file, content)
                     print(f"\n{formatted}")
+
+                    if config.dispatch.enabled:
+                        workflow_result = dispatch_plan(
+                            parse_response(content),
+                            config.dispatch,
+                        )
+
+                        if workflow_result is not None:
+                            print(f"\n{render_summary(workflow_result)}")
 
             except Exception as e:
                 logger.exception("Request failed: turn=%d", turn)

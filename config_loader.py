@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from agent_registry import AgentRegistry, load_agent_registry
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,6 +24,26 @@ class TelemetryConfig:
     deployment_environment: str = "local"
 
 
+@dataclass(frozen=True)
+class DispatchConfig:
+    """Workflow dispatch configuration.
+
+    Attributes:
+        enabled: Whether generated plans are sent to KIO agents. Disabled by
+            default, so KIO1 keeps behaving as a plan-only terminal tool
+            until agents are actually reachable.
+        request_timeout: Seconds to wait for a single agent's reply.
+        max_parallel_steps: Upper bound on concurrent dispatches in
+            `parallel` execution mode.
+        registry: Agents KIO1 is able to dispatch work to.
+    """
+
+    enabled: bool = False
+    request_timeout: float = 60.0
+    max_parallel_steps: int = 4
+    registry: AgentRegistry = field(default_factory=lambda: AgentRegistry({}))
+
+
 @dataclass
 class Config:
     """Application configuration."""
@@ -36,6 +58,7 @@ class Config:
     keep_alive: int
     max_output_tokens: int
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
+    dispatch: DispatchConfig = field(default_factory=DispatchConfig)
     provider_options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -100,16 +123,12 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
     if not isinstance(kio_id, str) or not kio_id.strip():
         raise ValueError("telemetry.kio_id must be a non-empty string.")
 
-    deployment_environment = telemetry_data.get(
-        "deployment_environment", "local"
-    )
+    deployment_environment = telemetry_data.get("deployment_environment", "local")
     if (
         not isinstance(deployment_environment, str)
         or not deployment_environment.strip()
     ):
-        raise ValueError(
-            "telemetry.deployment_environment must be a non-empty string."
-        )
+        raise ValueError("telemetry.deployment_environment must be a non-empty string.")
 
     return TelemetryConfig(
         enabled=enabled,
@@ -120,6 +139,55 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
         trace_sample_ratio=float(sample_ratio),
         kio_id=kio_id.strip(),
         deployment_environment=deployment_environment.strip(),
+    )
+
+
+def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
+    """Load and validate the optional dispatch configuration.
+
+    Args:
+        data: Complete decoded configuration object.
+
+    Returns:
+        Validated dispatch settings.
+
+    Raises:
+        ValueError: If dispatch settings have invalid types or values.
+    """
+    dispatch_data = data.get("dispatch", {})
+
+    if not isinstance(dispatch_data, dict):
+        raise ValueError("dispatch must be a JSON object.")
+
+    enabled = dispatch_data.get("enabled", False)
+    if type(enabled) is not bool:
+        raise ValueError("dispatch.enabled must be a boolean.")
+
+    request_timeout = dispatch_data.get("request_timeout", 60)
+    if type(request_timeout) not in (int, float) or request_timeout <= 0:
+        raise ValueError("dispatch.request_timeout must be a positive number.")
+
+    max_parallel_steps = dispatch_data.get("max_parallel_steps", 4)
+    if type(max_parallel_steps) is not int or max_parallel_steps <= 0:
+        raise ValueError("dispatch.max_parallel_steps must be a positive integer.")
+
+    agents_data = dispatch_data.get("agents", {})
+    if not isinstance(agents_data, dict):
+        raise ValueError("dispatch.agents must be a JSON object.")
+
+    registry = load_agent_registry(agents_data)
+
+    if enabled and not len(registry):
+        raise ValueError(
+            "dispatch.enabled is true but dispatch.agents is empty; there is "
+            "nowhere to send workflow steps."
+        )
+
+    return DispatchConfig(
+        enabled=enabled,
+        request_timeout=float(request_timeout),
+        max_parallel_steps=max_parallel_steps,
+        registry=registry,
     )
 
 
@@ -141,6 +209,7 @@ def load_config(config_path: str = "config.json") -> Config:
         raise ValueError("provider_options must be a JSON object.")
 
     telemetry = _load_telemetry_config(data)
+    dispatch = _load_dispatch_config(data)
 
     allowed_providers = frozenset(data["allowed_providers"])
     if data["provider"] not in allowed_providers:
@@ -172,5 +241,6 @@ def load_config(config_path: str = "config.json") -> Config:
         keep_alive=keep_alive,
         max_output_tokens=max_output_tokens,
         telemetry=telemetry,
+        dispatch=dispatch,
         provider_options=provider_options,
     )
