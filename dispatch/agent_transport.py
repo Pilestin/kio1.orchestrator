@@ -4,8 +4,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Protocol
 
-from agent_registry import AgentEndpoint
-from workflow_planner import ExecutionMessage
+from dispatch.agent_registry import AgentEndpoint
+from dispatch.workflow_planner import ExecutionMessage
 
 logger = logging.getLogger(__name__)
 

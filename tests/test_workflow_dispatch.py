@@ -5,11 +5,10 @@ from typing import Any
 
 import pytest
 
-from agent_registry import AgentEndpoint, AgentRegistry, load_agent_registry
-from agent_transport import AgentTransportError, HttpAgentTransport
-from config_loader import DispatchConfig, load_config
-from dummy_agent import build_server, server_address
-from workflow_executor import (
+from core.config_loader import DispatchConfig, load_config
+from dispatch.agent_registry import AgentEndpoint, AgentRegistry, load_agent_registry
+from dispatch.agent_transport import AgentTransportError, HttpAgentTransport
+from dispatch.workflow_executor import (
     STATUS_ERROR,
     STATUS_NOT_RUN,
     STATUS_OK,
@@ -18,13 +17,14 @@ from workflow_executor import (
     execute_workflow,
     render_summary,
 )
-from workflow_planner import (
+from dispatch.workflow_planner import (
     SKIP_CAPABILITY_MISMATCH,
     SKIP_NO_ENDPOINT,
     ExecutionMessage,
     parse_plan,
     route_plan,
 )
+from tools.dummy_agent import build_server, server_address
 
 KIO2_ENDPOINT = AgentEndpoint(
     agent_id="KIO2",

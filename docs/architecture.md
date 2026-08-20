@@ -9,23 +9,23 @@ KIO1 Orchestrator is a terminal application that accepts natural-language user r
 ```mermaid
 graph TD
     User[User Terminal] -->|query| Main[main.py]
-    Main --> ConfigLoader[config_loader.py]
-    Main --> PromptLoader[prompt_loader.py]
-    Main --> ChatHistory[chat_history.py]
-    Main --> ProviderClient[provider_client.py]
-    Main --> Formatter[formatter.py]
-    Main --> SessionLogger[session_logger.py]
-    Main --> Telemetry[telemetry.py]
-    Main --> Executor[workflow_executor.py]
-    Executor --> Planner[workflow_planner.py]
-    Executor --> Registry[agent_registry.py]
-    Executor --> Transport[agent_transport.py]
+    Main --> ConfigLoader[core/config_loader.py]
+    Main --> PromptLoader[core/prompt_loader.py]
+    Main --> ChatHistory[core/chat_history.py]
+    Main --> ProviderClient[providers/provider_client.py]
+    Main --> Formatter[core/formatter.py]
+    Main --> SessionLogger[core/session_logger.py]
+    Main --> Telemetry[core/telemetry.py]
+    Main --> Executor[dispatch/workflow_executor.py]
+    Executor --> Planner[dispatch/workflow_planner.py]
+    Executor --> Registry[dispatch/agent_registry.py]
+    Executor --> Transport[dispatch/agent_transport.py]
     Transport -->|HTTP POST| Agents[KIO2 - KIO13 agents]
     Executor --> Telemetry
     SessionLogger -->|write| LogFiles[logs/*.log]
-    ProviderClient -->|dynamic import| OllamaClient[ollama_client.py]
-    ProviderClient -->|dynamic import| OpenAIClient[openai_client.py]
-    ProviderClient -->|dynamic import| AnthropicClient[anthropic_client.py]
+    ProviderClient -->|dynamic import| OllamaClient[providers/ollama_client.py]
+    ProviderClient -->|dynamic import| OpenAIClient[providers/openai_client.py]
+    ProviderClient -->|dynamic import| AnthropicClient[providers/anthropic_client.py]
     OllamaClient -->|HTTP POST| Ollama[Ollama API :11434]
     OpenAIClient -->|HTTPS| OpenAIAPI[OpenAI Chat Completions API]
     AnthropicClient -->|HTTPS| AnthropicAPI[Anthropic Messages API]
@@ -46,21 +46,21 @@ graph TD
 | Module | Responsibility |
 |--------|---------------|
 | `main.py` | Entry point; REPL loop, orchestrates all other modules |
-| `config_loader.py` | Loads and validates `config.json` into a typed `Config` dataclass |
-| `session_logger.py` | Per-session log file setup and duration measurement |
-| `provider_client.py` | Dynamically imports `<provider>_client.py` and validates it implements the required provider interface |
-| `prompt_loader.py` | Reads system prompt text from disk |
-| `ollama_client.py` | Sends HTTP requests to the Ollama `/api/chat` endpoint |
-| `openai_client.py` | Sends requests via the OpenAI Chat Completions API |
-| `anthropic_client.py` | Sends requests via the Anthropic Messages API |
-| `chat_history.py` | Manages JSONL-based conversation persistence |
-| `formatter.py` | Pretty-prints JSON responses for terminal display |
-| `telemetry.py` | Initializes OpenTelemetry, creates spans and metrics, records metadata, and flushes exporters |
-| `workflow_planner.py` | Validates a workflow plan and turns its steps into protocol execution messages |
-| `agent_registry.py` | Maps `agent_id` values from a plan to configured, reachable agent endpoints |
-| `agent_transport.py` | Delivers one execution message to one agent; HTTP today, swappable |
-| `workflow_executor.py` | Runs a routed plan sequentially or in parallel and collects per-step results |
-| `dummy_agent.py` | Dependency-free stub agent used to validate the protocol end to end |
+| `core/config_loader.py` | Loads and validates `config.json` into a typed `Config` dataclass |
+| `core/session_logger.py` | Per-session log file setup and duration measurement |
+| `providers/provider_client.py` | Dynamically imports `<provider>_client.py` and validates it implements the required provider interface |
+| `core/prompt_loader.py` | Reads system prompt text from disk |
+| `providers/ollama_client.py` | Sends HTTP requests to the Ollama `/api/chat` endpoint |
+| `providers/openai_client.py` | Sends requests via the OpenAI Chat Completions API |
+| `providers/anthropic_client.py` | Sends requests via the Anthropic Messages API |
+| `core/chat_history.py` | Manages JSONL-based conversation persistence |
+| `core/formatter.py` | Pretty-prints JSON responses for terminal display |
+| `core/telemetry.py` | Initializes OpenTelemetry, creates spans and metrics, records metadata, and flushes exporters |
+| `dispatch/workflow_planner.py` | Validates a workflow plan and turns its steps into protocol execution messages |
+| `dispatch/agent_registry.py` | Maps `agent_id` values from a plan to configured, reachable agent endpoints |
+| `dispatch/agent_transport.py` | Delivers one execution message to one agent; HTTP today, swappable |
+| `dispatch/workflow_executor.py` | Runs a routed plan sequentially or in parallel and collects per-step results |
+| `tools/dummy_agent.py` | Dependency-free stub agent used to validate the protocol end to end |
 
 ## Data Flow
 

@@ -1,5 +1,4 @@
 import json
-from formatter import format_json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, call, patch
@@ -7,11 +6,12 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 from opentelemetry.trace import StatusCode
 
-import telemetry
-from anthropic_client import send_request as send_anthropic_request
-from config_loader import Config, TelemetryConfig
-from ollama_client import send_request as send_ollama_request
-from openai_client import send_request as send_openai_request
+from core import telemetry
+from core.config_loader import Config, TelemetryConfig
+from core.formatter import format_json
+from providers.anthropic_client import send_request as send_anthropic_request
+from providers.ollama_client import send_request as send_ollama_request
+from providers.openai_client import send_request as send_openai_request
 
 
 def _recording_tracer() -> tuple[MagicMock, MagicMock]:
@@ -96,8 +96,8 @@ def test_interrupted_turn_is_recorded_as_error() -> None:
     )
 
 
-@patch("ollama_client.record_gen_ai_response")
-@patch("ollama_client.urllib.request.urlopen")
+@patch("providers.ollama_client.record_gen_ai_response")
+@patch("providers.ollama_client.urllib.request.urlopen")
 def test_ollama_maps_response_telemetry_before_truncation(
     urlopen: MagicMock,
     record_response: MagicMock,
@@ -135,7 +135,7 @@ def test_ollama_maps_response_telemetry_before_truncation(
     )
 
 
-@patch("openai_client.record_gen_ai_response")
+@patch("providers.openai_client.record_gen_ai_response")
 def test_openai_maps_response_telemetry_before_truncation(
     record_response: MagicMock,
 ) -> None:
@@ -171,7 +171,7 @@ def test_openai_maps_response_telemetry_before_truncation(
     )
 
 
-@patch("anthropic_client.record_gen_ai_response")
+@patch("providers.anthropic_client.record_gen_ai_response")
 def test_anthropic_maps_response_telemetry_before_truncation(
     record_response: MagicMock,
 ) -> None:
@@ -594,8 +594,8 @@ def test_formatter_records_fallback_and_workflow_structure() -> None:
     )
 
     with (
-        patch("formatter.record_format_fallback") as record_fallback,
-        patch("formatter.record_workflow_plan") as record_plan,
+        patch("core.formatter.record_format_fallback") as record_fallback,
+        patch("core.formatter.record_workflow_plan") as record_plan,
     ):
         formatted = format_json(raw_response)
 

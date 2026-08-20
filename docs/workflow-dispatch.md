@@ -24,16 +24,16 @@ not, so a generated plan was never delivered anywhere.
 model response (JSON workflow plan)
         |
         v
-  parse_plan()            workflow_planner.py   validate the plan
+  parse_plan()            dispatch/workflow_planner.py   validate the plan
         |
         v
-  route_plan()            workflow_planner.py   plan step -> execution message
-        |                 agent_registry.py     agent_id  -> endpoint
+  route_plan()            dispatch/workflow_planner.py   plan step -> execution message
+        |                 dispatch/agent_registry.py     agent_id  -> endpoint
         v
-  execute_workflow()      workflow_executor.py  sequential / parallel
+  execute_workflow()      dispatch/workflow_executor.py  sequential / parallel
         |
         v
-  transport.send()        agent_transport.py    HTTP POST to the agent
+  transport.send()        dispatch/agent_transport.py    HTTP POST to the agent
         |
         v
   StepResult per step     correlated by workflow_id + step_id
@@ -174,15 +174,15 @@ end-to-end traces across KIOs.
 
 ## The stub agent
 
-`dummy_agent.py` is a dependency-free stand-in for a real KIO, used to
+`tools/dummy_agent.py` is a dependency-free stand-in for a real KIO, used to
 validate the protocol before any agent exists:
 
 ```bash
-python dummy_agent.py --agent-id KIO2 --port 8102
+python tools/dummy_agent.py --agent-id KIO2 --port 8102
 ```
 
 ```bash
-python dummy_agent.py --agent-id KIO10 --port 8110
+python tools/dummy_agent.py --agent-id KIO10 --port 8110
 ```
 
 Useful flags:

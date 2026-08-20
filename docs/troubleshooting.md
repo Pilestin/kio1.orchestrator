@@ -299,3 +299,9 @@ The safe shutdown command is:
 ```bash
 docker compose -f observability/compose.telemetry.yaml stop
 ```
+
+### Exporter errors appear in the terminal while typing
+
+They should not. OpenTelemetry export failures are filtered out of the console handler and written only to `logs/log_<session_id>.log`, so they cannot corrupt the line being typed at the prompt. If they still reach the terminal, the run predates that filter, or a library outside the `opentelemetry` logger namespace is failing.
+
+A silent absence of telemetry is the expected trade-off: check the session log for `Failed to export`, and confirm `telemetry.otlp_http_endpoint` points at a reachable Collector.

@@ -1,18 +1,17 @@
 import logging
 import sys
-from formatter import format_json, parse_response
 
-from chat_history import (
+from core.chat_history import (
     append_assistant_message,
     append_user_message,
     create_chat_file,
     load_messages,
 )
-from config_loader import load_config
-from prompt_loader import load_prompt
-from provider_client import load_provider
-from session_logger import generate_session_id, init_logger
-from telemetry import (
+from core.config_loader import load_config
+from core.formatter import format_json, parse_response
+from core.prompt_loader import load_prompt
+from core.session_logger import generate_session_id, init_logger
+from core.telemetry import (
     init_telemetry,
     record_session_completed,
     record_session_started,
@@ -22,7 +21,8 @@ from telemetry import (
     trace_provider_preload,
     trace_turn,
 )
-from workflow_executor import dispatch_plan, render_summary
+from dispatch.workflow_executor import dispatch_plan, render_summary
+from providers.provider_client import load_provider
 
 logger = logging.getLogger("main")
 

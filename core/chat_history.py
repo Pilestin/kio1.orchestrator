@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 
-from session_logger import generate_session_id
+from core.session_logger import generate_session_id
 
 logger = logging.getLogger(__name__)
 

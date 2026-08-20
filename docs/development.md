@@ -26,24 +26,37 @@ ollama pull ministral-3:8b
 ## Project Structure
 
 ```
-main.py              - Entry point (REPL loop)
-config_loader.py     - Configuration loading
-prompt_loader.py     - System prompt file reader
-provider_client.py   - Dynamic provider loader and interface
-openai_client.py     - OpenAI Chat Completions API provider
-anthropic_client.py  - Anthropic Messages API provider
-ollama_client.py     - Ollama HTTP client
-chat_history.py      - JSONL conversation persistence
-formatter.py         - JSON pretty-printing
-session_logger.py    - Per-session log setup and duration measurement
-telemetry.py         - OpenTelemetry tracing and metrics
-config.json          - Application settings
-observability/       - Collector, Tempo, and Prometheus configuration
-prompts/             - System prompt files
-chats/               - Session history (auto-created, gitignored)
-logs/                - Session logs (auto-created, gitignored)
-tests/               - Unit tests
-docs/                - Documentation
+main.py                        - Entry point (REPL loop)
+config.json                    - Application settings
+
+core/                          - Orchestrator plumbing
+  config_loader.py             - Configuration loading and validation
+  prompt_loader.py             - System prompt file reader
+  chat_history.py              - JSONL conversation persistence
+  formatter.py                 - Response parsing and pretty-printing
+  session_logger.py            - Per-session log setup and duration measurement
+  telemetry.py                 - OpenTelemetry tracing and metrics
+
+providers/                     - Model providers
+  provider_client.py           - Dynamic provider loader and interface
+  ollama_client.py             - Ollama HTTP client
+  openai_client.py             - OpenAI Chat Completions API provider
+  anthropic_client.py          - Anthropic Messages API provider
+
+dispatch/                      - Sending plan steps to KIO agents
+  workflow_planner.py          - Plan validation and execution messages
+  agent_registry.py            - agent_id to endpoint mapping
+  agent_transport.py           - Message delivery, HTTP today
+  workflow_executor.py         - Sequential and parallel execution
+
+tools/                         - Developer utilities
+  dummy_agent.py               - Stub KIO agent for protocol validation
+
+prompts/                       - System prompt files
+tests/                         - Unit tests
+docs/                          - Documentation
+chats/                         - Session history (auto-created, gitignored)
+logs/                          - Session logs (auto-created, gitignored)
 ```
 
 ## Running Tests

@@ -5,9 +5,32 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from agent_registry import AgentRegistry, load_agent_registry
+from dispatch.agent_registry import AgentRegistry, load_agent_registry
 
 logger = logging.getLogger(__name__)
+
+# Placeholder hosts shipped in the example configuration. Left in place with
+# telemetry enabled, every export fails silently in the background, so they
+# are rejected loudly at startup instead.
+_PLACEHOLDER_OTLP_HOSTS = ("your_host", "your-host", "changeme", "example.com")
+
+
+def _is_placeholder_host(hostname: str | None) -> bool:
+    """Report whether a hostname is an unedited example value.
+
+    Args:
+        hostname: Host parsed from the configured endpoint, if any.
+
+    Returns:
+        True for the example hosts and for any `.example.com` subdomain,
+        which RFC 2606 reserves for documentation.
+    """
+    if not hostname:
+        return False
+
+    hostname = hostname.lower()
+
+    return hostname in _PLACEHOLDER_OTLP_HOSTS or hostname.endswith(".example.com")
 
 
 @dataclass(frozen=True)
@@ -81,11 +104,11 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
 
     enabled = telemetry_data.get("enabled", False)
     if type(enabled) is not bool:
-        raise ValueError("telemetry.enabled must be a boolean.")
+        raise ValueError("core.telemetry.enabled must be a boolean.")
 
     service_name = telemetry_data.get("service_name", "kio1-orchestrator")
     if not isinstance(service_name, str) or not service_name.strip():
-        raise ValueError("telemetry.service_name must be a non-empty string.")
+        raise ValueError("core.telemetry.service_name must be a non-empty string.")
 
     endpoint = telemetry_data.get(
         "otlp_http_endpoint",
@@ -93,42 +116,51 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
     )
     if not isinstance(endpoint, str) or not endpoint.strip():
         raise ValueError(
-            "telemetry.otlp_http_endpoint must be a non-empty HTTP(S) URL."
+            "core.telemetry.otlp_http_endpoint must be a non-empty HTTP(S) URL."
         )
 
     endpoint = endpoint.strip().rstrip("/")
     parsed_endpoint = urlparse(endpoint)
     if parsed_endpoint.scheme not in {"http", "https"} or not parsed_endpoint.netloc:
         raise ValueError(
-            "telemetry.otlp_http_endpoint must be a non-empty HTTP(S) URL."
+            "core.telemetry.otlp_http_endpoint must be a non-empty HTTP(S) URL."
+        )
+
+    if enabled and _is_placeholder_host(parsed_endpoint.hostname):
+        raise ValueError(
+            "telemetry.otlp_http_endpoint is still the example placeholder "
+            f"({parsed_endpoint.hostname!r}). Set the real Collector endpoint, "
+            "or set telemetry.enabled to false."
         )
 
     bearer_token = telemetry_data.get("otlp_bearer_token", "")
     if not isinstance(bearer_token, str):
-        raise ValueError("telemetry.otlp_bearer_token must be a string.")
+        raise ValueError("core.telemetry.otlp_bearer_token must be a string.")
 
     export_interval = telemetry_data.get("metric_export_interval_ms", 5000)
     if type(export_interval) is not int or export_interval <= 0:
         raise ValueError(
-            "telemetry.metric_export_interval_ms must be a positive integer."
+            "core.telemetry.metric_export_interval_ms must be a positive integer."
         )
 
     sample_ratio = telemetry_data.get("trace_sample_ratio", 1.0)
     if type(sample_ratio) not in (int, float) or not 0.0 <= sample_ratio <= 1.0:
         raise ValueError(
-            "telemetry.trace_sample_ratio must be a number between 0.0 and 1.0."
+            "core.telemetry.trace_sample_ratio must be a number between 0.0 and 1.0."
         )
 
     kio_id = telemetry_data.get("kio_id", "kio1")
     if not isinstance(kio_id, str) or not kio_id.strip():
-        raise ValueError("telemetry.kio_id must be a non-empty string.")
+        raise ValueError("core.telemetry.kio_id must be a non-empty string.")
 
     deployment_environment = telemetry_data.get("deployment_environment", "local")
     if (
         not isinstance(deployment_environment, str)
         or not deployment_environment.strip()
     ):
-        raise ValueError("telemetry.deployment_environment must be a non-empty string.")
+        raise ValueError(
+            "core.telemetry.deployment_environment must be a non-empty string."
+        )
 
     return TelemetryConfig(
         enabled=enabled,

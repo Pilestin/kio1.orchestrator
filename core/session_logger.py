@@ -6,6 +6,24 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Libraries whose errors must never reach the console. Their failures are
+# infrastructure noise rather than something the user typed a request about,
+# and printing them mid-prompt corrupts the interactive line the user is
+# still editing. They are still written to the session log file in full.
+_CONSOLE_SILENCED_PREFIXES = ("opentelemetry",)
+
+
+def _console_filter(record: logging.LogRecord) -> bool:
+    """Keep third-party infrastructure errors off the interactive console.
+
+    Args:
+        record: The log record about to be emitted.
+
+    Returns:
+        False when the record comes from a silenced library, True otherwise.
+    """
+    return not record.name.startswith(_CONSOLE_SILENCED_PREFIXES)
+
 
 def generate_session_id() -> str:
     """Generate a timestamp+uuid id shared by the log file and chat file.
@@ -47,6 +65,7 @@ def init_logger(log_directory: str, session_id: str) -> logging.Logger:
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(logging.ERROR)
     stream_handler.setFormatter(formatter)
+    stream_handler.addFilter(_console_filter)
 
     logger = logging.getLogger()
     for handler in logger.handlers[:]:

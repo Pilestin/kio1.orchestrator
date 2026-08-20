@@ -2,7 +2,6 @@ import json
 import logging
 import re
 from collections.abc import Iterator
-from formatter import format_json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,25 +9,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from anthropic_client import create_client as create_anthropic_client
-from anthropic_client import extract_content as extract_anthropic_content
-from anthropic_client import preload as preload_anthropic
-from anthropic_client import send_request as send_anthropic_request
-from chat_history import (
+from core.chat_history import (
     append_assistant_message,
     append_user_message,
     create_chat_file,
     load_messages,
 )
-from config_loader import Config, TelemetryConfig, load_config
-from ollama_client import extract_content, preload, send_request
-from openai_client import create_client as create_openai_client
-from openai_client import extract_content as extract_openai_content
-from openai_client import preload as preload_openai
-from openai_client import send_request as send_openai_request
-from prompt_loader import load_prompt
-from provider_client import load_provider
-from session_logger import generate_session_id, init_logger
+from core.config_loader import Config, TelemetryConfig, load_config
+from core.formatter import format_json
+from core.prompt_loader import load_prompt
+from core.session_logger import generate_session_id, init_logger
+from providers.anthropic_client import create_client as create_anthropic_client
+from providers.anthropic_client import extract_content as extract_anthropic_content
+from providers.anthropic_client import preload as preload_anthropic
+from providers.anthropic_client import send_request as send_anthropic_request
+from providers.ollama_client import extract_content, preload, send_request
+from providers.openai_client import create_client as create_openai_client
+from providers.openai_client import extract_content as extract_openai_content
+from providers.openai_client import preload as preload_openai
+from providers.openai_client import send_request as send_openai_request
+from providers.provider_client import load_provider
 
 
 def make_config(
@@ -155,6 +155,53 @@ class TestConfigLoader:
         config = load_config(str(config_file))
 
         assert config.telemetry == TelemetryConfig()
+
+    @pytest.mark.parametrize(
+        ("enabled", "endpoint", "expect_error"),
+        [
+            (True, "http://YOUR_HOST:4318", True),
+            (True, "http://collector.example.com:4318", True),
+            (True, "http://157.230.17.89:4318", False),
+            (False, "http://YOUR_HOST:4318", False),
+        ],
+    )
+    def test_enabled_telemetry_rejects_placeholder_endpoints(
+        self,
+        tmp_path: Path,
+        enabled: bool,
+        endpoint: str,
+        expect_error: bool,
+    ) -> None:
+        """Verify an unedited example endpoint fails loudly instead of silently.
+
+        Export failures are filtered off the console so they cannot corrupt the
+        interactive prompt, which means a placeholder endpoint would otherwise
+        fail invisibly for the whole session.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+            enabled: Value for `telemetry.enabled`.
+            endpoint: Value for `telemetry.otlp_http_endpoint`.
+            expect_error: Whether loading should raise.
+        """
+        config_data = {
+            "provider": "ollama",
+            "allowed_providers": ["ollama"],
+            "model": "test-model",
+            "prompt_path": "prompts/test.txt",
+            "chat_directory": "chats",
+            "temperature": 0.1,
+            "request_timeout": 120,
+            "telemetry": {"enabled": enabled, "otlp_http_endpoint": endpoint},
+        }
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(config_data))
+
+        if expect_error:
+            with pytest.raises(ValueError, match="placeholder"):
+                load_config(str(config_file))
+        else:
+            load_config(str(config_file))
 
     def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
         """Verify an unknown provider value raises a clear error
@@ -516,6 +563,44 @@ class TestSessionLogger:
         assert file_handler.level == logging.DEBUG
         assert stream_handler.level == logging.ERROR
 
+    def test_exporter_errors_reach_the_log_file_but_not_the_console(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify OpenTelemetry export failures never corrupt the interactive prompt.
+
+        A failing OTLP exporter logs at ERROR. Without filtering, those records
+        print to stderr in the middle of the line the user is still typing.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        log_dir = tmp_path / "logs"
+        init_logger(str(log_dir), "session1")
+        file_handler, stream_handler = logging.getLogger().handlers
+
+        exporter_record = logging.LogRecord(
+            name="opentelemetry.exporter.otlp.proto.http.metric_exporter",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="Failed to export metrics batch",
+            args=(),
+            exc_info=None,
+        )
+        application_record = logging.LogRecord(
+            name="providers.ollama_client",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="Request failed",
+            args=(),
+            exc_info=None,
+        )
+
+        assert not stream_handler.filter(exporter_record)
+        assert stream_handler.filter(application_record)
+        assert file_handler.filter(exporter_record)
+
     def test_init_logger_replaces_existing_handlers(self, tmp_path: Path) -> None:
         """Verify repeated initialization does not accumulate duplicate handlers.
 
@@ -660,7 +745,7 @@ class TestFormatter:
 class TestOllamaClient:
     """Tests for Ollama client logic with mocked HTTP."""
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_send_request_builds_correct_payload(self, mock_urlopen: MagicMock) -> None:
         """Verify the request payload is correctly structured.
 
@@ -693,7 +778,7 @@ class TestOllamaClient:
         assert payload["messages"][0] == {"role": "system", "content": "system"}
         assert payload["messages"][1] == {"role": "user", "content": "test query"}
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_send_request_returns_parsed_response(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -741,7 +826,7 @@ class TestOllamaClient:
         response = {"message": {"content": '  {"key": "value"}  \n'}}
         assert extract_content(response) == '{"key": "value"}'
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_send_request_uses_correct_url(self, mock_urlopen: MagicMock) -> None:
         """Verify the request URL includes the chat endpoint.
 
@@ -771,7 +856,7 @@ class TestOllamaClient:
         call_args = mock_urlopen.call_args[0][0]
         assert call_args.full_url == "http://myhost:1234/api/chat"
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_send_request_passes_timeout(self, mock_urlopen: MagicMock) -> None:
         """Verify the timeout parameter is forwarded to `urlopen`.
 
@@ -794,7 +879,7 @@ class TestOllamaClient:
 
         assert mock_urlopen.call_args[1]["timeout"] == 60
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_send_request_passes_custom_temperature(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -821,7 +906,7 @@ class TestOllamaClient:
         payload = json.loads(call_args.data.decode("utf-8"))
         assert payload["options"]["temperature"] == 0.5
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_send_request_passes_custom_keep_alive(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -848,7 +933,7 @@ class TestOllamaClient:
         payload = json.loads(call_args.data.decode("utf-8"))
         assert payload["keep_alive"] == 600
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_preload_model_sends_correct_payload(self, mock_urlopen: MagicMock) -> None:
         """Verify `preload_model` sends the expected payload to Ollama.
 
@@ -875,7 +960,7 @@ class TestOllamaClient:
         assert payload["messages"] == []
         assert payload["keep_alive"] == -1
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_preload_model_passes_timeout(self, mock_urlopen: MagicMock) -> None:
         """Verify `preload_model` forwards the `timeout` parameter to `urlopen`.
 
@@ -896,7 +981,7 @@ class TestOllamaClient:
 
         assert mock_urlopen.call_args[1]["timeout"] == 30
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_send_request_sends_context_options(self, mock_urlopen: MagicMock) -> None:
         """Verify num_ctx and num_predict are sent in the payload options."""
         mock_response = MagicMock()
@@ -921,7 +1006,7 @@ class TestOllamaClient:
         assert payload["options"]["num_ctx"] == 16384
         assert payload["options"]["num_predict"] == 2048
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_preload_sends_context_option(self, mock_urlopen: MagicMock) -> None:
         """Verify preload loads the model with the configured context size.
 
@@ -940,7 +1025,7 @@ class TestOllamaClient:
         payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
         assert payload["options"]["num_ctx"] == 16384
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_send_request_rejects_truncated_response(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -1007,7 +1092,7 @@ class TestOllamaClient:
 class TestOpenAIClient:
     """Tests for OpenAI client logic with mocked SDK calls."""
 
-    @patch("openai_client.OpenAI")
+    @patch("providers.openai_client.OpenAI")
     def test_create_client_uses_api_key_and_timeout(
         self, mock_openai: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1028,7 +1113,7 @@ class TestOpenAIClient:
 
         mock_openai.assert_called_once_with(api_key="test-api-key", timeout=12.0)
 
-    @patch("openai_client.OpenAI")
+    @patch("providers.openai_client.OpenAI")
     def test_create_client_rejects_missing_api_key(
         self,
         mock_openai: MagicMock,
@@ -1057,7 +1142,7 @@ class TestOpenAIClient:
 
         mock_openai.assert_not_called()
 
-    @patch("openai_client.OpenAI")
+    @patch("providers.openai_client.OpenAI")
     def test_create_client_rejects_blank_api_key(
         self,
         mock_openai: MagicMock,
@@ -1169,7 +1254,7 @@ class TestOpenAIClient:
 class TestAnthropicClient:
     """Tests for Anthropic client logic with mocked SDK calls."""
 
-    @patch("anthropic_client.Anthropic")
+    @patch("providers.anthropic_client.Anthropic")
     def test_create_client_uses_api_key_and_timeout(
         self, mock_anthropic: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1190,7 +1275,7 @@ class TestAnthropicClient:
 
         mock_anthropic.assert_called_once_with(api_key="test-api-key", timeout=12.0)
 
-    @patch("anthropic_client.Anthropic")
+    @patch("providers.anthropic_client.Anthropic")
     def test_create_client_rejects_missing_api_key(
         self,
         mock_anthropic: MagicMock,
@@ -1219,7 +1304,7 @@ class TestAnthropicClient:
 
         mock_anthropic.assert_not_called()
 
-    @patch("anthropic_client.Anthropic")
+    @patch("providers.anthropic_client.Anthropic")
     def test_create_client_rejects_blank_api_key(
         self,
         mock_anthropic: MagicMock,
@@ -1357,7 +1442,7 @@ class TestAnthropicClient:
 class TestProviderLogging:
     """Tests for the INFO records emitted by provider modules."""
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_ollama_send_request_logs_duration_and_tokens(
         self, mock_urlopen: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -1380,7 +1465,7 @@ class TestProviderLogging:
         mock_urlopen.return_value = mock_response
 
         config = make_config(model="test-model")
-        with caplog.at_level(logging.INFO, logger="ollama_client"):
+        with caplog.at_level(logging.INFO, logger="providers.ollama_client"):
             send_request(config, None, "sys", [])
 
         assert "Response received:" in caplog.text
@@ -1389,7 +1474,7 @@ class TestProviderLogging:
         assert "output_tokens=286" in caplog.text
         assert "duration_ms=" in caplog.text
 
-    @patch("ollama_client.urllib.request.urlopen")
+    @patch("providers.ollama_client.urllib.request.urlopen")
     def test_ollama_preload_logs_duration(
         self, mock_urlopen: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -1406,7 +1491,7 @@ class TestProviderLogging:
         mock_urlopen.return_value = mock_response
 
         config = make_config(model="test-model")
-        with caplog.at_level(logging.INFO, logger="ollama_client"):
+        with caplog.at_level(logging.INFO, logger="providers.ollama_client"):
             preload(config, None)
 
         assert "Model preloaded:" in caplog.text
@@ -1429,7 +1514,7 @@ class TestProviderLogging:
         )
 
         config = make_config(provider="openai", model="gpt-4o-mini")
-        with caplog.at_level(logging.INFO, logger="openai_client"):
+        with caplog.at_level(logging.INFO, logger="providers.openai_client"):
             send_openai_request(config, client, "sys", [])
 
         assert "Response received:" in caplog.text
@@ -1448,7 +1533,7 @@ class TestProviderLogging:
         client = MagicMock()
         config = make_config(provider="openai", model="gpt-4o-mini")
 
-        with caplog.at_level(logging.INFO, logger="openai_client"):
+        with caplog.at_level(logging.INFO, logger="providers.openai_client"):
             preload_openai(config, client)
 
         assert "Model verified:" in caplog.text
@@ -1469,7 +1554,7 @@ class TestProviderLogging:
         )
 
         config = make_config(provider="anthropic", model="claude-haiku-4-5")
-        with caplog.at_level(logging.INFO, logger="anthropic_client"):
+        with caplog.at_level(logging.INFO, logger="providers.anthropic_client"):
             send_anthropic_request(config, client, "sys", [])
 
         assert "Response received:" in caplog.text
@@ -1488,7 +1573,7 @@ class TestProviderLogging:
         client = MagicMock()
         config = make_config(provider="anthropic", model="claude-haiku-4-5")
 
-        with caplog.at_level(logging.INFO, logger="anthropic_client"):
+        with caplog.at_level(logging.INFO, logger="providers.anthropic_client"):
             preload_anthropic(config, client)
 
         assert "Model verified:" in caplog.text

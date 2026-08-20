@@ -1,7 +1,7 @@
 {
     "provider": "ollama",
     "allowed_providers": ["ollama", "openai", "anthropic"],
-    "model": "qwen2.5:3b",
+    "model": "ministral-3:3b",
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
     "temperature": 0.2,
@@ -9,7 +9,7 @@
     "keep_alive": -1,
     "max_output_tokens": 4096,
     "telemetry": {
-        "enabled": true,
+        "enabled": false,
         "service_name": "kio1-orchestrator",
         "otlp_http_endpoint": "http://YOUR_HOST:4318",
         "otlp_bearer_token": "local-dev-otlp-token",

@@ -65,7 +65,7 @@ KIO1 can send the steps of a generated plan to the KIO agents that carry them ou
 A dependency-free stub agent is included for validating the protocol before real agents exist:
 
 ```bash
-python dummy_agent.py --agent-id KIO2 --port 8102
+python tools/dummy_agent.py --agent-id KIO2 --port 8102
 ```
 
 See the [Workflow Dispatch Guide](docs/workflow-dispatch.md) for the message format, reply contract, execution modes, and known gaps.

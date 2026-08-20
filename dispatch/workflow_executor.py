@@ -5,15 +5,19 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
-from agent_registry import AgentRegistry
-from agent_transport import (
+from core.config_loader import DispatchConfig
+from core.telemetry import (
+    record_step_result,
+    trace_step_dispatch,
+    trace_workflow_execution,
+)
+from dispatch.agent_registry import AgentRegistry
+from dispatch.agent_transport import (
     AgentTransport,
     AgentTransportError,
     HttpAgentTransport,
 )
-from config_loader import DispatchConfig
-from telemetry import record_step_result, trace_step_dispatch, trace_workflow_execution
-from workflow_planner import (
+from dispatch.workflow_planner import (
     ExecutionMessage,
     RoutingResult,
     WorkflowPlan,

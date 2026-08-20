@@ -21,7 +21,7 @@ from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode, Tracer
 from opentelemetry.util.types import Attributes, AttributeValue
 
-from config_loader import TelemetryConfig
+from core.config_loader import TelemetryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -468,7 +468,7 @@ def init_telemetry(
     )
     if headers is None:
         logger.warning(
-            "telemetry.otlp_bearer_token is not set; OTLP requests will be "
+            "core.telemetry.otlp_bearer_token is not set; OTLP requests will be "
             "sent without an Authorization header"
         )
 

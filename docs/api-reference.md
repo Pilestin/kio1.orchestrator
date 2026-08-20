@@ -33,7 +33,7 @@ telemetry      --> init_telemetry() / shutdown_telemetry()
                --> record_format_fallback() / record_workflow_plan()
 ```
 
-## `config_loader`
+## `core.config_loader`
 
 ### `Config` (dataclass)
 
@@ -67,7 +67,7 @@ Loads a `Config` from a JSON file. Validates provider selection, provider option
 
 Raises `FileNotFoundError` if the file does not exist. Raises `KeyError` if a required field is missing. Raises `ValueError` when a provider, provider option, generation limit, or telemetry setting is invalid.
 
-## `provider_client`
+## `providers.provider_client`
 
 ### `load_provider(provider_name, allowed_providers) -> ProviderModule`
 
@@ -75,7 +75,7 @@ Dynamically imports `<provider_name>_client.py` and validates it implements `cre
 
 Raises `ValueError` if `provider_name` is not in `allowed_providers` or is not a valid identifier. Raises `TypeError` if the imported module is missing a required function.
 
-## `prompt_loader`
+## `core.prompt_loader`
 
 ### `load_prompt(prompt_path) -> str`
 
@@ -83,7 +83,7 @@ Reads and returns the stripped text content of a prompt file.
 
 Raises `FileNotFoundError` if the file does not exist.
 
-## `session_logger`
+## `core.session_logger`
 
 ### `generate_session_id() -> str`
 
@@ -109,7 +109,7 @@ with measure_duration() as elapsed:
 logger.info("Response received: duration_ms=%d", elapsed())
 ```
 
-## Provider modules (`ollama_client`, `openai_client`, `anthropic_client`)
+## Provider modules (`providers.ollama_client`, `providers.openai_client`, `providers.anthropic_client`)
 
 Each provider module implements the same four functions:
 
@@ -131,7 +131,7 @@ Sends a chat request to the provider and returns the raw response. Raises `Value
 Extracts the assistant's text content from a provider response.
 
 
-## `chat_history`
+## `core.chat_history`
 
 ### `create_chat_file(chat_directory, system_prompt, session_id=None) -> Path`
 
@@ -152,13 +152,13 @@ Appends an assistant message as a JSONL line.
 
 Returns all messages from the chat file, excluding the system prompt.
 
-## `formatter`
+## `core.formatter`
 
 ### `format_json(raw_json) -> str`
 
 Parses and pretty-prints a JSON string with 2-space indentation. Falls back to `ast.literal_eval` for single-quoted Python dict output from the model. When telemetry is enabled, the function records response-formatting duration, fallback parsing, workflow execution mode, and workflow step count without recording response content.
 
-## `telemetry`
+## `core.telemetry`
 
 ### `init_telemetry(config) -> None`
 

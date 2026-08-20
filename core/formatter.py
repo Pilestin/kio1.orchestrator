@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any
 
-from telemetry import (
+from core.telemetry import (
     record_format_fallback,
     record_workflow_plan,
     trace_operation,

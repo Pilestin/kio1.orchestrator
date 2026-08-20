@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent_registry import AgentRegistry
+from dispatch.agent_registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
 

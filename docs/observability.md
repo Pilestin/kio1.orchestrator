@@ -109,7 +109,7 @@ In addition to the metrics above, KIO1 also emits the AI4SWENG Observability Int
 
 Two of these are estimates, not measurements, and should be read accordingly on any dashboard:
 
-- `kio_llm_cost_usd` is derived from a fixed per-provider USD/1K-token coefficient (`_COST_PER_1K_TOKENS_USD` in `telemetry.py`; currently `ollama=0.0`, `openai=0.002`, `anthropic=0.003`), not each provider's real invoice. It should be revisited before being used for real budget decisions.
+- `kio_llm_cost_usd` is derived from a fixed per-provider USD/1K-token coefficient (`_COST_PER_1K_TOKENS_USD` in `core/telemetry.py`; currently `ollama=0.0`, `openai=0.002`, `anthropic=0.003`), not each provider's real invoice. It should be revisited before being used for real budget decisions.
 - `kio_session_active_count` is best-effort: if the process is killed instead of exiting normally (`exit` in the KIO1 prompt or `Ctrl+C`), the corresponding decrement never runs and the count will not settle until telemetry re-initializes.
 
 `kio.id` and `deployment.environment` are set as resource attributes (see [Enabling Telemetry](#enabling-telemetry)); the platform's Collector auto-promotes resource attributes to labels on ingest (`resource_to_telemetry_conversion: enabled: true` in `otel-collector/config.yaml`), so in principle that alone is enough. The seven contract metrics also attach `kio.id` explicitly on every call, matching the platform's own `kio-simulator` reference implementation (`kio2-sim`/`kio3`/`kio4`/`kio7`), which does the same rather than relying only on resource promotion — this removes any doubt about whether promotion applies identically across the Collector's gRPC (`4317`) and HTTP (`4318`) receiver paths.

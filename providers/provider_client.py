@@ -3,7 +3,7 @@ from importlib import import_module
 from types import ModuleType
 from typing import Any, Protocol, cast
 
-from config_loader import Config
+from core.config_loader import Config
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def load_provider(
 ) -> ProviderModule:
     """Dynamically load a provider module.
 
-    A provider named ``openai`` is loaded from ``openai_client.py``.
+    A provider named ``openai`` is loaded from ``providers/openai_client.py``.
 
     Args:
         provider_name: Provider name from configuration.
@@ -55,7 +55,7 @@ def load_provider(
     ):
         raise ValueError(f"Invalid provider name: {provider_name!r}")
 
-    module_name = f"{provider_name}_client"
+    module_name = f"providers.{provider_name}_client"
 
     try:
         module: ModuleType = import_module(module_name)
@@ -63,7 +63,7 @@ def load_provider(
         if error.name == module_name:
             raise ValueError(
                 f"Provider {provider_name!r} is not installed. "
-                f"Expected module: {module_name}.py"
+                f"Expected module: {module_name.replace('.', '/')}.py"
             ) from error
 
         raise

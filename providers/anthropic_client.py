@@ -5,9 +5,9 @@ from typing import Any, cast
 from anthropic import Anthropic
 from anthropic.types import MessageParam
 
-from config_loader import Config
-from session_logger import measure_duration
-from telemetry import record_gen_ai_response
+from core.config_loader import Config
+from core.session_logger import measure_duration
+from core.telemetry import record_gen_ai_response
 
 logger = logging.getLogger(__name__)
 

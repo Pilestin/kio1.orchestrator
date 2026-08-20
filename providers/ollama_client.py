@@ -3,9 +3,9 @@ import logging
 import urllib.request
 from typing import Any
 
-from config_loader import Config
-from session_logger import measure_duration
-from telemetry import record_gen_ai_response
+from core.config_loader import Config
+from core.session_logger import measure_duration
+from core.telemetry import record_gen_ai_response
 
 logger = logging.getLogger(__name__)
 
