@@ -75,12 +75,15 @@ The `lineage` table records which artifact fed which step, and carries a
 | `execution_order` | Inferred from the order steps ran in |
 | `declared_dependency` | Taken from a dependency the plan declared |
 
-Workflow plans carry no per-step dependencies yet, so every edge today is
-`execution_order`, and only for `sequential` and `mixed` runs. In `parallel`
-mode the recording order carries no dependency information, so no edges are
-inferred rather than wrong ones being invented. Once the plan schema gains
-explicit dependencies, real edges land as `declared_dependency` and the two
-can be told apart in the data.
+When a plan step declares `depends_on`, KIO1 sends those step ids along with
+the step result and the edges are recorded as `declared_dependency`. When it
+does not, the Session Manager falls back to inferring an edge from the
+previous step that produced an artifact, and marks it `execution_order`. In
+`parallel` runs the recording order carries no dependency information, so no
+edges are inferred rather than wrong ones being invented.
+
+Both kinds live in the same table, so a query can always tell what KIO1
+actually knew from what it merely observed.
 
 ## Configuration
 
@@ -101,8 +104,13 @@ Everything at once, in containers:
 make services
 ```
 
-That brings up PostgreSQL, the Session Manager on `8001`, and the Workflow API
-on `8000`. Stop it with `make services-down`; the database volume survives.
+That brings up PostgreSQL, NATS, the Session Manager on `8001`, and the
+Workflow API on `8000`. Stop it with `make services-down`; the database volume
+survives.
+
+NATS is started with JetStream enabled and its monitoring port on `8222`, so
+the broker is ready even though dispatch defaults to HTTP. Switch transports
+with `dispatch.transport` in `config.json`.
 
 To run the services from source against a containerized database, start
 PostgreSQL alone and then each service in its own terminal:
@@ -165,5 +173,6 @@ contract section 2.1).
   the next phase.
 - **No pagination or retention.** `GET /sessions/{id}` returns every step and
   artifact, and nothing prunes old sessions.
-- **Step outputs are not fed forward.** Artifacts are recorded but not passed
-  into later steps, so lineage describes order rather than real data flow.
+- **Lineage without declared dependencies is only an observation.** A plan
+  that omits `depends_on` still produces `execution_order` edges, which record
+  what ran after what, not what actually consumed what.

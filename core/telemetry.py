@@ -468,7 +468,7 @@ def init_telemetry(
     )
     if headers is None:
         logger.warning(
-            "core.telemetry.otlp_bearer_token is not set; OTLP requests will be "
+            "telemetry.otlp_bearer_token is not set; OTLP requests will be "
             "sent without an Authorization header"
         )
 

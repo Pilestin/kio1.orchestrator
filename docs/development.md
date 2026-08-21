@@ -44,10 +44,12 @@ providers/                     - Model providers
   anthropic_client.py          - Anthropic Messages API provider
 
 dispatch/                      - Sending plan steps to KIO agents
-  workflow_planner.py          - Plan validation and execution messages
-  agent_registry.py            - agent_id to endpoint mapping
-  agent_transport.py           - Message delivery, HTTP today
-  workflow_executor.py         - Sequential and parallel execution
+  workflow_planner.py          - Plan validation, dependencies, execution levels
+  agent_registry.py            - agent_id to endpoint and subject mapping
+  agent_transport.py           - Transport interface and HTTP delivery
+  nats_transport.py            - NATS request/reply delivery
+  transport_factory.py         - Transport selection
+  workflow_executor.py         - Sequential, parallel, and level-based execution
 
 services/                      - HTTP services
   session_manager/             - Sessions, steps, artifacts, lineage

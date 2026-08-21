@@ -68,7 +68,9 @@ A dependency-free stub agent is included for validating the protocol before real
 python tools/dummy_agent.py --agent-id KIO2 --port 8102
 ```
 
-See the [Workflow Dispatch Guide](docs/workflow-dispatch.md) for the message format, reply contract, execution modes, and known gaps.
+Steps can declare dependencies with an optional `depends_on` field, and a step's output is fed to the steps that depend on it through the protocol's own `data` field. Messages travel over HTTP by default, or over NATS with `dispatch.transport`; the message body is identical either way.
+
+See the [Workflow Dispatch Guide](docs/workflow-dispatch.md) for the message format, reply contract, dependencies, execution modes, transports, and known gaps.
 
 ## Services
 

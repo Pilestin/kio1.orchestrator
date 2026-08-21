@@ -261,3 +261,98 @@ def test_an_unreachable_agent_is_recorded_as_a_failed_session(
     assert "unreachable" in steps["s1"]["error"]
     # Sequential execution halts, so the step after the failure never ran.
     assert steps["s2"]["status"] == "not_run"
+
+
+DEPENDENT_PLAN = {
+    "workflow_id": "wf-int02",
+    "execution_mode": "mixed",
+    "steps": [
+        {
+            "step_id": "s1",
+            "agent_id": "KIO2",
+            "capability": "bug_localization",
+            "task": "Locate the null dereference",
+        },
+        {
+            "step_id": "s2",
+            "agent_id": "KIO2",
+            "capability": "fix_recommendation",
+            "task": "Recommend a fix from the located defect",
+            "depends_on": ["s1"],
+        },
+    ],
+    "explanation": "Locate, then fix.",
+}
+
+
+class DependentPlanningProvider:
+    """Returns a plan whose second step declares a dependency."""
+
+    def send_request(self, **kwargs: Any) -> dict[str, Any]:
+        return {"content": json.dumps(DEPENDENT_PLAN)}
+
+    def extract_content(self, response: dict[str, Any]) -> str:
+        return str(response["content"])
+
+
+def test_declared_dependencies_reach_the_agent_and_the_lineage_record(
+    session_manager_url: str,
+    kio2_endpoint: AgentEndpoint,
+) -> None:
+    config = Config(
+        provider="ollama",
+        allowed_providers=frozenset({"ollama"}),
+        model="test-model",
+        prompt_path="prompts/test.txt",
+        chat_directory="chats",
+        temperature=0.2,
+        request_timeout=30,
+        keep_alive=-1,
+        max_output_tokens=1024,
+        dispatch=DispatchConfig(
+            enabled=True,
+            request_timeout=10.0,
+            max_parallel_steps=2,
+            registry=AgentRegistry({"KIO2": kio2_endpoint}),
+        ),
+    )
+    session_client = SessionClient(session_manager_url)
+    workflow_app.dependency_overrides[get_state] = lambda: _State(
+        runner=WorkflowRunner(
+            config=config,
+            system_prompt="You are KIO1.",
+            provider=DependentPlanningProvider(),
+            provider_client=None,
+            recorder=session_client,
+            transport=HttpAgentTransport(),
+        ),
+        session_client=session_client,
+    )
+
+    try:
+        client = TestClient(workflow_app)
+        session_id = client.post(
+            "/workflow/run", json={"request": "Fix the payment bug"}
+        ).json()["session_id"]
+        body = client.get(f"/workflow/{session_id}").json()
+    finally:
+        workflow_app.dependency_overrides.clear()
+
+    assert body["session"]["status"] == "completed"
+
+    steps = {step["step_id"]: step for step in body["steps"]}
+    assert steps["s1"]["status"] == "ok"
+    assert steps["s2"]["status"] == "ok"
+
+    # The dependency was declared, so the edge is recorded as such rather than
+    # inferred from the order the steps happened to be recorded in.
+    assert [
+        (edge["produced_by_step_id"], edge["consumed_by_step_id"], edge["basis"])
+        for edge in body["lineage"]
+    ] == [("s1", "s2", "declared_dependency")]
+
+    # The stub agent echoes the upstream step ids it was handed, so this
+    # proves s1's output actually travelled to s2 inside the protocol's own
+    # data field rather than being assumed.
+    assert steps["s2"]["output"]["received_upstream"] == ["s1"]
+    assert "received_upstream" not in steps["s1"]["output"]

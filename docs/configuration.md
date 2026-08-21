@@ -28,7 +28,10 @@ All application settings are stored in `config.json` at the project root.
 | `dispatch.enabled` | boolean | Sends generated plans to KIO agents (default: `false`) |
 | `dispatch.request_timeout` | number | Positive per-agent reply timeout in seconds (default: `60`) |
 | `dispatch.max_parallel_steps` | int | Positive bound on concurrent dispatches in `parallel` mode (default: `4`) |
+| `dispatch.transport` | string | How execution messages travel: `http` (default) or `nats` |
 | `dispatch.agents` | object | Agent id to endpoint mapping; see [Workflow Dispatch](workflow-dispatch.md) |
+| `dispatch.nats.servers` | array of strings | NATS server URLs; required when `transport` is `nats` |
+| `dispatch.nats.subject_template` | string | Subject pattern for agents that do not name one; must contain `{agent}` (default: `kio.{agent}.execute`) |
 
 ## Example `config.json`
 
@@ -170,7 +173,9 @@ When enabled, each plan step is turned into an execution message and posted to t
 
 Enabling dispatch with an empty `dispatch.agents` object is rejected at startup, since there would be nowhere to send any step.
 
-For the message format, reply contract, execution modes, and telemetry, see [Workflow Dispatch](workflow-dispatch.md).
+Switching `dispatch.transport` to `nats` changes only how a message is delivered. The message body is identical, so agents that already speak the HTTP contract need no schema change.
+
+For the message format, reply contract, dependencies, execution modes, and telemetry, see [Workflow Dispatch](workflow-dispatch.md).
 
 ## Security
 

@@ -21,6 +21,7 @@ from core.telemetry import (
     trace_provider_preload,
     trace_turn,
 )
+from dispatch.transport_factory import build_transport
 from dispatch.workflow_executor import dispatch_plan, render_summary
 from providers.provider_client import load_provider
 
@@ -84,6 +85,9 @@ def main() -> None:
 
     turn = 0
     session_success = False
+    # One transport for the whole session: a NATS transport owns a connection
+    # and a thread, so building one per turn would leak both.
+    transport = build_transport(config.dispatch) if config.dispatch.enabled else None
 
     try:
         while True:
@@ -137,10 +141,11 @@ def main() -> None:
                     append_assistant_message(chat_file, content)
                     print(f"\n{formatted}")
 
-                    if config.dispatch.enabled:
+                    if transport is not None:
                         workflow_result = dispatch_plan(
                             parse_response(content),
                             config.dispatch,
+                            transport,
                         )
 
                         if workflow_result is not None:
@@ -158,6 +163,9 @@ def main() -> None:
             model=config.model,
             success=session_success,
         )
+        if transport is not None:
+            transport.close()
+
         logger.info("Session ended: turns=%d", turn)
         shutdown_telemetry()
 

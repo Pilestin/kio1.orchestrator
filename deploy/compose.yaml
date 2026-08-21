@@ -17,6 +17,20 @@ services:
       timeout: 3s
       retries: 10
 
+  nats:
+    image: nats:2-alpine
+    # JetStream is enabled so the broker is ready for durable delivery, even
+    # though KIO1 currently uses core request/reply.
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   session-manager:
     build:
       context: ..
@@ -47,6 +61,8 @@ services:
     depends_on:
       session-manager:
         condition: service_started
+      nats:
+        condition: service_healthy
     # The provider endpoint in config.json points at the host, not this
     # network, so Ollama running on the developer machine stays reachable.
     extra_hosts:

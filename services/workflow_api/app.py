@@ -99,7 +99,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        _state = None
+        state, _state = _state, None
+
+        if state is not None:
+            state.runner.transport.close()
+
         shutdown_telemetry()
 
 

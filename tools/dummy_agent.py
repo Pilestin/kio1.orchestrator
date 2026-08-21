@@ -122,7 +122,11 @@ class _AgentRequestHandler(BaseHTTPRequestHandler):
                 "step_id": step_id,
                 "agent_id": self.agent_id,
                 "status": "ok",
-                "output": _build_output(capability, message.get("task", "")),
+                "output": _build_output(
+                    capability,
+                    message.get("task", ""),
+                    message.get("data", {}),
+                ),
                 "error": None,
             },
         )
@@ -190,12 +194,19 @@ class _AgentRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def _build_output(capability: str, task: str) -> dict[str, Any]:
+def _build_output(
+    capability: str,
+    task: str,
+    data: Any = None,
+) -> dict[str, Any]:
     """Return a plausible output object for a capability.
 
     Args:
         capability: Capability requested by the execution message.
         task: The free-text task, echoed so replies are traceable by eye.
+        data: The message's `data` field. Any upstream step ids found in it
+            are echoed back, so a caller can confirm that results really were
+            fed forward rather than assuming it.
 
     Returns:
         A canned output object, or a generic acknowledgement.
@@ -207,6 +218,11 @@ def _build_output(capability: str, task: str) -> dict[str, Any]:
         )
     )
     output["received_task"] = task
+
+    upstream = data.get("upstream") if isinstance(data, dict) else None
+
+    if isinstance(upstream, dict):
+        output["received_upstream"] = sorted(upstream)
 
     return output
 

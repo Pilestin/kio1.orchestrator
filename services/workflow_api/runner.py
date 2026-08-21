@@ -6,7 +6,8 @@ from uuid import UUID
 from core.config_loader import Config
 from core.formatter import parse_response
 from core.telemetry import trace_gen_ai_request, trace_operation
-from dispatch.agent_transport import AgentTransport, HttpAgentTransport
+from dispatch.agent_transport import AgentTransport
+from dispatch.transport_factory import build_transport
 from dispatch.workflow_executor import (
     STATUS_OK,
     WorkflowResult,
@@ -166,20 +167,25 @@ class WorkflowRunner:
         Returns:
             None.
         """
-        tasks = {step.step_id: step.task for step in plan.steps}
+        planned = {step.step_id: step for step in plan.steps}
 
         for step in result.results:
+            declared = planned.get(step.step_id)
+
             self.recorder.record_step(
                 session_id,
                 {
                     "step_id": step.step_id,
                     "agent_id": step.agent_id,
                     "capability": step.capability,
-                    "task": tasks.get(step.step_id, ""),
+                    "task": declared.task if declared is not None else "",
                     "status": step.status,
                     "duration_ms": step.duration_ms,
                     "error": step.error,
                     "output": step.output if step.status == STATUS_OK else None,
+                    "depends_on": (
+                        list(declared.depends_on) if declared is not None else []
+                    ),
                 },
             )
 
@@ -192,7 +198,7 @@ def build_runner(
     recorder: SessionRecorder,
     transport: AgentTransport | None = None,
 ) -> WorkflowRunner:
-    """Assemble a runner with the default HTTP transport.
+    """Assemble a runner with the transport the configuration selects.
 
     Args:
         config: Application configuration.
@@ -211,5 +217,7 @@ def build_runner(
         provider=provider,
         provider_client=provider_client,
         recorder=recorder,
-        transport=transport if transport is not None else HttpAgentTransport(),
+        transport=(
+            transport if transport is not None else build_transport(config.dispatch)
+        ),
     )

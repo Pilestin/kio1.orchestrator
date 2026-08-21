@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from dispatch.agent_registry import AgentRegistry
@@ -17,12 +17,23 @@ SKIP_CAPABILITY_MISMATCH = "capability_mismatch"
 
 @dataclass(frozen=True)
 class PlanStep:
-    """One step of the workflow plan produced by the model."""
+    """One step of the workflow plan produced by the model.
+
+    Attributes:
+        step_id: Identifier of the step within the workflow.
+        agent_id: Agent the step is addressed to.
+        capability: Capability requested from the agent.
+        task: Free-text description of the work.
+        depends_on: Step ids whose output this step consumes. Optional and
+            additive: a plan that omits it behaves exactly as it did before
+            the field existed, and nothing is fed into its `data`.
+    """
 
     step_id: str
     agent_id: str
     capability: str
     task: str
+    depends_on: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -148,10 +159,12 @@ def parse_plan(parsed_response: Any) -> WorkflowPlan:
                 agent_id=fields["agent_id"],
                 capability=fields["capability"],
                 task=fields["task"],
+                depends_on=_read_depends_on(step_data, fields["step_id"]),
             )
         )
 
     explanation = parsed_response.get("explanation")
+    steps = _sanitize_dependencies(steps)
 
     return WorkflowPlan(
         workflow_id=workflow_id.strip(),
@@ -159,6 +172,192 @@ def parse_plan(parsed_response: Any) -> WorkflowPlan:
         steps=tuple(steps),
         explanation=explanation.strip() if isinstance(explanation, str) else "",
     )
+
+
+def _read_depends_on(step_data: dict[str, Any], step_id: str) -> tuple[str, ...]:
+    """Read a step's optional dependency list.
+
+    A malformed value is dropped rather than raised on. `depends_on` is an
+    optional addition to the plan schema, so a model that emits it badly must
+    not turn a plan that would otherwise run into a hard failure.
+
+    Args:
+        step_data: The raw step object.
+        step_id: The step's own id, used for warnings and the self-reference check.
+
+    Returns:
+        The declared dependencies, deduplicated and order-preserving.
+    """
+    raw = step_data.get("depends_on")
+
+    if raw is None:
+        return ()
+
+    if not isinstance(raw, list) or not all(
+        isinstance(entry, str) and entry.strip() for entry in raw
+    ):
+        logger.warning(
+            "Ignoring malformed depends_on on step %s: expected a list of step ids",
+            step_id,
+        )
+        return ()
+
+    dependencies: list[str] = []
+
+    for entry in raw:
+        dependency = entry.strip()
+
+        if dependency == step_id:
+            logger.warning("Ignoring self-dependency on step %s", step_id)
+            continue
+
+        if dependency not in dependencies:
+            dependencies.append(dependency)
+
+    return tuple(dependencies)
+
+
+def _sanitize_dependencies(steps: list[PlanStep]) -> list[PlanStep]:
+    """Drop dependencies that cannot be honoured.
+
+    References to steps the plan does not contain are dropped. A cycle makes
+    the whole graph unusable, so every dependency is dropped and the plan
+    falls back to its declared execution mode.
+
+    Args:
+        steps: Steps in plan order.
+
+    Returns:
+        The steps with unusable dependencies removed.
+    """
+    known = {step.step_id for step in steps}
+    resolved: list[PlanStep] = []
+
+    for step in steps:
+        kept = tuple(
+            dependency for dependency in step.depends_on if dependency in known
+        )
+        dropped = set(step.depends_on) - set(kept)
+
+        if dropped:
+            logger.warning(
+                "Dropping dependencies on unknown steps from %s: %s",
+                step.step_id,
+                ", ".join(sorted(dropped)),
+            )
+
+        resolved.append(
+            step if kept == step.depends_on else replace(step, depends_on=kept)
+        )
+
+    if _has_cycle(resolved):
+        logger.warning(
+            "Plan dependencies form a cycle; ignoring all of them and falling "
+            "back to the declared execution mode"
+        )
+        return [replace(step, depends_on=()) for step in resolved]
+
+    return resolved
+
+
+def _has_cycle(steps: list[PlanStep]) -> bool:
+    """Report whether the dependency graph contains a cycle.
+
+    Args:
+        steps: Steps whose dependencies reference only known step ids.
+
+    Returns:
+        True when no valid execution order exists.
+    """
+    remaining = {step.step_id: set(step.depends_on) for step in steps}
+
+    while remaining:
+        ready = [
+            step_id for step_id, dependencies in remaining.items() if not dependencies
+        ]
+
+        if not ready:
+            return True
+
+        for step_id in ready:
+            del remaining[step_id]
+
+        for dependencies in remaining.values():
+            dependencies.difference_update(ready)
+
+    return False
+
+
+def has_dependencies(plan: WorkflowPlan) -> bool:
+    """Report whether any step declares a dependency."""
+    return any(step.depends_on for step in plan.steps)
+
+
+def execution_levels(plan: WorkflowPlan) -> tuple[tuple[str, ...], ...]:
+    """Group step ids into levels that can run one after another.
+
+    Every step in a level depends only on steps in earlier levels, so a level
+    may run concurrently. A plan with no declared dependencies yields a single
+    level containing every step, in plan order.
+
+    Args:
+        plan: A validated plan whose dependencies are already sanitized.
+
+    Returns:
+        Levels of step ids, in execution order.
+    """
+    pending = {step.step_id: set(step.depends_on) for step in plan.steps}
+    order = [step.step_id for step in plan.steps]
+    levels: list[tuple[str, ...]] = []
+
+    while pending:
+        ready = tuple(
+            step_id for step_id in order if step_id in pending and not pending[step_id]
+        )
+
+        if not ready:  # pragma: no cover - cycles are removed by parse_plan
+            break
+
+        levels.append(ready)
+
+        for step_id in ready:
+            del pending[step_id]
+
+        for dependencies in pending.values():
+            dependencies.difference_update(ready)
+
+    return tuple(levels)
+
+
+def descendants_of(plan: WorkflowPlan, step_id: str) -> frozenset[str]:
+    """Return every step that depends on a step, directly or transitively.
+
+    Args:
+        plan: A validated plan.
+        step_id: The step whose dependents are wanted.
+
+    Returns:
+        The step ids that cannot run once this step has failed.
+    """
+    dependents: dict[str, set[str]] = {step.step_id: set() for step in plan.steps}
+
+    for step in plan.steps:
+        for dependency in step.depends_on:
+            dependents[dependency].add(step.step_id)
+
+    found: set[str] = set()
+    queue = list(dependents.get(step_id, set()))
+
+    while queue:
+        current = queue.pop()
+
+        if current in found:
+            continue
+
+        found.add(current)
+        queue.extend(dependents.get(current, set()))
+
+    return frozenset(found)
 
 
 def route_plan(plan: WorkflowPlan, registry: AgentRegistry) -> RoutingResult:

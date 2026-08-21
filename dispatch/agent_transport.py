@@ -22,10 +22,10 @@ class AgentTransport(Protocol):
     """How KIO1 delivers one execution message to one agent.
 
     The shared documents disagree on the transport: the observability guide
-    describes NATS JetStream carrying a `KIOEnvelope`, while the KIO1-KIO10
-    integration protocol describes a direct HTTP call to an `endpoint`. Both
-    fit behind this interface, so the choice can be made later without
-    touching the planner or the executor.
+    describes NATS carrying the payload, while the KIO1-KIO10 integration
+    protocol describes a direct HTTP call to an `endpoint`. Both live behind
+    this interface, and both carry the same KIO1-KIO10 execution message
+    unchanged, so the planner and the executor never learn which is in use.
     """
 
     def send(
@@ -49,6 +49,15 @@ class AgentTransport(Protocol):
         """
         ...
 
+    def close(self) -> None:
+        """Release anything the transport holds open.
+
+        Transports may own connections and threads, so one is created per
+        process rather than per dispatch and closed when its owner shuts
+        down.
+        """
+        ...
+
 
 class HttpAgentTransport:
     """Delivers execution messages over HTTP, per the KIO1-KIO10 protocol.
@@ -56,6 +65,9 @@ class HttpAgentTransport:
     Uses `urllib.request` rather than a third-party HTTP client, matching the
     existing Ollama client and keeping the dispatch layer dependency-free.
     """
+
+    def close(self) -> None:
+        """Do nothing: each request opens and closes its own connection."""
 
     def send(
         self,

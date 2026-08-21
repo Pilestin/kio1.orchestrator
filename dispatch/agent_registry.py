@@ -15,12 +15,16 @@ class AgentEndpoint:
         path: Request path appended to `endpoint`, starting with a slash.
         capabilities: Capability values the agent accepts. An empty set means
             the registry performs no capability check for this agent.
+        subject: NATS subject this agent listens on. Unset lets the NATS
+            transport derive one from its subject template. Ignored by the
+            HTTP transport.
     """
 
     agent_id: str
     endpoint: str
     path: str
     capabilities: frozenset[str]
+    subject: str | None = None
 
     @property
     def url(self) -> str:
@@ -128,6 +132,14 @@ def load_agent_registry(agents_data: dict[str, object]) -> AgentRegistry:
                 "with '/'."
             )
 
+        subject = agent_data.get("subject")
+        if subject is not None and (
+            not isinstance(subject, str) or not subject.strip()
+        ):
+            raise ValueError(
+                f"dispatch.agents.{agent_id}.subject must be a non-empty string."
+            )
+
         capabilities_data = agent_data.get("capabilities", [])
         if not isinstance(capabilities_data, list) or not all(
             isinstance(capability, str) and capability.strip()
@@ -145,6 +157,7 @@ def load_agent_registry(agents_data: dict[str, object]) -> AgentRegistry:
             capabilities=frozenset(
                 capability.strip() for capability in capabilities_data
             ),
+            subject=subject.strip() if isinstance(subject, str) else None,
         )
 
     logger.info("Agent registry loaded: agents=%s", sorted(agents))

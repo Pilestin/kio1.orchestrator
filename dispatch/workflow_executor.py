@@ -1,7 +1,7 @@
 import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import Any
 
@@ -12,15 +12,15 @@ from core.telemetry import (
     trace_workflow_execution,
 )
 from dispatch.agent_registry import AgentRegistry
-from dispatch.agent_transport import (
-    AgentTransport,
-    AgentTransportError,
-    HttpAgentTransport,
-)
+from dispatch.agent_transport import AgentTransport, AgentTransportError
+from dispatch.transport_factory import build_transport
 from dispatch.workflow_planner import (
     ExecutionMessage,
     RoutingResult,
     WorkflowPlan,
+    descendants_of,
+    execution_levels,
+    has_dependencies,
     parse_plan,
     route_plan,
 )
@@ -111,8 +111,20 @@ def execute_workflow(
         step_count=len(plan.steps),
         dispatchable_step_count=len(routing.messages),
     ):
-        if plan.execution_mode == "parallel":
-            dispatched = _execute_parallel(
+        if has_dependencies(plan):
+            # Declared dependencies define the order, so execution_mode only
+            # decides whether independent steps share a level concurrently.
+            dispatched = _execute_levels(
+                plan,
+                routing,
+                registry,
+                transport,
+                timeout=timeout,
+                max_parallel_steps=max_parallel_steps,
+                concurrent=plan.execution_mode != "sequential",
+            )
+        elif plan.execution_mode == "parallel":
+            dispatched = _dispatch_concurrently(
                 routing.messages,
                 registry,
                 transport,
@@ -121,13 +133,11 @@ def execute_workflow(
             )
         else:
             if plan.execution_mode == "mixed":
-                # Workflow plans carry no per-step dependency field, so there
-                # is nothing to derive a partial order from. Sequential is the
-                # only safe reading of "mixed" until the plan schema gains
-                # explicit dependencies.
+                # Without declared dependencies there is no partial order to
+                # derive, so sequential is the only safe reading of "mixed".
                 logger.warning(
-                    "execution_mode=mixed has no dependency information in the "
-                    "plan schema; running sequentially: workflow_id=%s",
+                    "execution_mode=mixed carries no depends_on information; "
+                    "running sequentially: workflow_id=%s",
                     plan.workflow_id,
                 )
 
@@ -193,7 +203,7 @@ def _execute_sequential(
     return results
 
 
-def _execute_parallel(
+def _dispatch_concurrently(
     messages: tuple[ExecutionMessage, ...],
     registry: AgentRegistry,
     transport: AgentTransport,
@@ -245,6 +255,123 @@ def _execute_parallel(
             results[message.step_id] = future.result()
 
     return results
+
+
+def _execute_levels(
+    plan: WorkflowPlan,
+    routing: RoutingResult,
+    registry: AgentRegistry,
+    transport: AgentTransport,
+    *,
+    timeout: float,
+    max_parallel_steps: int,
+    concurrent: bool,
+) -> dict[str, StepResult]:
+    """Dispatch a plan level by level, honouring its declared dependencies.
+
+    A step whose dependency failed or was skipped is never dispatched: its
+    input was never produced, so asking an agent to act on it would waste a
+    call and invite a misleading answer. Such steps surface as `not_run`.
+
+    Args:
+        plan: The validated plan, read for its dependency graph.
+        routing: The routing outcome, whose skipped steps also block dependents.
+        registry: Registry used to resolve each message's endpoint.
+        transport: Transport used to deliver execution messages.
+        timeout: Seconds to wait for each agent's reply.
+        max_parallel_steps: Upper bound on concurrent dispatches within a level.
+        concurrent: Whether steps in the same level may run at the same time.
+
+    Returns:
+        Step results keyed by step id, covering only the steps that ran.
+    """
+    by_step = {message.step_id: message for message in routing.messages}
+    results: dict[str, StepResult] = {}
+    blocked: set[str] = set()
+
+    for skipped in routing.skipped:
+        blocked.update(descendants_of(plan, skipped.step_id))
+
+    for level in execution_levels(plan):
+        runnable = [
+            by_step[step_id]
+            for step_id in level
+            if step_id in by_step and step_id not in blocked
+        ]
+
+        if not runnable:
+            continue
+
+        prepared = [_with_upstream_data(message, plan, results) for message in runnable]
+
+        if concurrent and len(prepared) > 1:
+            level_results = _dispatch_concurrently(
+                tuple(prepared),
+                registry,
+                transport,
+                timeout=timeout,
+                max_parallel_steps=max_parallel_steps,
+            )
+        else:
+            level_results = {
+                message.step_id: _dispatch_step(
+                    message, registry, transport, timeout=timeout
+                )
+                for message in prepared
+            }
+
+        results.update(level_results)
+
+        for step_id, result in level_results.items():
+            if result.status == STATUS_ERROR:
+                blocked.update(descendants_of(plan, step_id))
+                logger.warning(
+                    "Blocking steps that depend on the failed step: step_id=%s",
+                    step_id,
+                )
+
+    return results
+
+
+def _with_upstream_data(
+    message: ExecutionMessage,
+    plan: WorkflowPlan,
+    results: dict[str, StepResult],
+) -> ExecutionMessage:
+    """Attach the outputs of a step's dependencies to its `data` field.
+
+    The KIO1-KIO10 protocol describes `data` as the extension point for
+    inputs a KIO needs beyond the free-text task, so upstream results travel
+    there rather than in any new field. Steps that declare no dependencies
+    keep an empty `data`, exactly as before.
+
+    Args:
+        message: The execution message about to be dispatched.
+        plan: The plan, read for the step's declared dependencies.
+        results: Results of the steps that have already run.
+
+    Returns:
+        The message, with `data.upstream` populated when there is anything
+        to pass on.
+    """
+    step = next(
+        (candidate for candidate in plan.steps if candidate.step_id == message.step_id),
+        None,
+    )
+
+    if step is None or not step.depends_on:
+        return message
+
+    upstream = {
+        dependency: results[dependency].output
+        for dependency in step.depends_on
+        if dependency in results and results[dependency].output is not None
+    }
+
+    if not upstream:
+        return message
+
+    return replace(message, data={**message.data, "upstream": upstream})
 
 
 def _dispatch_step(
@@ -509,8 +636,10 @@ def dispatch_plan(
     Args:
         parsed_response: The already-decoded workflow plan from the model.
         dispatch_config: Dispatch settings, including the agent registry.
-        transport: Transport used to deliver execution messages. Defaults to
-            HTTP, per the KIO1-KIO10 integration protocol.
+        transport: The transport to dispatch with. Callers that dispatch
+            more than once should build one transport and reuse it: a NATS
+            transport owns a connection and a thread. Omitting it builds a
+            throwaway transport, which is only cheap for HTTP.
 
     Returns:
         The workflow result, or None when dispatch is disabled or the
@@ -530,7 +659,7 @@ def dispatch_plan(
     return execute_workflow(
         plan,
         dispatch_config.registry,
-        transport if transport is not None else HttpAgentTransport(),
+        transport if transport is not None else build_transport(dispatch_config),
         timeout=dispatch_config.request_timeout,
         max_parallel_steps=dispatch_config.max_parallel_steps,
     )

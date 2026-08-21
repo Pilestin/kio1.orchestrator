@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 # placeholder host would otherwise fail invisibly for a whole session. It is
 # reported once at startup instead of rejected: running against an unreachable
 # collector is a legitimate way to exercise the export-failure path.
+_ALLOWED_DISPATCH_TRANSPORTS = frozenset({"http", "nats"})
+
 _PLACEHOLDER_OTLP_HOSTS = ("your_host", "your-host", "changeme", "example.com")
 
 
@@ -57,16 +59,24 @@ class DispatchConfig:
         enabled: Whether generated plans are sent to KIO agents. Disabled by
             default, so KIO1 keeps behaving as a plan-only terminal tool
             until agents are actually reachable.
+        transport: How execution messages travel, `http` or `nats`. The
+            message body is identical either way.
         request_timeout: Seconds to wait for a single agent's reply.
         max_parallel_steps: Upper bound on concurrent dispatches in
             `parallel` execution mode.
         registry: Agents KIO1 is able to dispatch work to.
+        nats_servers: NATS server URLs, required when transport is `nats`.
+        nats_subject_template: Subject used for agents that do not name one
+            themselves. `{agent}` is replaced with the lowercased agent id.
     """
 
     enabled: bool = False
+    transport: str = "http"
     request_timeout: float = 60.0
     max_parallel_steps: int = 4
     registry: AgentRegistry = field(default_factory=lambda: AgentRegistry({}))
+    nats_servers: tuple[str, ...] = ()
+    nats_subject_template: str = "kio.{agent}.execute"
 
 
 @dataclass
@@ -106,11 +116,11 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
 
     enabled = telemetry_data.get("enabled", False)
     if type(enabled) is not bool:
-        raise ValueError("core.telemetry.enabled must be a boolean.")
+        raise ValueError("telemetry.enabled must be a boolean.")
 
     service_name = telemetry_data.get("service_name", "kio1-orchestrator")
     if not isinstance(service_name, str) or not service_name.strip():
-        raise ValueError("core.telemetry.service_name must be a non-empty string.")
+        raise ValueError("telemetry.service_name must be a non-empty string.")
 
     endpoint = telemetry_data.get(
         "otlp_http_endpoint",
@@ -118,14 +128,14 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
     )
     if not isinstance(endpoint, str) or not endpoint.strip():
         raise ValueError(
-            "core.telemetry.otlp_http_endpoint must be a non-empty HTTP(S) URL."
+            "telemetry.otlp_http_endpoint must be a non-empty HTTP(S) URL."
         )
 
     endpoint = endpoint.strip().rstrip("/")
     parsed_endpoint = urlparse(endpoint)
     if parsed_endpoint.scheme not in {"http", "https"} or not parsed_endpoint.netloc:
         raise ValueError(
-            "core.telemetry.otlp_http_endpoint must be a non-empty HTTP(S) URL."
+            "telemetry.otlp_http_endpoint must be a non-empty HTTP(S) URL."
         )
 
     if enabled and _is_placeholder_host(parsed_endpoint.hostname):
@@ -138,32 +148,30 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
 
     bearer_token = telemetry_data.get("otlp_bearer_token", "")
     if not isinstance(bearer_token, str):
-        raise ValueError("core.telemetry.otlp_bearer_token must be a string.")
+        raise ValueError("telemetry.otlp_bearer_token must be a string.")
 
     export_interval = telemetry_data.get("metric_export_interval_ms", 5000)
     if type(export_interval) is not int or export_interval <= 0:
         raise ValueError(
-            "core.telemetry.metric_export_interval_ms must be a positive integer."
+            "telemetry.metric_export_interval_ms must be a positive integer."
         )
 
     sample_ratio = telemetry_data.get("trace_sample_ratio", 1.0)
     if type(sample_ratio) not in (int, float) or not 0.0 <= sample_ratio <= 1.0:
         raise ValueError(
-            "core.telemetry.trace_sample_ratio must be a number between 0.0 and 1.0."
+            "telemetry.trace_sample_ratio must be a number between 0.0 and 1.0."
         )
 
     kio_id = telemetry_data.get("kio_id", "kio1")
     if not isinstance(kio_id, str) or not kio_id.strip():
-        raise ValueError("core.telemetry.kio_id must be a non-empty string.")
+        raise ValueError("telemetry.kio_id must be a non-empty string.")
 
     deployment_environment = telemetry_data.get("deployment_environment", "local")
     if (
         not isinstance(deployment_environment, str)
         or not deployment_environment.strip()
     ):
-        raise ValueError(
-            "core.telemetry.deployment_environment must be a non-empty string."
-        )
+        raise ValueError("telemetry.deployment_environment must be a non-empty string.")
 
     return TelemetryConfig(
         enabled=enabled,
@@ -206,6 +214,35 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
     if type(max_parallel_steps) is not int or max_parallel_steps <= 0:
         raise ValueError("dispatch.max_parallel_steps must be a positive integer.")
 
+    transport = dispatch_data.get("transport", "http")
+    if transport not in _ALLOWED_DISPATCH_TRANSPORTS:
+        raise ValueError(
+            "dispatch.transport must be one of "
+            f"{sorted(_ALLOWED_DISPATCH_TRANSPORTS)}."
+        )
+
+    nats_data = dispatch_data.get("nats", {})
+    if not isinstance(nats_data, dict):
+        raise ValueError("dispatch.nats must be a JSON object.")
+
+    servers_data = nats_data.get("servers", [])
+    if not isinstance(servers_data, list) or not all(
+        isinstance(server, str) and server.strip() for server in servers_data
+    ):
+        raise ValueError("dispatch.nats.servers must be a list of non-empty strings.")
+
+    subject_template = nats_data.get("subject_template", "kio.{agent}.execute")
+    if not isinstance(subject_template, str) or "{agent}" not in subject_template:
+        raise ValueError(
+            "dispatch.nats.subject_template must be a string containing " "'{agent}'."
+        )
+
+    if enabled and transport == "nats" and not servers_data:
+        raise ValueError(
+            "dispatch.transport is 'nats' but dispatch.nats.servers is empty; "
+            "there is no broker to publish to."
+        )
+
     agents_data = dispatch_data.get("agents", {})
     if not isinstance(agents_data, dict):
         raise ValueError("dispatch.agents must be a JSON object.")
@@ -220,9 +257,12 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
 
     return DispatchConfig(
         enabled=enabled,
+        transport=transport,
         request_timeout=float(request_timeout),
         max_parallel_steps=max_parallel_steps,
         registry=registry,
+        nats_servers=tuple(server.strip() for server in servers_data),
+        nats_subject_template=subject_template,
     )
 
 

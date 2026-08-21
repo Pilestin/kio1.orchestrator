@@ -58,7 +58,9 @@ graph TD
 | `core/telemetry.py` | Initializes OpenTelemetry, creates spans and metrics, records metadata, and flushes exporters |
 | `dispatch/workflow_planner.py` | Validates a workflow plan and turns its steps into protocol execution messages |
 | `dispatch/agent_registry.py` | Maps `agent_id` values from a plan to configured, reachable agent endpoints |
-| `dispatch/agent_transport.py` | Delivers one execution message to one agent; HTTP today, swappable |
+| `dispatch/agent_transport.py` | Transport interface and the HTTP implementation |
+| `dispatch/nats_transport.py` | NATS request/reply implementation of the same interface |
+| `dispatch/transport_factory.py` | Picks the transport `dispatch.transport` selects |
 | `dispatch/workflow_executor.py` | Runs a routed plan sequentially or in parallel and collects per-step results |
 | `tools/dummy_agent.py` | Dependency-free stub agent used to validate the protocol end to end |
 | `services/workflow_api/` | HTTP entry point; accepts a request and runs the workflow in the background |
@@ -89,6 +91,9 @@ graph TD
 - **Optional dispatch**: Plan dispatch is disabled by default, so KIO1 stays usable as a plan-only tool while KIO agents are still being brought up. A plan step addressed to an undeployed agent is skipped, not failed.
 - **Transport behind an interface**: The shared documents describe two different transports (direct HTTP in the KIO1-KIO10 protocol, NATS JetStream in the observability guide). `AgentTransport` isolates that choice from the planner and executor.
 - **Dependency-free dispatch**: The HTTP transport and the stub agent use `urllib.request` and `http.server`, matching the existing Ollama client and adding no new runtime dependencies.
+- **One message, two transports**: HTTP and NATS carry a byte-identical execution message. A test asserts the equality directly, so the two cannot drift apart.
+- **Dependencies are optional and additive**: `depends_on` is validated defensively — malformed values, unknown references, and cycles are dropped with a warning rather than failing a plan that would otherwise run.
+- **Results travel through the protocol's own extension point**: upstream outputs are passed in `data`, so feeding results forward adds no field to the agreed message shape.
 - **Two entry points, one core**: The terminal application and the Workflow API share configuration, prompt loading, planning, and dispatch. Only the way a request arrives differs.
 - **Sessions opened before work starts**: `POST /workflow/run` refuses the request if no session can be opened, so a caller is never left holding no identifier for work that is already running.
 - **Recording is best effort after that point**: losing a step record is not a reason to abandon a workflow that is already calling real agents, so only session creation is fatal.

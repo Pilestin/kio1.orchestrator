@@ -53,6 +53,7 @@ class InMemorySessionRepository:
         self._sessions: dict[UUID, Session] = {}
         self._steps: dict[UUID, list[Step]] = {}
         self._lineage: dict[UUID, list[LineageEdge]] = {}
+        self._artifacts: dict[UUID, dict[str, int]] = {}
         self._next_artifact_id = 1
 
     def create_session(self, request_text: str) -> Session:
@@ -68,6 +69,7 @@ class InMemorySessionRepository:
         self._sessions[session.session_id] = session
         self._steps[session.session_id] = []
         self._lineage[session.session_id] = []
+        self._artifacts[session.session_id] = {}
 
         return session
 
@@ -123,18 +125,39 @@ class InMemorySessionRepository:
         if step.output is not None:
             artifact_id = self._next_artifact_id
             self._next_artifact_id += 1
+            self._artifacts[session_id][step.step_id] = artifact_id
 
-            if previous is not None and session.execution_mode in (
-                _ORDERED_EXECUTION_MODES
-            ):
-                self._lineage[session_id].append(
+        edges = self._lineage[session_id]
+
+        if step.depends_on:
+            # The plan said what this step consumed, so no inference is needed.
+            for dependency in step.depends_on:
+                upstream_artifact = self._artifacts[session_id].get(dependency)
+
+                if upstream_artifact is None:
+                    continue
+
+                edges.append(
                     LineageEdge(
-                        produced_by_step_id=previous.step_id,
+                        produced_by_step_id=dependency,
                         consumed_by_step_id=step.step_id,
-                        artifact_id=artifact_id,
-                        basis="execution_order",
+                        artifact_id=upstream_artifact,
+                        basis="declared_dependency",
                     )
                 )
+        elif (
+            step.output is not None
+            and previous is not None
+            and session.execution_mode in _ORDERED_EXECUTION_MODES
+        ):
+            edges.append(
+                LineageEdge(
+                    produced_by_step_id=previous.step_id,
+                    consumed_by_step_id=step.step_id,
+                    artifact_id=self._artifacts[session_id][step.step_id],
+                    basis="execution_order",
+                )
+            )
 
         return recorded
 
@@ -310,21 +333,46 @@ class PostgresSessionRepository:
                 ),
             ).fetchone()
 
-            if step.output is None:
-                return _to_step((*row[:7], None, row[7]))
+            artifact_row = None
 
-            artifact_row = connection.execute(
-                """
-                INSERT INTO artifacts (session_id, step_id, payload)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (session_id, step_id) DO UPDATE
-                SET payload = EXCLUDED.payload
-                RETURNING id
-                """,
-                (session_id, step.step_id, json.dumps(step.output)),
-            ).fetchone()
+            if step.output is not None:
+                artifact_row = connection.execute(
+                    """
+                    INSERT INTO artifacts (session_id, step_id, payload)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (session_id, step_id) DO UPDATE
+                    SET payload = EXCLUDED.payload
+                    RETURNING id
+                    """,
+                    (session_id, step.step_id, json.dumps(step.output)),
+                ).fetchone()
 
-            if previous_row is not None and execution_mode in _ORDERED_EXECUTION_MODES:
+            if step.depends_on:
+                # The plan said what this step consumed, so no inference is
+                # needed. Only dependencies that actually left an artifact can
+                # be linked.
+                connection.execute(
+                    """
+                    INSERT INTO lineage (session_id, produced_by_step_id,
+                                         consumed_by_step_id, artifact_id, basis)
+                    SELECT %s, a.step_id, %s, a.id, 'declared_dependency'
+                    FROM artifacts a
+                    WHERE a.session_id = %s AND a.step_id = ANY(%s)
+                    ON CONFLICT (session_id, produced_by_step_id,
+                                 consumed_by_step_id) DO NOTHING
+                    """,
+                    (
+                        session_id,
+                        step.step_id,
+                        session_id,
+                        list(step.depends_on),
+                    ),
+                )
+            elif (
+                artifact_row is not None
+                and previous_row is not None
+                and execution_mode in _ORDERED_EXECUTION_MODES
+            ):
                 connection.execute(
                     """
                     INSERT INTO lineage (session_id, produced_by_step_id,

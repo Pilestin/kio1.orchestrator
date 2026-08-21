@@ -34,6 +34,10 @@ class RecordStepRequest(BaseModel):
 
     `output` is the agent's reply payload. It is stored verbatim as an
     artifact so the result can be inspected and its lineage tracked.
+
+    `depends_on` names the steps this one consumed. When it is supplied the
+    lineage edges are recorded as `declared_dependency`; when it is empty the
+    Session Manager falls back to inferring edges from execution order.
     """
 
     step_id: str = Field(min_length=1, max_length=64)
@@ -44,6 +48,7 @@ class RecordStepRequest(BaseModel):
     duration_ms: int = Field(default=0, ge=0)
     error: str | None = Field(default=None, max_length=4_000)
     output: dict[str, Any] | None = None
+    depends_on: list[str] = Field(default_factory=list, max_length=64)
 
 
 class Session(BaseModel):
