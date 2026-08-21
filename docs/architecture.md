@@ -66,6 +66,7 @@ graph TD
 | `services/workflow_api/` | HTTP entry point; accepts a request and runs the workflow in the background |
 | `services/session_manager/` | Records sessions, steps, artifacts, and lineage in PostgreSQL |
 | `core/session_client.py` | Client the Workflow API and terminal use to talk to the Session Manager |
+| `core/service_telemetry.py` | Trace export and the server-span middleware shared by both services |
 
 ## Data Flow
 
@@ -94,6 +95,8 @@ graph TD
 - **One message, two transports**: HTTP and NATS carry a byte-identical execution message. A test asserts the equality directly, so the two cannot drift apart.
 - **Dependencies are optional and additive**: `depends_on` is validated defensively — malformed values, unknown references, and cycles are dropped with a warning rather than failing a plan that would otherwise run.
 - **Results travel through the protocol's own extension point**: upstream outputs are passed in `data`, so feeding results forward adds no field to the agreed message shape.
+- **One request, one trace**: both services continue the caller's trace rather than starting their own, so the path from an HTTP request through planning, dispatch, and every session write is a single tree. Span names use route templates so a session id never becomes a span name.
+- **Traces from the services, metrics from the orchestrator**: the Session Manager exports traces under its own service name but no metrics, because the mandatory contract counters are keyed by `kio.id` and a second emitter would double-count them.
 - **Two entry points, one core**: The terminal application and the Workflow API share configuration, prompt loading, planning, and dispatch. Only the way a request arrives differs.
 - **Sessions opened before work starts**: `POST /workflow/run` refuses the request if no session can be opened, so a caller is never left holding no identifier for work that is already running.
 - **Recording is best effort after that point**: losing a step record is not a reason to abandon a workflow that is already calling real agents, so only session creation is fatal.

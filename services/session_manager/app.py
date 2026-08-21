@@ -7,6 +7,12 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
 
+from core.config_loader import load_config
+from core.service_telemetry import (
+    TraceContextMiddleware,
+    init_service_tracing,
+    shutdown_service_tracing,
+)
 from services.session_manager.models import (
     CreateSessionRequest,
     RecordStepRequest,
@@ -69,10 +75,11 @@ def _build_repository() -> tuple[SessionRepository, Any]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Open storage on startup and close it on shutdown."""
+    """Open storage and tracing on startup, close both on shutdown."""
     global _pool
     global _repository
 
+    _start_tracing()
     _repository, _pool = _build_repository()
 
     try:
@@ -83,6 +90,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             _pool = None
 
         _repository = None
+        shutdown_service_tracing()
+
+
+def _start_tracing() -> None:
+    """Initialize trace export, reusing the orchestrator's telemetry settings.
+
+    A missing or unreadable `config.json` must not stop the service from
+    serving: telemetry is an aid, not a dependency.
+
+    Returns:
+        None.
+    """
+    try:
+        config = load_config()
+    except (OSError, ValueError):
+        logger.warning(
+            "Could not read config.json; running without tracing", exc_info=True
+        )
+        return
+
+    init_service_tracing(
+        config.telemetry,
+        service_name=f"{config.telemetry.kio_id}-session-manager",
+    )
 
 
 app = FastAPI(
@@ -91,6 +122,9 @@ app = FastAPI(
     summary="Records workflow sessions, step results, artifacts, and lineage.",
     lifespan=lifespan,
 )
+# Continues the caller's trace, so this service's work is part of the same
+# end-to-end path rather than an unconnected trace of its own.
+app.add_middleware(TraceContextMiddleware, service_name="session-manager")
 
 
 def get_repository() -> Iterator[SessionRepository]:

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from core.config_loader import load_config
 from core.prompt_loader import load_prompt
+from core.service_telemetry import TraceContextMiddleware
 from core.session_client import NullSessionClient, SessionClient, SessionClientError
 from core.telemetry import init_telemetry, shutdown_telemetry, trace_provider_preload
 from providers.provider_client import load_provider
@@ -113,6 +114,9 @@ app = FastAPI(
     summary="Accepts software-development requests and orchestrates KIO agents.",
     lifespan=lifespan,
 )
+# Records the incoming request as the root of the trace, so the work the
+# background runner does hangs off something rather than floating alone.
+app.add_middleware(TraceContextMiddleware, service_name="workflow-api")
 
 
 def get_state() -> _State:

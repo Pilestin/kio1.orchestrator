@@ -97,6 +97,10 @@ settings. Deployment-specific values come from the environment:
 | `KIO1_TEST_DATABASE_URL` | Tests | Enables the PostgreSQL repository tests; they are skipped when unset. |
 | `KIO1_TEST_NATS_SERVERS` | Tests | Enables the live NATS round-trip tests; they are skipped when unset. |
 
+The Session Manager reads `config.json` for its telemetry settings. If that
+file is missing or unreadable it serves requests without tracing rather than
+refusing to start: telemetry is an aid, not a dependency.
+
 ## Running
 
 Everything at once, in containers:
@@ -155,21 +159,42 @@ It is the closest thing to a production run that does not need a model.
 
 ## Telemetry
 
-The Workflow API initializes OpenTelemetry the same way the terminal
-application does, and every run is wrapped in a `kio1.workflow.run` span
-carrying `session.id`. Calls to the Session Manager and to KIO agents both
-carry a W3C `traceparent` header, so those services join the same trace as
-soon as they are instrumented.
+One request produces one trace, across both services and out to the agents:
+
+```text
+POST /workflow/run
+  POST /sessions                            (Session Manager)
+  kio1.workflow.run                         session.id
+    PATCH /sessions/{session_id}            (Session Manager)
+    chat <model>                            the planning call
+    kio1.workflow.execute
+      dispatch KIO2                         out to the agent
+      dispatch KIO2
+    POST /sessions/{session_id}/steps       (Session Manager)
+    PATCH /sessions/{session_id}            (Session Manager)
+```
+
+Both services wrap incoming requests in `TraceContextMiddleware`, which reads
+the W3C `traceparent` header KIO1 sends and continues that trace instead of
+starting a new one. Outgoing calls — to the Session Manager and to KIO agents
+— inject the header, so an agent that reads it joins the same trace too.
+
+Span names use the route template, not the request path, so a session id never
+becomes part of a span name. The id is recorded as a `session.id` attribute
+instead, on the workflow span and on every Session Manager span that carries
+one.
 
 `session.id` is a span attribute only, never a metric label: session
 identifiers are unbounded and would degrade the metrics database (observability
 contract section 2.1).
 
+The Session Manager exports **traces only**, under its own service name
+(`kio1-session-manager`). The mandatory contract metrics are emitted by the
+orchestrator with `kio.id = kio1`; emitting them from a second process under
+the same id would double-count every counter.
+
 ## Known gaps
 
-- **The Session Manager is not instrumented.** It accepts `traceparent` but
-  does not yet create spans of its own, so a trace currently stops at the
-  Workflow API boundary.
 - **No authentication.** Both services are open. They are meant to run on a
   private network or behind the platform's gateway.
 - **Background execution is in-process.** A run is executed by the API process
