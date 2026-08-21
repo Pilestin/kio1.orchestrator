@@ -37,6 +37,12 @@ def main() -> None:
         config = load_config()
         init_telemetry(config.telemetry, llm=config.model)
 
+        if config.telemetry.enabled:
+            # Export failures are kept out of the console so they cannot
+            # corrupt the prompt, so name the destination once at startup;
+            # otherwise a wrong endpoint is invisible for the whole session.
+            print(f"Telemetry: exporting to {config.telemetry.otlp_http_endpoint}")
+
         startup_attributes = {
             "gen_ai.provider.name": config.provider,
             "gen_ai.request.model": config.model,

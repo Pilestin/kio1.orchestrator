@@ -157,7 +157,7 @@ class TestConfigLoader:
         assert config.telemetry == TelemetryConfig()
 
     @pytest.mark.parametrize(
-        ("enabled", "endpoint", "expect_error"),
+        ("enabled", "endpoint", "expect_warning"),
         [
             (True, "http://YOUR_HOST:4318", True),
             (True, "http://collector.example.com:4318", True),
@@ -165,24 +165,27 @@ class TestConfigLoader:
             (False, "http://YOUR_HOST:4318", False),
         ],
     )
-    def test_enabled_telemetry_rejects_placeholder_endpoints(
+    def test_enabled_telemetry_warns_about_placeholder_endpoints(
         self,
         tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
         enabled: bool,
         endpoint: str,
-        expect_error: bool,
+        expect_warning: bool,
     ) -> None:
-        """Verify an unedited example endpoint fails loudly instead of silently.
+        """Verify an unedited example endpoint is reported once at load time.
 
         Export failures are filtered off the console so they cannot corrupt the
         interactive prompt, which means a placeholder endpoint would otherwise
-        fail invisibly for the whole session.
+        fail invisibly for the whole session. Running against an unreachable
+        collector is still allowed, so this warns rather than raising.
 
         Args:
             tmp_path: Pytest temporary directory fixture.
+            caplog: Pytest log capture fixture.
             enabled: Value for `telemetry.enabled`.
             endpoint: Value for `telemetry.otlp_http_endpoint`.
-            expect_error: Whether loading should raise.
+            expect_warning: Whether a placeholder warning should be logged.
         """
         config_data = {
             "provider": "ollama",
@@ -197,11 +200,11 @@ class TestConfigLoader:
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps(config_data))
 
-        if expect_error:
-            with pytest.raises(ValueError, match="placeholder"):
-                load_config(str(config_file))
-        else:
-            load_config(str(config_file))
+        with caplog.at_level(logging.WARNING, logger="core.config_loader"):
+            config = load_config(str(config_file))
+
+        assert config.telemetry.enabled == enabled
+        assert ("example placeholder" in caplog.text) == expect_warning
 
     def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
         """Verify an unknown provider value raises a clear error

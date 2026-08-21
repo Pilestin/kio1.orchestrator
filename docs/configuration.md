@@ -144,7 +144,7 @@ Zero and negative values are not sentinels for "use the model maximum". Ollama c
 
 The `telemetry` object is optional. When it is omitted or `telemetry.enabled` is `false`, the application does not initialize OpenTelemetry exporters and can run without the local observability stack.
 
-`otlp_http_endpoint` must point at a real Collector before `enabled` is set to `true`. Leaving the example placeholder in place (`YOUR_HOST`, `changeme`, or any `example.com` host) is rejected at startup with a clear message, because export failures are deliberately kept off the console and would otherwise fail invisibly for the whole session.
+When `enabled` is `true`, the endpoint is printed once at startup, and a placeholder host (`YOUR_HOST`, `changeme`, or any `example.com` host) is reported as a warning in the session log. Neither is fatal: running against an unreachable collector is a legitimate way to exercise the export-failure path. The notice exists because export errors are deliberately kept off the console, so a wrong endpoint would otherwise be invisible for the whole session.
 
 When enabled, `otlp_http_endpoint` is treated as the OTLP/HTTP base URL. The application automatically sends traces to `/v1/traces` and metrics to `/v1/metrics`.
 

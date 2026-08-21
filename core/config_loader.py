@@ -9,9 +9,11 @@ from dispatch.agent_registry import AgentRegistry, load_agent_registry
 
 logger = logging.getLogger(__name__)
 
-# Placeholder hosts shipped in the example configuration. Left in place with
-# telemetry enabled, every export fails silently in the background, so they
-# are rejected loudly at startup instead.
+# Placeholder hosts shipped in the example configuration. Exporter errors are
+# filtered off the console so they cannot corrupt the interactive prompt, so a
+# placeholder host would otherwise fail invisibly for a whole session. It is
+# reported once at startup instead of rejected: running against an unreachable
+# collector is a legitimate way to exercise the export-failure path.
 _PLACEHOLDER_OTLP_HOSTS = ("your_host", "your-host", "changeme", "example.com")
 
 
@@ -127,10 +129,11 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
         )
 
     if enabled and _is_placeholder_host(parsed_endpoint.hostname):
-        raise ValueError(
-            "telemetry.otlp_http_endpoint is still the example placeholder "
-            f"({parsed_endpoint.hostname!r}). Set the real Collector endpoint, "
-            "or set telemetry.enabled to false."
+        logger.warning(
+            "telemetry.otlp_http_endpoint host is still the example "
+            "placeholder (%r); every export will fail until it is replaced "
+            "with a real Collector endpoint",
+            parsed_endpoint.hostname,
         )
 
     bearer_token = telemetry_data.get("otlp_bearer_token", "")
