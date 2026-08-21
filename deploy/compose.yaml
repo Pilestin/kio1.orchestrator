@@ -1,0 +1,56 @@
+name: kio1
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: kio1
+      POSTGRES_USER: kio1
+      POSTGRES_PASSWORD: kio1
+    ports:
+      - "5432:5432"
+    volumes:
+      - kio1-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kio1 -d kio1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  session-manager:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command:
+      - uvicorn
+      - services.session_manager.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+    environment:
+      KIO1_DATABASE_URL: postgresql://kio1:kio1@postgres:5432/kio1
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  workflow-api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      KIO1_SESSION_MANAGER_URL: http://session-manager:8001
+    ports:
+      - "8000:8000"
+    depends_on:
+      session-manager:
+        condition: service_started
+    # The provider endpoint in config.json points at the host, not this
+    # network, so Ollama running on the developer machine stays reachable.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  kio1-postgres:

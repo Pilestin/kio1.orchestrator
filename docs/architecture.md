@@ -61,6 +61,9 @@ graph TD
 | `dispatch/agent_transport.py` | Delivers one execution message to one agent; HTTP today, swappable |
 | `dispatch/workflow_executor.py` | Runs a routed plan sequentially or in parallel and collects per-step results |
 | `tools/dummy_agent.py` | Dependency-free stub agent used to validate the protocol end to end |
+| `services/workflow_api/` | HTTP entry point; accepts a request and runs the workflow in the background |
+| `services/session_manager/` | Records sessions, steps, artifacts, and lineage in PostgreSQL |
+| `core/session_client.py` | Client the Workflow API and terminal use to talk to the Session Manager |
 
 ## Data Flow
 
@@ -86,6 +89,9 @@ graph TD
 - **Optional dispatch**: Plan dispatch is disabled by default, so KIO1 stays usable as a plan-only tool while KIO agents are still being brought up. A plan step addressed to an undeployed agent is skipped, not failed.
 - **Transport behind an interface**: The shared documents describe two different transports (direct HTTP in the KIO1-KIO10 protocol, NATS JetStream in the observability guide). `AgentTransport` isolates that choice from the planner and executor.
 - **Dependency-free dispatch**: The HTTP transport and the stub agent use `urllib.request` and `http.server`, matching the existing Ollama client and adding no new runtime dependencies.
+- **Two entry points, one core**: The terminal application and the Workflow API share configuration, prompt loading, planning, and dispatch. Only the way a request arrives differs.
+- **Sessions opened before work starts**: `POST /workflow/run` refuses the request if no session can be opened, so a caller is never left holding no identifier for work that is already running.
+- **Recording is best effort after that point**: losing a step record is not a reason to abandon a workflow that is already calling real agents, so only session creation is fatal.
 - **Privacy-aware instrumentation**: Telemetry contains operational metadata but excludes prompts, responses, exception messages, and stack traces.
 - **Persistent observability storage**: Collector queues, Tempo traces, and Prometheus metrics use named Docker volumes that survive container recreation.
 

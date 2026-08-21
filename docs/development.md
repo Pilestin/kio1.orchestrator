@@ -49,8 +49,14 @@ dispatch/                      - Sending plan steps to KIO agents
   agent_transport.py           - Message delivery, HTTP today
   workflow_executor.py         - Sequential and parallel execution
 
+services/                      - HTTP services
+  session_manager/             - Sessions, steps, artifacts, lineage
+  workflow_api/                - Request entry point and background runner
+
 tools/                         - Developer utilities
   dummy_agent.py               - Stub KIO agent for protocol validation
+
+deploy/                        - Dockerfile and compose stack
 
 prompts/                       - System prompt files
 tests/                         - Unit tests

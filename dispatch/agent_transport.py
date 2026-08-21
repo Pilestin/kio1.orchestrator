@@ -4,6 +4,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Protocol
 
+from opentelemetry.propagate import inject
+
 from dispatch.agent_registry import AgentEndpoint
 from dispatch.workflow_planner import ExecutionMessage
 
@@ -76,10 +78,16 @@ class HttpAgentTransport:
                 with a non-2xx status, or the reply was not a JSON object.
         """
         payload = json.dumps(message.to_payload()).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        # W3C trace context, so an agent that reads `traceparent` continues
+        # this trace instead of starting an unrelated one. Agents that ignore
+        # the header are unaffected.
+        inject(headers)
+
         request = urllib.request.Request(
             agent.url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
 

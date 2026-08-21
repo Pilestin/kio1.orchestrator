@@ -1,0 +1,342 @@
+import os
+from collections.abc import Iterator
+from typing import Any
+from uuid import UUID, uuid4
+
+import pytest
+from fastapi.testclient import TestClient
+
+from services.session_manager.app import app, get_repository
+from services.session_manager.models import RecordStepRequest, UpdateSessionRequest
+from services.session_manager.repository import (
+    InMemorySessionRepository,
+    PostgresSessionRepository,
+    SessionRepository,
+)
+
+DATABASE_URL_ENV = "KIO1_TEST_DATABASE_URL"
+
+
+def make_step(
+    step_id: str = "s1",
+    agent_id: str = "KIO2",
+    capability: str = "bug_localization",
+    status: str = "ok",
+    output: dict[str, Any] | None = None,
+) -> RecordStepRequest:
+    """Build a step-record request for tests."""
+    return RecordStepRequest(
+        step_id=step_id,
+        agent_id=agent_id,
+        capability=capability,
+        task=f"Task for {step_id}",
+        status=status,  # type: ignore[arg-type]
+        duration_ms=12,
+        output=output if output is not None else {"summary": f"done {step_id}"},
+    )
+
+
+# ── repository behaviour, exercised against every implementation ─────────────
+
+
+def _postgres_repository() -> PostgresSessionRepository | None:
+    """Build a Postgres repository when a test database is configured.
+
+    Returns:
+        A repository with the schema applied, or None when
+        `KIO1_TEST_DATABASE_URL` is unset or psycopg is unavailable.
+    """
+    database_url = os.environ.get(DATABASE_URL_ENV, "").strip()
+
+    if not database_url:
+        return None
+
+    from psycopg_pool import ConnectionPool
+
+    pool = ConnectionPool(database_url, min_size=1, max_size=4, open=True)
+    repository = PostgresSessionRepository(pool)
+    repository.apply_schema()
+
+    return repository
+
+
+@pytest.fixture(
+    params=["memory", "postgres"],
+    ids=["memory", "postgres"],
+)
+def repository(request: pytest.FixtureRequest) -> Iterator[SessionRepository]:
+    """Yield each repository implementation in turn.
+
+    The Postgres case is skipped unless `KIO1_TEST_DATABASE_URL` points at a
+    reachable database, so the suite stays green without Docker while still
+    covering real SQL when one is available.
+    """
+    if request.param == "memory":
+        yield InMemorySessionRepository()
+        return
+
+    postgres = _postgres_repository()
+
+    if postgres is None:
+        pytest.skip(f"{DATABASE_URL_ENV} is not set")
+
+    yield postgres
+
+
+def test_create_session_starts_pending(repository: SessionRepository) -> None:
+    session = repository.create_session("Build a scheduling app")
+
+    assert session.status == "pending"
+    assert session.request_text == "Build a scheduling app"
+    assert session.workflow_id is None
+
+
+def test_get_session_returns_none_for_unknown_id(
+    repository: SessionRepository,
+) -> None:
+    assert repository.get_session(uuid4()) is None
+
+
+def test_update_session_applies_only_supplied_fields(
+    repository: SessionRepository,
+) -> None:
+    session = repository.create_session("Build a scheduling app")
+
+    updated = repository.update_session(
+        session.session_id,
+        UpdateSessionRequest(status="running", workflow_id="wf-1"),
+    )
+
+    assert updated is not None
+    assert updated.status == "running"
+    assert updated.workflow_id == "wf-1"
+    assert updated.execution_mode is None
+    assert updated.request_text == "Build a scheduling app"
+
+
+def test_update_session_returns_none_for_unknown_id(
+    repository: SessionRepository,
+) -> None:
+    assert (
+        repository.update_session(uuid4(), UpdateSessionRequest(status="running"))
+        is None
+    )
+
+
+def test_record_step_stores_the_step_and_its_output(
+    repository: SessionRepository,
+) -> None:
+    session = repository.create_session("Fix the payment bug")
+
+    recorded = repository.record_step(session.session_id, make_step())
+
+    assert recorded is not None
+    assert recorded.step_id == "s1"
+    assert recorded.output == {"summary": "done s1"}
+
+    detail = repository.get_session(session.session_id)
+    assert detail is not None
+    assert [step.step_id for step in detail.steps] == ["s1"]
+
+
+def test_record_step_returns_none_for_unknown_session(
+    repository: SessionRepository,
+) -> None:
+    assert repository.record_step(uuid4(), make_step()) is None
+
+
+def test_recording_a_step_twice_replaces_it(repository: SessionRepository) -> None:
+    session = repository.create_session("Fix the payment bug")
+
+    repository.record_step(session.session_id, make_step(status="error"))
+    repository.record_step(session.session_id, make_step(status="ok"))
+
+    detail = repository.get_session(session.session_id)
+    assert detail is not None
+    assert len(detail.steps) == 1
+    assert detail.steps[0].status == "ok"
+
+
+def test_sequential_runs_record_execution_order_lineage(
+    repository: SessionRepository,
+) -> None:
+    session = repository.create_session("Build a scheduling app")
+    repository.update_session(
+        session.session_id, UpdateSessionRequest(execution_mode="sequential")
+    )
+
+    repository.record_step(session.session_id, make_step(step_id="s1"))
+    repository.record_step(session.session_id, make_step(step_id="s2"))
+    repository.record_step(session.session_id, make_step(step_id="s3"))
+
+    detail = repository.get_session(session.session_id)
+    assert detail is not None
+    assert [
+        (edge.produced_by_step_id, edge.consumed_by_step_id, edge.basis)
+        for edge in detail.lineage
+    ] == [
+        ("s1", "s2", "execution_order"),
+        ("s2", "s3", "execution_order"),
+    ]
+
+
+def test_parallel_runs_record_no_lineage(repository: SessionRepository) -> None:
+    # Recording order carries no dependency information when steps ran
+    # concurrently, so inferring edges from it would be wrong.
+    session = repository.create_session("Build a scheduling app")
+    repository.update_session(
+        session.session_id, UpdateSessionRequest(execution_mode="parallel")
+    )
+
+    repository.record_step(session.session_id, make_step(step_id="s1"))
+    repository.record_step(session.session_id, make_step(step_id="s2"))
+
+    detail = repository.get_session(session.session_id)
+    assert detail is not None
+    assert detail.lineage == []
+
+
+def test_steps_without_output_produce_no_lineage(
+    repository: SessionRepository,
+) -> None:
+    session = repository.create_session("Build a scheduling app")
+    repository.update_session(
+        session.session_id, UpdateSessionRequest(execution_mode="sequential")
+    )
+
+    repository.record_step(session.session_id, make_step(step_id="s1"))
+    repository.record_step(
+        session.session_id,
+        RecordStepRequest(
+            step_id="s2",
+            agent_id="KIO7",
+            capability="code_generation",
+            task="Not deployed",
+            status="skipped",
+            error="no_endpoint",
+        ),
+    )
+
+    detail = repository.get_session(session.session_id)
+    assert detail is not None
+    assert detail.lineage == []
+    assert detail.steps[1].output is None
+
+
+# ── HTTP surface ────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def client() -> Iterator[TestClient]:
+    """Yield a client backed by a fresh in-memory repository."""
+    repository = InMemorySessionRepository()
+    app.dependency_overrides[get_repository] = lambda: repository
+
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_health_reports_the_service_name(client: TestClient) -> None:
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "session-manager"}
+
+
+def test_post_sessions_returns_a_new_session(client: TestClient) -> None:
+    response = client.post("/sessions", json={"request_text": "Build an app"})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert UUID(body["session_id"])
+    assert body["status"] == "pending"
+
+
+def test_post_sessions_rejects_an_empty_request(client: TestClient) -> None:
+    assert client.post("/sessions", json={"request_text": ""}).status_code == 422
+
+
+def test_full_session_lifecycle_over_http(client: TestClient) -> None:
+    session_id = client.post(
+        "/sessions", json={"request_text": "Fix the payment bug"}
+    ).json()["session_id"]
+
+    patched = client.patch(
+        f"/sessions/{session_id}",
+        json={
+            "status": "running",
+            "workflow_id": "wf-1",
+            "execution_mode": "sequential",
+        },
+    )
+    assert patched.status_code == 200
+    assert patched.json()["execution_mode"] == "sequential"
+
+    step = client.post(
+        f"/sessions/{session_id}/steps",
+        json={
+            "step_id": "s1",
+            "agent_id": "KIO2",
+            "capability": "bug_localization",
+            "task": "Locate the defect",
+            "status": "ok",
+            "duration_ms": 21,
+            "output": {"summary": "found it"},
+        },
+    )
+    assert step.status_code == 201
+
+    client.patch(f"/sessions/{session_id}", json={"status": "completed"})
+
+    detail = client.get(f"/sessions/{session_id}").json()
+    assert detail["session"]["status"] == "completed"
+    assert len(detail["steps"]) == 1
+    assert detail["steps"][0]["output"] == {"summary": "found it"}
+
+
+def test_unknown_session_is_a_404_on_every_route(client: TestClient) -> None:
+    unknown = uuid4()
+
+    assert client.get(f"/sessions/{unknown}").status_code == 404
+    assert (
+        client.patch(f"/sessions/{unknown}", json={"status": "running"}).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            f"/sessions/{unknown}/steps",
+            json={
+                "step_id": "s1",
+                "agent_id": "KIO2",
+                "capability": "bug_localization",
+                "task": "Locate the defect",
+                "status": "ok",
+            },
+        ).status_code
+        == 404
+    )
+
+
+def test_a_malformed_session_id_is_rejected(client: TestClient) -> None:
+    assert client.get("/sessions/not-a-uuid").status_code == 422
+
+
+def test_an_unknown_step_status_is_rejected(client: TestClient) -> None:
+    session_id = client.post(
+        "/sessions", json={"request_text": "Fix the payment bug"}
+    ).json()["session_id"]
+
+    response = client.post(
+        f"/sessions/{session_id}/steps",
+        json={
+            "step_id": "s1",
+            "agent_id": "KIO2",
+            "capability": "bug_localization",
+            "task": "Locate the defect",
+            "status": "maybe",
+        },
+    )
+
+    assert response.status_code == 422

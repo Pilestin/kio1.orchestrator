@@ -651,3 +651,56 @@ def test_transport_reports_an_unknown_path(stub_agent: AgentEndpoint) -> None:
 
     with pytest.raises(AgentTransportError, match="HTTP 404"):
         HttpAgentTransport().send(message, wrong_path, timeout=5.0)
+
+
+def test_an_unexpected_transport_error_fails_only_that_step(
+    registry: AgentRegistry,
+) -> None:
+    # A transport is contracted to raise AgentTransportError. If it raises
+    # anything else, the results of steps that already succeeded must survive.
+    class BrokenTransport:
+        def send(
+            self,
+            message: ExecutionMessage,
+            agent: AgentEndpoint,
+            timeout: float,
+        ) -> dict[str, Any]:
+            if message.step_id == "s2":
+                raise RuntimeError("transport bug")
+
+            return {
+                "workflow_id": message.workflow_id,
+                "step_id": message.step_id,
+                "status": "ok",
+                "output": {"summary": "done"},
+            }
+
+    plan_data = build_plan_data(
+        [
+            {
+                "step_id": "s1",
+                "agent_id": "KIO2",
+                "capability": "bug_localization",
+                "task": "Locate the bug",
+            },
+            {
+                "step_id": "s2",
+                "agent_id": "KIO10",
+                "capability": "energy_efficiency",
+                "task": "Analyse energy use",
+            },
+        ],
+        execution_mode="parallel",
+    )
+
+    result = execute_workflow(
+        parse_plan(plan_data),
+        registry,
+        BrokenTransport(),
+        timeout=5.0,
+        max_parallel_steps=2,
+    )
+
+    assert result.results[0].status == STATUS_OK
+    assert result.results[1].status == STATUS_ERROR
+    assert "RuntimeError: transport bug" == result.results[1].error

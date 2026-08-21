@@ -290,14 +290,29 @@ def _dispatch_step(
     ):
         try:
             reply = transport.send(message, agent, timeout)
-        except AgentTransportError as error:
+        except Exception as error:
             elapsed_ms = int((perf_counter() - started_at) * 1000)
-            logger.warning(
-                "Step dispatch failed: step_id=%s agent_id=%s duration_ms=%d",
-                message.step_id,
-                message.agent_id,
-                elapsed_ms,
-            )
+
+            if isinstance(error, AgentTransportError):
+                logger.warning(
+                    "Step dispatch failed: step_id=%s agent_id=%s duration_ms=%d",
+                    message.step_id,
+                    message.agent_id,
+                    elapsed_ms,
+                )
+                detail = str(error)
+            else:
+                # A transport is contracted to raise AgentTransportError.
+                # Anything else is a bug, but letting it escape would discard
+                # the results of every step that already succeeded, so it is
+                # reported as a failed step and logged with its traceback.
+                logger.exception(
+                    "Transport raised an unexpected error: step_id=%s agent_id=%s",
+                    message.step_id,
+                    message.agent_id,
+                )
+                detail = f"{type(error).__name__}: {error}"
+
             record_step_result(
                 agent_id=message.agent_id,
                 capability=message.capability,
@@ -310,7 +325,7 @@ def _dispatch_step(
                 capability=message.capability,
                 status=STATUS_ERROR,
                 duration_ms=elapsed_ms,
-                error=str(error),
+                error=detail,
             )
 
     elapsed_ms = int((perf_counter() - started_at) * 1000)

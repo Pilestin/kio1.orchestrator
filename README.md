@@ -70,6 +70,22 @@ python tools/dummy_agent.py --agent-id KIO2 --port 8102
 
 See the [Workflow Dispatch Guide](docs/workflow-dispatch.md) for the message format, reply contract, execution modes, and known gaps.
 
+## Services
+
+Alongside the terminal application, KIO1 exposes a Workflow API and a Session Manager. The API accepts a request, opens a session, and executes the workflow in the background; the Session Manager records every session, step, artifact, and lineage edge in PostgreSQL.
+
+```bash
+make services
+```
+
+That starts PostgreSQL, the Session Manager on port 8001, and the Workflow API on port 8000.
+
+```bash
+curl -X POST http://localhost:8000/workflow/run -H 'Content-Type: application/json' -d '{"request":"fix the null pointer exception in the payment module"}'
+```
+
+See the [Services Guide](docs/services.md) for the full route reference, configuration, and known gaps.
+
 ## Running Tests
 
 ```bash
@@ -87,5 +103,6 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Chat History Format](docs/chat-history.md) — JSONL session file specification
 - [Development Guide](docs/development.md) — Setup, testing, and contribution guidelines
 - [Troubleshooting](docs/troubleshooting.md) — Common errors and how to resolve them
+- [Services](docs/services.md) — Workflow API, Session Manager, and PostgreSQL
 - [Workflow Dispatch](docs/workflow-dispatch.md) — Sending plan steps to KIO agents
 - [Observability](docs/observability.md) — Tracing, metrics, storage, querying, and safe shutdown

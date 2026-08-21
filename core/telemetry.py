@@ -727,6 +727,9 @@ def trace_turn(
     span_attributes: dict[str, AttributeValue] = {
         **_model_attributes(provider, model),
         "gen_ai.conversation.id": session_id,
+        # The platform's dashboards filter traces by session.id, so it is
+        # carried in addition to the GenAI convention attribute.
+        "session.id": session_id,
         "kio1.turn.number": turn_number,
     }
 
@@ -828,6 +831,7 @@ def trace_gen_ai_request(
         **_model_attributes(provider, model),
         "gen_ai.operation.name": "chat",
         "gen_ai.conversation.id": session_id,
+        "session.id": session_id,
         "gen_ai.request.max_tokens": max_output_tokens,
         "gen_ai.request.temperature": temperature,
         "gen_ai.request.is_streaming": False,

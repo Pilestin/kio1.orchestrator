@@ -3,7 +3,8 @@
 VENV        := .venv
 PYTHON      := $(VENV)/bin/python
 PIP         := $(VENV)/bin/pip
-SOURCES     := main.py core/ providers/ dispatch/ tools/ tests/
+SOURCES     := main.py core/ providers/ dispatch/ services/ tools/ tests/
+COMPOSE     := docker compose -f deploy/compose.yaml
 
 # ── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -38,6 +39,32 @@ typecheck: ## Run mypy static type checker
 .PHONY: check
 check: lint typecheck ## Run all static checks (lint + typecheck)
 
+# ── Services ─────────────────────────────────────────────────────────────────
+
+.PHONY: services
+services: ## Start PostgreSQL, the Session Manager, and the Workflow API
+	$(COMPOSE) up -d --build
+
+.PHONY: services-down
+services-down: ## Stop the service stack, keeping the database volume
+	$(COMPOSE) down
+
+.PHONY: services-logs
+services-logs: ## Follow the service logs
+	$(COMPOSE) logs -f
+
+.PHONY: postgres
+postgres: ## Start only PostgreSQL, for running the services from source
+	$(COMPOSE) up -d postgres
+
+.PHONY: run-session-manager
+run-session-manager: ## Run the Session Manager from source (needs make postgres)
+	KIO1_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 		$(VENV)/bin/uvicorn services.session_manager.app:app --port 8001 --reload
+
+.PHONY: run-workflow-api
+run-workflow-api: ## Run the Workflow API from source (needs the Session Manager)
+	KIO1_SESSION_MANAGER_URL=http://localhost:8001 		$(VENV)/bin/uvicorn services.workflow_api.app:app --port 8000 --reload
+
 # ── Testing ───────────────────────────────────────────────────────────────────
 
 .PHONY: test
@@ -47,6 +74,10 @@ test: ## Run test suite
 .PHONY: test-cov
 test-cov: ## Run tests with coverage report
 	$(VENV)/bin/pytest tests/ -v --cov=. --cov-report=term-missing
+
+.PHONY: test-postgres
+test-postgres: ## Run the suite with the PostgreSQL repository tests enabled
+	KIO1_TEST_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 		$(VENV)/bin/pytest tests/ -v
 
 # ── Composite ────────────────────────────────────────────────────────────────
 
