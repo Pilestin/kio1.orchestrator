@@ -5,10 +5,10 @@ the reply an agent returns. This stub implements the reply shape KIO1
 expects, so the communication protocol, endpoint configuration, workflow
 tracking, and error handling can be validated before any real agent exists.
 
-Run one stub per agent:
+Run one stub per agent, over HTTP or over NATS:
 
-    python dummy_agent.py --agent-id KIO2 --port 8102
-    python dummy_agent.py --agent-id KIO10 --port 8110
+    python tools/dummy_agent.py --agent-id KIO2 --port 8102
+    python tools/dummy_agent.py --agent-id KIO10 --transport nats
 
 Reply shape:
 
@@ -23,8 +23,10 @@ Reply shape:
 """
 
 import argparse
+import asyncio
 import json
 import logging
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -301,12 +303,33 @@ def main() -> None:
         default=[],
         help="Capability that should answer with an error. Repeatable.",
     )
+    parser.add_argument(
+        "--transport",
+        choices=("http", "nats"),
+        default="http",
+        help="How the stub listens for execution messages.",
+    )
+    parser.add_argument(
+        "--nats-server",
+        action="append",
+        default=[],
+        help="NATS server URL. Repeatable. Defaults to nats://localhost:4222.",
+    )
+    parser.add_argument(
+        "--subject",
+        default=None,
+        help="NATS subject to listen on. Defaults to kio.<agent>.execute.",
+    )
     arguments = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+    if arguments.transport == "nats":
+        _serve_nats(arguments)
+        return
 
     server = build_server(
         agent_id=arguments.agent_id,
@@ -330,5 +353,186 @@ def main() -> None:
         server.server_close()
 
 
+def _serve_nats(arguments: argparse.Namespace) -> None:
+    """Serve a NATS stub agent until interrupted.
+
+    Args:
+        arguments: Parsed command-line arguments.
+
+    Returns:
+        None.
+    """
+    stub = NatsStubAgent(
+        agent_id=arguments.agent_id,
+        servers=arguments.nats_server or ["nats://localhost:4222"],
+        subject=arguments.subject,
+        latency_seconds=arguments.latency,
+        fail_capabilities=frozenset(arguments.fail_capability),
+    )
+    stub.start()
+    print(f"{arguments.agent_id} stub listening on NATS subject {stub.subject}")
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nStopping stub agent.")
+    finally:
+        stub.stop()
+
+
 if __name__ == "__main__":
     main()
+
+
+DEFAULT_SUBJECT_TEMPLATE = "kio.{agent}.execute"
+
+
+class NatsStubAgent:
+    """Answers execution messages over NATS, for exercising that transport.
+
+    The reply is the same object the HTTP handler returns, so a caller cannot
+    tell the two apart other than by how the message arrived.
+    """
+
+    def __init__(
+        self,
+        *,
+        agent_id: str,
+        servers: list[str],
+        subject: str | None = None,
+        latency_seconds: float = 0.0,
+        fail_capabilities: frozenset[str] = frozenset(),
+    ) -> None:
+        """Store settings without connecting.
+
+        Args:
+            agent_id: Identifier the stub answers as.
+            servers: NATS server URLs.
+            subject: Subject to listen on. Defaults to the shared template.
+            latency_seconds: Artificial delay before replying.
+            fail_capabilities: Capabilities that answer with `status: error`.
+        """
+        self.agent_id = agent_id
+        self.subject = subject or DEFAULT_SUBJECT_TEMPLATE.format(
+            agent=agent_id.lower()
+        )
+        self._servers = list(servers)
+        self._latency_seconds = latency_seconds
+        self._fail_capabilities = fail_capabilities
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._connection: Any = None
+
+    def start(self, timeout: float = 15.0) -> None:
+        """Connect and begin answering, returning once the subscription is live.
+
+        Args:
+            timeout: Seconds to wait for the subscription to be established.
+
+        Raises:
+            RuntimeError: If the stub did not become ready in time.
+        """
+        ready = threading.Event()
+        failure: list[BaseException] = []
+        loop = asyncio.new_event_loop()
+
+        def run() -> None:
+            asyncio.set_event_loop(loop)
+
+            async def subscribe() -> None:
+                import nats
+
+                try:
+                    self._connection = await nats.connect(servers=self._servers)
+                    await self._connection.subscribe(self.subject, cb=self._handle)
+                except BaseException as error:  # noqa: BLE001 - reported to start()
+                    failure.append(error)
+                finally:
+                    ready.set()
+
+            loop.create_task(subscribe())
+            loop.run_forever()
+
+        thread = threading.Thread(
+            target=run, name=f"kio1-stub-{self.agent_id}", daemon=True
+        )
+        thread.start()
+
+        if not ready.wait(timeout=timeout):
+            raise RuntimeError(f"{self.agent_id} stub did not start in time")
+
+        if failure:
+            raise RuntimeError(
+                f"{self.agent_id} stub could not subscribe: {failure[0]}"
+            ) from failure[0]
+
+        self._loop = loop
+        self._thread = thread
+
+        logger.info("%s stub listening on NATS subject %s", self.agent_id, self.subject)
+
+    def stop(self) -> None:
+        """Drain the connection and stop the event-loop thread."""
+        loop, thread, connection = self._loop, self._thread, self._connection
+        self._loop = self._thread = self._connection = None
+
+        if loop is None:
+            return
+
+        if connection is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(connection.drain(), loop).result(
+                    timeout=10
+                )
+            except Exception:
+                logger.warning("Draining the stub connection failed", exc_info=True)
+
+        loop.call_soon_threadsafe(loop.stop)
+
+        if thread is not None:
+            thread.join(timeout=10)
+
+    async def _handle(self, message: Any) -> None:
+        """Answer one execution message.
+
+        Args:
+            message: The received NATS message.
+
+        Returns:
+            None.
+        """
+        try:
+            payload = json.loads(bytes(message.data).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            logger.warning("Discarding a non-JSON message on %s", self.subject)
+            return
+
+        if not isinstance(payload, dict):
+            logger.warning("Discarding a non-object message on %s", self.subject)
+            return
+
+        if self._latency_seconds > 0:
+            await asyncio.sleep(self._latency_seconds)
+
+        capability = payload.get("capability", "")
+        reply = {
+            "workflow_id": payload.get("workflow_id", ""),
+            "step_id": payload.get("step_id", ""),
+            "agent_id": self.agent_id,
+            "status": "ok",
+            "output": _build_output(
+                capability,
+                payload.get("task", ""),
+                payload.get("data", {}),
+            ),
+            "error": None,
+        }
+
+        if capability in self._fail_capabilities:
+            reply["status"] = "error"
+            reply["output"] = None
+            reply["error"] = f"Simulated failure for capability {capability!r}"
+
+        if message.reply:
+            await message.respond(json.dumps(reply).encode("utf-8"))

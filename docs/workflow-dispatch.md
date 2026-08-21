@@ -269,8 +269,12 @@ python tools/dummy_agent.py --agent-id KIO2 --port 8102
 ```
 
 ```bash
-python tools/dummy_agent.py --agent-id KIO10 --port 8110
+python tools/dummy_agent.py --agent-id KIO10 --transport nats
 ```
+
+In `nats` mode the stub subscribes to the agent's subject and answers with the
+same reply object it returns over HTTP, so the two transports can be compared
+directly.
 
 Useful flags:
 
@@ -279,6 +283,9 @@ Useful flags:
 | `--latency` | Delay replies, to exercise timeouts |
 | `--fail-capability` | Answer `status: "error"` for a capability, repeatable |
 | `--path` | Serve a path other than `/execute` |
+| `--transport` | `http` (default) or `nats` |
+| `--nats-server` | Broker URL in `nats` mode, repeatable |
+| `--subject` | Listen on a subject other than `kio.<agent>.execute` |
 
 It also answers `GET /health`, so reachability can be checked without
 sending a workflow step.
@@ -297,5 +304,6 @@ oversights:
   field for it and none was added.
 - **Nothing verifies what an agent does with `data.upstream`.** KIO1 hands
   results forward; whether an agent reads them is up to that agent.
-- **Untested against a real NATS broker.** The transport is covered against a
-  fake connection. Nothing has yet run against a live server.
+- **No JetStream consumer on the agent side.** The stub agent's NATS mode is
+  a plain subscriber, so it demonstrates the protocol rather than the durable
+  delivery a production worker would want.

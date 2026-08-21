@@ -53,8 +53,12 @@ services-down: ## Stop the service stack, keeping the database volume
 services-logs: ## Follow the service logs
 	$(COMPOSE) logs -f
 
+.PHONY: infra
+infra: ## Start only PostgreSQL and NATS, for running the services from source
+	$(COMPOSE) up -d postgres nats
+
 .PHONY: postgres
-postgres: ## Start only PostgreSQL, for running the services from source
+postgres: ## Start only PostgreSQL
 	$(COMPOSE) up -d postgres
 
 .PHONY: run-session-manager
@@ -78,6 +82,10 @@ test-cov: ## Run tests with coverage report
 .PHONY: test-postgres
 test-postgres: ## Run the suite with the PostgreSQL repository tests enabled
 	KIO1_TEST_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 		$(VENV)/bin/pytest tests/ -v
+
+.PHONY: test-live
+test-live: ## Run every test, including those needing PostgreSQL and NATS
+	KIO1_TEST_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 	KIO1_TEST_NATS_SERVERS=nats://localhost:4222 		$(VENV)/bin/pytest tests/ -v
 
 # ── Composite ────────────────────────────────────────────────────────────────
 

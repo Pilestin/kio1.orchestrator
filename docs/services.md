@@ -95,6 +95,7 @@ settings. Deployment-specific values come from the environment:
 | `KIO1_DATABASE_URL` | Session Manager | PostgreSQL DSN. Unset falls back to in-memory storage, which is lost on restart. |
 | `KIO1_SESSION_MANAGER_URL` | Workflow API | Session Manager base URL. Unset disables recording, and status lookups then fail. |
 | `KIO1_TEST_DATABASE_URL` | Tests | Enables the PostgreSQL repository tests; they are skipped when unset. |
+| `KIO1_TEST_NATS_SERVERS` | Tests | Enables the live NATS round-trip tests; they are skipped when unset. |
 
 ## Running
 
@@ -138,10 +139,14 @@ python tools/dummy_agent.py --agent-id KIO2 --port 8102
 
 The suite runs without Docker. Repository behaviour is verified against the
 in-memory implementation, and the same tests run against real PostgreSQL when
-a database is available:
+a database is available. With both PostgreSQL and NATS up, nothing is skipped:
 
 ```bash
-make test-postgres
+make infra
+```
+
+```bash
+make test-live
 ```
 
 `tests/test_services_integration.py` wires the Workflow API to a live Session

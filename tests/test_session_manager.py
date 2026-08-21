@@ -39,48 +39,55 @@ def make_step(
 # ── repository behaviour, exercised against every implementation ─────────────
 
 
-def _postgres_repository() -> PostgresSessionRepository | None:
-    """Build a Postgres repository when a test database is configured.
+@pytest.fixture(scope="session")
+def postgres_repository() -> Iterator[PostgresSessionRepository | None]:
+    """Yield a Postgres-backed repository, or None when none is configured.
 
-    Returns:
-        A repository with the schema applied, or None when
-        `KIO1_TEST_DATABASE_URL` is unset or psycopg is unavailable.
+    One connection pool is opened for the whole test session and closed at the
+    end. Opening a pool per test leaves pools to be garbage-collected, which
+    psycopg reports as an unraisable exception.
     """
     database_url = os.environ.get(DATABASE_URL_ENV, "").strip()
 
     if not database_url:
-        return None
+        yield None
+        return
 
     from psycopg_pool import ConnectionPool
 
     pool = ConnectionPool(database_url, min_size=1, max_size=4, open=True)
-    repository = PostgresSessionRepository(pool)
-    repository.apply_schema()
 
-    return repository
+    try:
+        repository = PostgresSessionRepository(pool)
+        repository.apply_schema()
+
+        yield repository
+    finally:
+        pool.close()
 
 
 @pytest.fixture(
     params=["memory", "postgres"],
     ids=["memory", "postgres"],
 )
-def repository(request: pytest.FixtureRequest) -> Iterator[SessionRepository]:
-    """Yield each repository implementation in turn.
+def repository(
+    request: pytest.FixtureRequest,
+    postgres_repository: PostgresSessionRepository | None,
+) -> SessionRepository:
+    """Return each repository implementation in turn.
 
     The Postgres case is skipped unless `KIO1_TEST_DATABASE_URL` points at a
     reachable database, so the suite stays green without Docker while still
-    covering real SQL when one is available.
+    covering real SQL when one is available. Every test opens its own session,
+    so the shared database needs no cleanup between them.
     """
     if request.param == "memory":
-        yield InMemorySessionRepository()
-        return
+        return InMemorySessionRepository()
 
-    postgres = _postgres_repository()
-
-    if postgres is None:
+    if postgres_repository is None:
         pytest.skip(f"{DATABASE_URL_ENV} is not set")
 
-    yield postgres
+    return postgres_repository
 
 
 def test_create_session_starts_pending(repository: SessionRepository) -> None:
@@ -340,3 +347,119 @@ def test_an_unknown_step_status_is_rejected(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_declared_dependencies_are_recorded_as_such(
+    repository: SessionRepository,
+) -> None:
+    session = repository.create_session("Build a service")
+    repository.update_session(
+        session.session_id, UpdateSessionRequest(execution_mode="mixed")
+    )
+
+    for step_id, depends_on in (
+        ("s1", []),
+        ("s2", ["s1"]),
+        ("s3", ["s1"]),
+        ("s4", ["s2", "s3"]),
+    ):
+        repository.record_step(
+            session.session_id,
+            RecordStepRequest(
+                step_id=step_id,
+                agent_id="KIO7",
+                capability="code_generation",
+                task=f"Task {step_id}",
+                status="ok",
+                output={"produced_by": step_id},
+                depends_on=depends_on,
+            ),
+        )
+
+    detail = repository.get_session(session.session_id)
+    assert detail is not None
+    assert {
+        (edge.produced_by_step_id, edge.consumed_by_step_id): edge.basis
+        for edge in detail.lineage
+    } == {
+        ("s1", "s2"): "declared_dependency",
+        ("s1", "s3"): "declared_dependency",
+        ("s2", "s4"): "declared_dependency",
+        ("s3", "s4"): "declared_dependency",
+    }
+
+
+def test_a_declared_dependency_that_left_no_artifact_is_not_linked(
+    repository: SessionRepository,
+) -> None:
+    # A skipped upstream step produces nothing, so there is no artifact to
+    # link to and inventing an edge would misrepresent the run.
+    session = repository.create_session("Build a service")
+    repository.update_session(
+        session.session_id, UpdateSessionRequest(execution_mode="mixed")
+    )
+
+    repository.record_step(
+        session.session_id,
+        RecordStepRequest(
+            step_id="s1",
+            agent_id="KIO4",
+            capability="architecture_design",
+            task="Not deployed",
+            status="skipped",
+            error="no_endpoint",
+        ),
+    )
+    repository.record_step(
+        session.session_id,
+        RecordStepRequest(
+            step_id="s2",
+            agent_id="KIO7",
+            capability="code_generation",
+            task="Depends on a skipped step",
+            status="ok",
+            output={"produced_by": "s2"},
+            depends_on=["s1"],
+        ),
+    )
+
+    detail = repository.get_session(session.session_id)
+    assert detail is not None
+    assert detail.lineage == []
+
+
+def test_declared_dependencies_suppress_order_inference(
+    repository: SessionRepository,
+) -> None:
+    # s3 declares only s1, so no edge from s2 may appear even though s2 was
+    # recorded immediately before it.
+    session = repository.create_session("Build a service")
+    repository.update_session(
+        session.session_id, UpdateSessionRequest(execution_mode="sequential")
+    )
+
+    for step_id, depends_on in (("s1", []), ("s2", []), ("s3", ["s1"])):
+        repository.record_step(
+            session.session_id,
+            RecordStepRequest(
+                step_id=step_id,
+                agent_id="KIO7",
+                capability="code_generation",
+                task=f"Task {step_id}",
+                status="ok",
+                output={"produced_by": step_id},
+                depends_on=depends_on,
+            ),
+        )
+
+    detail = repository.get_session(session.session_id)
+    assert detail is not None
+    edges = {
+        (edge.produced_by_step_id, edge.consumed_by_step_id): edge.basis
+        for edge in detail.lineage
+    }
+
+    assert edges == {
+        ("s1", "s2"): "execution_order",
+        ("s1", "s3"): "declared_dependency",
+    }
