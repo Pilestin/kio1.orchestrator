@@ -30,6 +30,8 @@ All application settings are stored in `config.json` at the project root.
 | `dispatch.max_parallel_steps` | int | Positive bound on concurrent dispatches in `parallel` mode (default: `4`) |
 | `dispatch.transport` | string | How execution messages travel: `http` (default) or `nats` |
 | `dispatch.agents` | object | Agent id to endpoint mapping; see [Workflow Dispatch](workflow-dispatch.md) |
+| `dispatch.workspace.path` | string | Repository root the agents should analyse, as *they* can see it (default: `""`, not sent) |
+| `dispatch.workspace.entry_point` | string | Runnable script reproducing the behaviour, relative to `workspace.path` (default: `""`, not sent) |
 | `dispatch.nats.servers` | array of strings | NATS server URLs; required when `transport` is `nats` |
 | `dispatch.nats.subject_template` | string | Subject pattern for agents that do not name one; must contain `{agent}` (default: `kio.{agent}.execute`) |
 
@@ -172,6 +174,8 @@ The `dispatch` object is optional. When it is omitted or `dispatch.enabled` is `
 When enabled, each plan step is turned into an execution message and posted to the agent configured under `dispatch.agents`. Steps addressed to agents that are not configured are reported as `skipped`; they are not errors, because a plan spanning KIO2-KIO13 will always name agents that are not deployed yet.
 
 Enabling dispatch with an empty `dispatch.agents` object is rejected at startup, since there would be nowhere to send any step.
+
+An agent that analyses code has to be told which code. The plan's `task` is free text, so `dispatch.workspace` travels in the execution message's `data` field as `repository.path` and `target.entry_point`. Leaving it unset sends neither key, which is correct for agents that do not touch a repository. In a containerized deployment the path must be the one inside the agent's container, not KIO1's.
 
 Switching `dispatch.transport` to `nats` changes only how a message is delivered. The message body is identical, so agents that already speak the HTTP contract need no schema change.
 

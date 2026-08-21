@@ -60,8 +60,18 @@ The message KIO1 posts to an agent follows the shared protocol exactly:
 ```
 
 `data` is the protocol's extension point for structured inputs a specific KIO
-needs beyond the free-text `task`. KIO1 uses it, and only it, to feed results
-forward:
+needs beyond the free-text `task`. KIO1 uses it, and only it, for two things.
+
+The code under analysis, from `dispatch.workspace`:
+
+```json
+"data": {
+  "repository": {"path": "/work/repo"},
+  "target": {"entry_point": "reproduce.py"}
+}
+```
+
+And results fed forward to the steps that declared a dependency:
 
 ```json
 "data": {
@@ -72,9 +82,10 @@ forward:
 }
 ```
 
-A step that declares no dependencies receives `"data": {}`, exactly as before
-the field was used. No key outside the seven agreed fields is ever added to an
-execution message.
+The two coexist: a step can receive the repository path and its predecessor's
+output together. With no workspace configured and no dependencies declared, a
+step receives `"data": {}`, exactly as before the field was used. No key
+outside the seven agreed fields is ever added to an execution message.
 
 ## Reply contract
 

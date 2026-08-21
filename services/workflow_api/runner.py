@@ -93,6 +93,7 @@ class WorkflowRunner:
                     self.transport,
                     timeout=self.config.dispatch.request_timeout,
                     max_parallel_steps=self.config.dispatch.max_parallel_steps,
+                    workspace_data=self.config.dispatch.workspace.to_data(),
                 )
             except Exception as error:
                 logger.exception("Dispatch failed: session_id=%s", session_id)

@@ -89,6 +89,7 @@ def execute_workflow(
     *,
     timeout: float,
     max_parallel_steps: int,
+    workspace_data: dict[str, Any] | None = None,
 ) -> WorkflowResult:
     """Route a workflow plan to agents and collect their results.
 
@@ -99,11 +100,12 @@ def execute_workflow(
         timeout: Seconds to wait for each agent's reply.
         max_parallel_steps: Upper bound on concurrent dispatches in
             `parallel` mode.
+        workspace_data: The `data` fragment naming the code under analysis.
 
     Returns:
         One `StepResult` per plan step, in the plan's own step order.
     """
-    routing = route_plan(plan, registry)
+    routing = route_plan(plan, registry, workspace_data=workspace_data)
 
     with trace_workflow_execution(
         workflow_id=plan.workflow_id,
@@ -662,4 +664,5 @@ def dispatch_plan(
         transport if transport is not None else build_transport(dispatch_config),
         timeout=dispatch_config.request_timeout,
         max_parallel_steps=dispatch_config.max_parallel_steps,
+        workspace_data=dispatch_config.workspace.to_data(),
     )

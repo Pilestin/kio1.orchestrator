@@ -52,6 +52,44 @@ class TelemetryConfig:
 
 
 @dataclass(frozen=True)
+class Workspace:
+    """The code a workflow is about.
+
+    A KIO that analyses code needs to be told which code. The plan's `task`
+    is free text, so this travels in the execution message's `data` field —
+    the protocol's own extension point — under the keys KIO agents document.
+
+    Attributes:
+        path: Repository root, as the agents can see it. In a containerized
+            deployment this is the path inside the agent's container, not
+            KIO1's.
+        entry_point: Runnable script that reproduces the behaviour under
+            analysis, relative to `path`.
+    """
+
+    path: str = ""
+    entry_point: str = ""
+
+    def to_data(self) -> dict[str, Any]:
+        """Return the `data` fragment describing this workspace.
+
+        Returns:
+            The fragment to merge into an execution message's `data`, or an
+            empty object when nothing is configured, so a plan behaves
+            exactly as it did before a workspace existed.
+        """
+        fragment: dict[str, Any] = {}
+
+        if self.path:
+            fragment["repository"] = {"path": self.path}
+
+        if self.entry_point:
+            fragment["target"] = {"entry_point": self.entry_point}
+
+        return fragment
+
+
+@dataclass(frozen=True)
 class DispatchConfig:
     """Workflow dispatch configuration.
 
@@ -68,6 +106,7 @@ class DispatchConfig:
         nats_servers: NATS server URLs, required when transport is `nats`.
         nats_subject_template: Subject used for agents that do not name one
             themselves. `{agent}` is replaced with the lowercased agent id.
+        workspace: The repository and entry point agents should analyse.
     """
 
     enabled: bool = False
@@ -77,6 +116,7 @@ class DispatchConfig:
     registry: AgentRegistry = field(default_factory=lambda: AgentRegistry({}))
     nats_servers: tuple[str, ...] = ()
     nats_subject_template: str = "kio.{agent}.execute"
+    workspace: Workspace = field(default_factory=Workspace)
 
 
 @dataclass
@@ -247,6 +287,17 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
     if not isinstance(agents_data, dict):
         raise ValueError("dispatch.agents must be a JSON object.")
 
+    workspace_data = dispatch_data.get("workspace", {})
+    if not isinstance(workspace_data, dict):
+        raise ValueError("dispatch.workspace must be a JSON object.")
+
+    workspace_path = workspace_data.get("path", "")
+    entry_point = workspace_data.get("entry_point", "")
+
+    for name, value in (("path", workspace_path), ("entry_point", entry_point)):
+        if not isinstance(value, str):
+            raise ValueError(f"dispatch.workspace.{name} must be a string.")
+
     registry = load_agent_registry(agents_data)
 
     if enabled and not len(registry):
@@ -263,6 +314,10 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
         registry=registry,
         nats_servers=tuple(server.strip() for server in servers_data),
         nats_subject_template=subject_template,
+        workspace=Workspace(
+            path=workspace_path.strip(),
+            entry_point=entry_point.strip(),
+        ),
     )
 
 

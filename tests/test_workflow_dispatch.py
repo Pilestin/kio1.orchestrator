@@ -704,3 +704,110 @@ def test_an_unexpected_transport_error_fails_only_that_step(
     assert result.results[0].status == STATUS_OK
     assert result.results[1].status == STATUS_ERROR
     assert "RuntimeError: transport bug" == result.results[1].error
+
+
+# ── the code under analysis, carried in the protocol's data field ───────────
+
+
+def test_the_workspace_travels_in_the_data_field(registry: AgentRegistry) -> None:
+    from core.config_loader import Workspace
+
+    routing = route_plan(
+        parse_plan(build_plan_data()),
+        registry,
+        workspace_data=Workspace(
+            path="/work/repo", entry_point="reproduce.py"
+        ).to_data(),
+    )
+
+    assert routing.messages[0].to_payload() == {
+        "workflow_id": "wf-test01",
+        "step_id": "s1",
+        "agent_id": "KIO2",
+        "capability": "bug_localization",
+        "endpoint": "http://localhost:8102",
+        "task": "Locate the null dereference",
+        "data": {
+            "repository": {"path": "/work/repo"},
+            "target": {"entry_point": "reproduce.py"},
+        },
+    }
+
+
+def test_an_unset_workspace_leaves_data_empty(registry: AgentRegistry) -> None:
+    from core.config_loader import Workspace
+
+    routing = route_plan(
+        parse_plan(build_plan_data()),
+        registry,
+        workspace_data=Workspace().to_data(),
+    )
+
+    assert routing.messages[0].data == {}
+
+
+def test_a_partially_set_workspace_only_sends_what_it_knows() -> None:
+    from core.config_loader import Workspace
+
+    assert Workspace(path="/work/repo").to_data() == {
+        "repository": {"path": "/work/repo"}
+    }
+    assert Workspace(entry_point="reproduce.py").to_data() == {
+        "target": {"entry_point": "reproduce.py"}
+    }
+
+
+def test_the_workspace_and_upstream_results_coexist(
+    registry: AgentRegistry,
+) -> None:
+    # Both live under `data`, so one must not overwrite the other: an agent
+    # needs the repository path and its predecessor's output together.
+    from core.config_loader import DispatchConfig, Workspace
+
+    transport = RecordingTransport()
+    plan_data = build_plan_data(
+        [
+            {
+                "step_id": "s1",
+                "agent_id": "KIO2",
+                "capability": "bug_localization",
+                "task": "Locate the defect",
+            },
+            {
+                "step_id": "s2",
+                "agent_id": "KIO2",
+                "capability": "fix_recommendation",
+                "task": "Diagnose it",
+                "depends_on": ["s1"],
+            },
+        ],
+        execution_mode="mixed",
+    )
+
+    dispatch_plan(
+        plan_data,
+        DispatchConfig(
+            enabled=True,
+            request_timeout=5.0,
+            max_parallel_steps=2,
+            registry=registry,
+            workspace=Workspace(path="/work/repo", entry_point="reproduce.py"),
+        ),
+        transport,
+    )
+
+    second = next(m for m in transport.sent if m.step_id == "s2")
+    assert second.data["repository"] == {"path": "/work/repo"}
+    assert second.data["target"] == {"entry_point": "reproduce.py"}
+    assert second.data["upstream"] == {"s1": {"summary": "done"}}
+
+
+def test_the_repository_config_registers_kio2_without_fix_recommendation() -> None:
+    # KIO2 refuses fix_recommendation: per D2.6 UC-UC1-03 the patch is KIO7's
+    # step. Registering it would send KIO2 work it answers with an error.
+    config = load_config("config.json")
+    kio2 = config.dispatch.registry.resolve("KIO2")
+
+    assert kio2 is not None
+    assert "fix_recommendation" not in kio2.capabilities
+    assert {"bug_localization", "diagnosis"} <= kio2.capabilities

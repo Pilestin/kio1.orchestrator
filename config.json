@@ -19,14 +19,23 @@
         "deployment_environment": "local"
     },
     "dispatch": {
-        "enabled": true,
+        "enabled": false,
         "request_timeout": 60,
         "max_parallel_steps": 4,
+        "workspace": {
+            "path": "",
+            "entry_point": ""
+        },
         "agents": {
             "KIO2": {
                 "endpoint": "http://127.0.0.1:8102",
                 "path": "/execute",
-                "capabilities": ["bug_localization", "diagnosis", "fix_recommendation"]
+                "capabilities": [
+                    "bug_localization",
+                    "diagnosis",
+                    "replay",
+                    "trace_alignment"
+                ]
             },
             "KIO10": {
                 "endpoint": "http://127.0.0.1:8110",

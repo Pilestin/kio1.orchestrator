@@ -34,8 +34,23 @@ Strategy and Communication Protocol` document:
 
 ### `data`
 
-Usually `{}`. When the plan says your step depends on an earlier one, the
-earlier results arrive here, keyed by step id:
+Two things arrive here, and both may be present at once.
+
+**The code under analysis**, when KIO1 has been told what it is:
+
+```json
+"data": {
+  "repository": {"path": "/work/repo"},
+  "target": {"entry_point": "reproduce.py"}
+}
+```
+
+These come from `dispatch.workspace` in KIO1's `config.json`. The path is the
+one *your* service can see, so in a containerized deployment it is the path
+inside your container, not KIO1's. If the workspace is unset, neither key is
+sent — a KIO that does not analyse code needs neither.
+
+**Results from the steps you depend on**, keyed by step id:
 
 ```json
 "data": {
@@ -45,7 +60,7 @@ earlier results arrive here, keyed by step id:
 }
 ```
 
-Whether you use it is up to you. Ignoring it is valid.
+Whether you use either is up to you. Ignoring them is valid.
 
 ## 2. Reply
 
@@ -83,13 +98,18 @@ Add your KIO to `dispatch.agents` in KIO1's `config.json`:
 "KIO2": {
     "endpoint": "http://127.0.0.1:8102",
     "path": "/execute",
-    "capabilities": ["bug_localization", "diagnosis", "fix_recommendation"]
+    "capabilities": ["bug_localization", "diagnosis", "replay", "trace_alignment"]
 }
 ```
 
 `capabilities` must match the values in KIO1's system prompt for your agent. A
 step asking for a capability you did not declare is skipped rather than sent,
 which is a useful guard while things are being wired up.
+
+Declare only what you actually do. If a capability is registered here but your
+service refuses it, KIO1 dispatches the step and records the failure — the
+guard above cannot help, because the mismatch is between the config and your
+implementation rather than between the plan and the config.
 
 Use `127.0.0.1`, not `localhost`, for anything on the same machine: on Windows
 `localhost` tries IPv6 first and costs roughly two seconds per call against two
@@ -114,11 +134,9 @@ start `python main.py`, and ask something your KIO should handle. You will see
 a per-step table under the plan:
 
 ```text
-Workflow wf-bug-pay01 (sequential): 3 ok, 0 error, 1 not dispatched
-  s1   KIO2   bug_localization             ok        2 ms
-  s2   KIO2   diagnosis                    ok        2 ms
-  s3   KIO2   fix_recommendation           ok        26 ms
-  s4   KIO7   code_generation              skipped   no_endpoint
+Workflow wf-bug01-pricing (sequential): 2 ok, 0 error, 0 not dispatched
+  s1   KIO2   bug_localization             ok       854 ms
+  s2   KIO2   diagnosis                    ok       869 ms
 ```
 
 If your KIO is not ready yet, `tools/dummy_agent.py` stands in for it and

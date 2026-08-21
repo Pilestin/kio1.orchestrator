@@ -360,7 +360,12 @@ def descendants_of(plan: WorkflowPlan, step_id: str) -> frozenset[str]:
     return frozenset(found)
 
 
-def route_plan(plan: WorkflowPlan, registry: AgentRegistry) -> RoutingResult:
+def route_plan(
+    plan: WorkflowPlan,
+    registry: AgentRegistry,
+    *,
+    workspace_data: dict[str, Any] | None = None,
+) -> RoutingResult:
     """Turn plan steps into execution messages for the agents that exist.
 
     Steps addressed to agents without a configured endpoint are reported as
@@ -370,6 +375,9 @@ def route_plan(plan: WorkflowPlan, registry: AgentRegistry) -> RoutingResult:
     Args:
         plan: The validated workflow plan.
         registry: Registry of agents KIO1 can reach.
+        workspace_data: The `data` fragment naming the code under analysis,
+            attached to every message. Omitted means an empty `data`, which
+            is how plans behaved before a workspace could be configured.
 
     Returns:
         Execution messages for routable steps and a record of the rest.
@@ -422,6 +430,7 @@ def route_plan(plan: WorkflowPlan, registry: AgentRegistry) -> RoutingResult:
                 capability=step.capability,
                 endpoint=agent.endpoint,
                 task=step.task,
+                data=dict(workspace_data) if workspace_data else {},
             )
         )
 
