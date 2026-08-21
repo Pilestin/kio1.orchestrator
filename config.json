@@ -24,19 +24,19 @@
         "max_parallel_steps": 4,
         "agents": {
             "KIO2": {
-                "endpoint": "http://localhost:8102",
+                "endpoint": "http://127.0.0.1:8102",
                 "path": "/execute",
                 "capabilities": ["bug_localization", "diagnosis", "fix_recommendation"]
             },
             "KIO10": {
-                "endpoint": "http://localhost:8110",
+                "endpoint": "http://127.0.0.1:8110",
                 "path": "/execute",
                 "capabilities": ["tinyml", "energy_efficiency"]
             }
         }
     },
     "provider_options": {
-        "endpoint": "http://localhost:11434",
+        "endpoint": "http://127.0.0.1:11434",
         "context_window_size": 16384
     }
 }

@@ -10,7 +10,11 @@ from core.chat_history import (
 from core.config_loader import load_config
 from core.formatter import format_json, parse_response
 from core.prompt_loader import load_prompt
-from core.session_logger import generate_session_id, init_logger
+from core.session_logger import (
+    configure_console_encoding,
+    generate_session_id,
+    init_logger,
+)
 from core.telemetry import (
     init_telemetry,
     record_session_completed,
@@ -30,6 +34,8 @@ logger = logging.getLogger("main")
 
 def main() -> None:
     """Run the orchestrator terminal application."""
+    configure_console_encoding()
+
     try:
         session_id = generate_session_id()
         init_logger("logs", session_id)

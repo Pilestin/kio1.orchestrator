@@ -1,4 +1,5 @@
 import logging
+import sys
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -23,6 +24,32 @@ def _console_filter(record: logging.LogRecord) -> bool:
         False when the record comes from a silenced library, True otherwise.
     """
     return not record.name.startswith(_CONSOLE_SILENCED_PREFIXES)
+
+
+def configure_console_encoding() -> None:
+    """Make stdout and stderr able to carry any character a model produces.
+
+    On Windows the console defaults to the system code page, so a single
+    character outside it — models routinely emit arrows and dashes — raises
+    UnicodeEncodeError from `print` and takes the whole turn down with it.
+    Switching the streams to UTF-8 with replacement means an unrenderable
+    character degrades to a placeholder instead of losing the response.
+
+    Returns:
+        None.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+
+        if reconfigure is None:
+            continue
+
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            # A redirected or already-detached stream cannot be reconfigured.
+            # Printing is then someone else's problem, not a reason to fail.
+            pass
 
 
 def generate_session_id() -> str:
@@ -58,7 +85,7 @@ def init_logger(log_directory: str, session_id: str) -> logging.Logger:
     )
     formatter.converter = time.gmtime
 
-    file_handler = logging.FileHandler(log_path)
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
 

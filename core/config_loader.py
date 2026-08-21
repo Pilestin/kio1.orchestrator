@@ -276,7 +276,7 @@ def load_config(config_path: str = "config.json") -> Config:
         A `Config` instance populated from the file.
     """
     path = Path(config_path)
-    data: dict[str, Any] = json.loads(path.read_text())
+    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
 
     provider_options = data.get("provider_options", {})
 

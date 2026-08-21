@@ -29,7 +29,7 @@ def create_chat_file(
 
     filepath = directory / f"chat_{session_id}.jsonl"
     line = json.dumps({"role": "system", "content": system_prompt})
-    filepath.write_text(line + "\n")
+    filepath.write_text(line + "\n", encoding="utf-8")
     logger.info("Created chat file: path=%s", filepath)
     return filepath
 
@@ -45,7 +45,7 @@ def append_user_message(chat_file: Path, message: str) -> None:
         None.
     """
     line = json.dumps({"role": "user", "content": message})
-    with chat_file.open("a") as f:
+    with chat_file.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 
@@ -60,7 +60,7 @@ def append_assistant_message(chat_file: Path, message: str) -> None:
         None.
     """
     line = json.dumps({"role": "assistant", "content": message})
-    with chat_file.open("a") as f:
+    with chat_file.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 
@@ -73,7 +73,7 @@ def load_messages(chat_file: Path) -> list[dict[str, str]]:
     Returns:
         A list of message dicts with `role` and `content` keys.
     """
-    lines = chat_file.read_text().strip().split("\n")
+    lines = chat_file.read_text(encoding="utf-8").strip().split("\n")
     messages: list[dict[str, str]] = []
 
     for line in lines[1:]:

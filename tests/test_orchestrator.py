@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,7 +19,11 @@ from core.chat_history import (
 from core.config_loader import Config, TelemetryConfig, load_config
 from core.formatter import format_json
 from core.prompt_loader import load_prompt
-from core.session_logger import generate_session_id, init_logger
+from core.session_logger import (
+    configure_console_encoding,
+    generate_session_id,
+    init_logger,
+)
 from providers.anthropic_client import create_client as create_anthropic_client
 from providers.anthropic_client import extract_content as extract_anthropic_content
 from providers.anthropic_client import preload as preload_anthropic
@@ -1626,3 +1631,66 @@ class TestProviderLoading:
         """Verify a provider excluded from the caller's allowlist is rejected."""
         with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider("openai", frozenset({"ollama"}))
+
+
+class TestNonAsciiHandling:
+    """Model output is not restricted to the machine's code page."""
+
+    def test_chat_history_round_trips_characters_outside_the_code_page(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify a response containing an arrow survives being written and read.
+
+        Models routinely emit characters such as U+2192. Writing them with the
+        platform default encoding fails on a Windows console code page, which
+        previously lost the whole turn.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        chat_file = create_chat_file(str(tmp_path), "System prompt", "session1")
+        content = '{"explanation": "locate \u2192 diagnose \u2192 fix"}'
+
+        append_user_message(chat_file, "bug in payments \u2192 fix it")
+        append_assistant_message(chat_file, content)
+
+        messages = load_messages(chat_file)
+
+        assert messages[-2]["content"] == "bug in payments \u2192 fix it"
+        assert messages[-1]["content"] == content
+
+    def test_a_prompt_file_outside_the_code_page_loads(self, tmp_path: Path) -> None:
+        """Verify prompts are read as UTF-8 regardless of platform default.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        prompt_file = tmp_path / "prompt.txt"
+        prompt_file.write_text("Plan: requirements \u2192 code", encoding="utf-8")
+
+        assert load_prompt(str(prompt_file)) == "Plan: requirements \u2192 code"
+
+    def test_the_log_file_accepts_characters_outside_the_code_page(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify logging a model response does not raise an encoding error.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        log_dir = tmp_path / "logs"
+        init_logger(str(log_dir), "session1")
+
+        logging.getLogger("test").debug("Response: locate \u2192 diagnose")
+
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+
+        written = (log_dir / "log_session1.log").read_text(encoding="utf-8")
+        assert "\u2192" in written
+
+    def test_configure_console_encoding_makes_stdout_utf8(self) -> None:
+        """Verify the console is switched to UTF-8 so printing cannot fail."""
+        configure_console_encoding()
+
+        assert (sys.stdout.encoding or "").lower().replace("-", "") == "utf8"

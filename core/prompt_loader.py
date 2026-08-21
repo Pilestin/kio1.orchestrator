@@ -11,4 +11,4 @@ def load_prompt(prompt_path: str) -> str:
         The prompt text content as a string.
     """
     path = Path(prompt_path)
-    return path.read_text().strip()
+    return path.read_text(encoding="utf-8").strip()

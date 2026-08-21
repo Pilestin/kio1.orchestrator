@@ -1,5 +1,9 @@
 # Workflow Dispatch
 
+> Implementing a KIO rather than working on KIO1? See
+> [Connecting a KIO](connecting-a-kio.md) instead — it is the same contract
+> without the internals.
+
 KIO1 turns a user request into a workflow plan. This document describes the
 layer that takes that plan and actually sends its steps to KIO agents.
 
@@ -134,6 +138,12 @@ not say who fills it in. KIO1 owns that mapping, configured under
 An agent that is not listed is not an error. Plans routinely reference KIOs
 that are not deployed yet; those steps are reported as `skipped` and the rest
 of the workflow still runs.
+
+Prefer `127.0.0.1` over `localhost` for local agents. On Windows, `localhost`
+resolves to `::1` first, and an agent listening only on IPv4 is reached after
+that attempt times out — measured at roughly two seconds per dispatch against
+two milliseconds for `127.0.0.1`. Across an eight-step plan that is the
+difference between a workflow that feels instant and one that stalls.
 
 ## Dependencies
 

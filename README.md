@@ -70,6 +70,8 @@ python tools/dummy_agent.py --agent-id KIO2 --port 8102
 
 Steps can declare dependencies with an optional `depends_on` field, and a step's output is fed to the steps that depend on it through the protocol's own `data` field. Messages travel over HTTP by default, or over NATS with `dispatch.transport`; the message body is identical either way.
 
+If you own a KIO and want KIO1 to call it, [Connecting a KIO](docs/connecting-a-kio.md) is the whole contract on one page.
+
 See the [Workflow Dispatch Guide](docs/workflow-dispatch.md) for the message format, reply contract, dependencies, execution modes, transports, and known gaps.
 
 ## Services
@@ -106,5 +108,6 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Development Guide](docs/development.md) — Setup, testing, and contribution guidelines
 - [Troubleshooting](docs/troubleshooting.md) — Common errors and how to resolve them
 - [Services](docs/services.md) — Workflow API, Session Manager, and PostgreSQL
+- [Connecting a KIO](docs/connecting-a-kio.md) — What a KIO must accept and reply to be reachable
 - [Workflow Dispatch](docs/workflow-dispatch.md) — Sending plan steps to KIO agents
 - [Observability](docs/observability.md) — Tracing, metrics, storage, querying, and safe shutdown
