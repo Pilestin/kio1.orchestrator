@@ -96,6 +96,13 @@ settings. Deployment-specific values come from the environment:
 | `KIO1_SESSION_MANAGER_URL` | Workflow API | Session Manager base URL. Unset disables recording, and status lookups then fail. |
 | `KIO1_TEST_DATABASE_URL` | Tests | Enables the PostgreSQL repository tests; they are skipped when unset. |
 | `KIO1_TEST_NATS_SERVERS` | Tests | Enables the live NATS round-trip tests; they are skipped when unset. |
+| `KIO1_PROVIDER_ENDPOINT` | Both | Overrides `provider_options.endpoint`. |
+| `KIO1_AGENT_ENDPOINT_<AGENT_ID>` | Both | Overrides one agent's endpoint, e.g. `KIO1_AGENT_ENDPOINT_KIO2`. |
+
+`config.json` is committed and shared, but the model provider and the KIO
+agents sit at different addresses depending on where KIO1 runs. The last two
+variables exist for that: the file keeps a sensible local default and the
+environment wins wherever it differs.
 
 The Session Manager reads `config.json` for its telemetry settings. If that
 file is missing or unreadable it serves requests without tracing rather than
@@ -116,6 +123,28 @@ survives.
 NATS is started with JetStream enabled and its monitoring port on `8222`, so
 the broker is ready even though dispatch defaults to HTTP. Switch transports
 with `dispatch.transport` in `config.json`.
+
+### Reaching the model and the agents from a container
+
+`config.json` addresses them as `127.0.0.1`, which inside a container means
+the container itself. The compose file therefore redirects them to
+`host.docker.internal`, so Ollama and any KIO agent running on the developer
+machine stay reachable.
+
+That is only half of it: a service on the host must also accept connections
+from outside its own loopback interface. Ollama binds `127.0.0.1` by default
+and refuses the container, so start it with `OLLAMA_HOST=0.0.0.0`. A KIO agent
+needs the same — `tools/dummy_agent.py --host 0.0.0.0`, and KIO2 takes
+`KIO_HOST=0.0.0.0`.
+
+`Connection refused` from inside the container means the host was reached and
+nothing accepted; a name-resolution error would mean the redirect itself is
+not working.
+
+The Workflow API no longer refuses to start when the model provider is
+unreachable. It logs a warning and serves; requests fail individually until
+the provider comes back. A service that dies at boot takes down the status
+endpoint someone would use to find out why.
 
 To run the services from source against a containerized database, start
 PostgreSQL alone and then each service in its own terminal:

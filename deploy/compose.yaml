@@ -56,6 +56,12 @@ services:
       dockerfile: deploy/Dockerfile
     environment:
       KIO1_SESSION_MANAGER_URL: http://session-manager:8001
+      # config.json addresses the model and the agents as 127.0.0.1, which
+      # inside a container means the container itself. These redirect them to
+      # the developer machine, where Ollama and the KIO agents actually run.
+      KIO1_PROVIDER_ENDPOINT: http://host.docker.internal:11434
+      KIO1_AGENT_ENDPOINT_KIO2: http://host.docker.internal:8102
+      KIO1_AGENT_ENDPOINT_KIO10: http://host.docker.internal:8110
     ports:
       - "8000:8000"
     depends_on:
@@ -63,8 +69,7 @@ services:
         condition: service_started
       nats:
         condition: service_healthy
-    # The provider endpoint in config.json points at the host, not this
-    # network, so Ollama running on the developer machine stays reachable.
+    # Resolves host.docker.internal on Linux hosts, where it is not built in.
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

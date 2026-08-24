@@ -1,6 +1,10 @@
 {
     "provider": "ollama",
-    "allowed_providers": ["ollama", "openai", "anthropic"],
+    "allowed_providers": [
+        "ollama",
+        "openai",
+        "anthropic"
+    ],
     "model": "ministral-3:3b",
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
@@ -23,8 +27,8 @@
         "request_timeout": 60,
         "max_parallel_steps": 4,
         "workspace": {
-            "path": "",
-            "entry_point": ""
+            "path": "E:/Kodlar/AI4SWeng/Trace/py-test-codes-for-focustracer/codes",
+            "entry_point": "01_siparis_toplami_hesaplama.py"
         },
         "agents": {
             "KIO2": {
@@ -40,7 +44,10 @@
             "KIO10": {
                 "endpoint": "http://127.0.0.1:8110",
                 "path": "/execute",
-                "capabilities": ["tinyml", "energy_efficiency"]
+                "capabilities": [
+                    "tinyml",
+                    "energy_efficiency"
+                ]
             }
         }
     },

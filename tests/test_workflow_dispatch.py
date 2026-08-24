@@ -811,3 +811,86 @@ def test_the_repository_config_registers_kio2_without_fix_recommendation() -> No
     assert kio2 is not None
     assert "fix_recommendation" not in kio2.capabilities
     assert {"bug_localization", "diagnosis"} <= kio2.capabilities
+
+
+# ── per-deployment addresses come from the environment ──────────────────────
+
+
+def make_config_file(tmp_path: Any) -> str:
+    """Write a configuration naming addresses on the local machine."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "provider": "ollama",
+                "allowed_providers": ["ollama"],
+                "model": "test-model",
+                "prompt_path": "prompts/test.txt",
+                "chat_directory": "chats",
+                "temperature": 0.2,
+                "request_timeout": 120,
+                "provider_options": {"endpoint": "http://127.0.0.1:11434"},
+                "dispatch": {
+                    "enabled": True,
+                    "agents": {
+                        "KIO2": {"endpoint": "http://127.0.0.1:8102"},
+                        "KIO10": {"endpoint": "http://127.0.0.1:8110"},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    return str(config_path)
+
+
+def test_the_provider_endpoint_can_be_overridden(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Inside a container 127.0.0.1 is the container itself, so a committed
+    # config cannot name the model host for every deployment.
+    monkeypatch.setenv("KIO1_PROVIDER_ENDPOINT", "http://host.docker.internal:11434")
+
+    config = load_config(make_config_file(tmp_path))
+
+    assert config.provider_options["endpoint"] == "http://host.docker.internal:11434"
+
+
+def test_one_agent_endpoint_can_be_overridden_without_touching_the_others(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KIO1_AGENT_ENDPOINT_KIO2", "http://host.docker.internal:8102")
+
+    config = load_config(make_config_file(tmp_path))
+    kio2 = config.dispatch.registry.resolve("KIO2")
+    kio10 = config.dispatch.registry.resolve("KIO10")
+
+    assert kio2 is not None and kio2.endpoint == "http://host.docker.internal:8102"
+    assert kio10 is not None and kio10.endpoint == "http://127.0.0.1:8110"
+
+
+def test_an_empty_override_is_ignored(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KIO1_PROVIDER_ENDPOINT", "   ")
+    monkeypatch.setenv("KIO1_AGENT_ENDPOINT_KIO2", "")
+
+    config = load_config(make_config_file(tmp_path))
+    kio2 = config.dispatch.registry.resolve("KIO2")
+
+    assert config.provider_options["endpoint"] == "http://127.0.0.1:11434"
+    assert kio2 is not None and kio2.endpoint == "http://127.0.0.1:8102"
+
+
+def test_without_overrides_the_file_is_used(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("KIO1_PROVIDER_ENDPOINT", raising=False)
+    monkeypatch.delenv("KIO1_AGENT_ENDPOINT_KIO2", raising=False)
+
+    config = load_config(make_config_file(tmp_path))
+    kio2 = config.dispatch.registry.resolve("KIO2")
+
+    assert config.provider_options["endpoint"] == "http://127.0.0.1:11434"
+    assert kio2 is not None and kio2.endpoint == "http://127.0.0.1:8102"

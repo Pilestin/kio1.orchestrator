@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,35 @@ logger = logging.getLogger(__name__)
 # collector is a legitimate way to exercise the export-failure path.
 _ALLOWED_DISPATCH_TRANSPORTS = frozenset({"http", "nats"})
 
+# Addresses that differ between running on a developer machine and running in
+# a container. `config.json` is committed and shared; these are per-deployment,
+# so the environment wins over the file.
+PROVIDER_ENDPOINT_ENV = "KIO1_PROVIDER_ENDPOINT"
+AGENT_ENDPOINT_ENV_PREFIX = "KIO1_AGENT_ENDPOINT_"
+
 _PLACEHOLDER_OTLP_HOSTS = ("your_host", "your-host", "changeme", "example.com")
+
+
+def _agent_endpoint_overrides() -> dict[str, str]:
+    """Return per-agent endpoint overrides taken from the environment.
+
+    `KIO1_AGENT_ENDPOINT_KIO2=http://host.docker.internal:8102` redirects KIO2
+    without editing the committed configuration. Agent ids are matched
+    case-insensitively, since environment variables are conventionally
+    uppercase.
+
+    Returns:
+        Uppercased agent id mapped to the endpoint to use instead.
+    """
+    overrides: dict[str, str] = {}
+
+    for name, value in os.environ.items():
+        if not name.startswith(AGENT_ENDPOINT_ENV_PREFIX) or not value.strip():
+            continue
+
+        overrides[name[len(AGENT_ENDPOINT_ENV_PREFIX) :].upper()] = value.strip()
+
+    return overrides
 
 
 def _is_placeholder_host(hostname: str | None) -> bool:
@@ -298,6 +327,20 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
         if not isinstance(value, str):
             raise ValueError(f"dispatch.workspace.{name} must be a string.")
 
+    overrides = _agent_endpoint_overrides()
+
+    for agent_id, agent_data in agents_data.items():
+        override = overrides.get(str(agent_id).upper())
+
+        if override is not None and isinstance(agent_data, dict):
+            logger.info(
+                "Agent endpoint overridden from the environment: agent_id=%s "
+                "endpoint=%s",
+                agent_id,
+                override,
+            )
+            agent_data["endpoint"] = override
+
     registry = load_agent_registry(agents_data)
 
     if enabled and not len(registry):
@@ -337,6 +380,15 @@ def load_config(config_path: str = "config.json") -> Config:
 
     if not isinstance(provider_options, dict):
         raise ValueError("provider_options must be a JSON object.")
+
+    provider_endpoint = os.environ.get(PROVIDER_ENDPOINT_ENV, "").strip()
+
+    if provider_endpoint:
+        logger.info(
+            "Provider endpoint overridden from the environment: %s",
+            provider_endpoint,
+        )
+        provider_options = {**provider_options, "endpoint": provider_endpoint}
 
     telemetry = _load_telemetry_config(data)
     dispatch = _load_dispatch_config(data)

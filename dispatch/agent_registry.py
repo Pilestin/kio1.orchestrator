@@ -86,6 +86,19 @@ class AgentRegistry:
         return self._agents.get(agent_id)
 
 
+def _looks_like_a_filesystem_path(value: str) -> bool:
+    """Report whether a value reads as a directory rather than a URL path.
+
+    Args:
+        value: The configured value.
+
+    Returns:
+        True for Windows drive letters and backslash separators, the two
+        shapes a copied directory arrives in.
+    """
+    return "\\" in value or (len(value) > 1 and value[1] == ":")
+
+
 def load_agent_registry(agents_data: dict[str, object]) -> AgentRegistry:
     """Build an `AgentRegistry` from the `dispatch.agents` configuration block.
 
@@ -127,9 +140,21 @@ def load_agent_registry(agents_data: dict[str, object]) -> AgentRegistry:
 
         path = agent_data.get("path", "/execute")
         if not isinstance(path, str) or not path.startswith("/"):
+            # Two different settings are called "path", and this is the one
+            # people reach for by mistake. Say so, rather than repeating the
+            # rule they just failed to guess.
+            hint = ""
+            if isinstance(path, str) and _looks_like_a_filesystem_path(path):
+                hint = (
+                    " This looks like a directory. The repository agents "
+                    "should analyse goes in dispatch.workspace.path; "
+                    f"dispatch.agents.{agent_id}.path is the HTTP request "
+                    "path the agent serves, such as '/execute'."
+                )
+
             raise ValueError(
                 f"dispatch.agents.{agent_id}.path must be a string starting "
-                "with '/'."
+                f"with '/'.{hint}"
             )
 
         subject = agent_data.get("subject")
