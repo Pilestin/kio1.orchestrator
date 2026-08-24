@@ -109,6 +109,9 @@ Rules KIO1 applies when reading a reply:
 | Situation | KIO1 behaviour |
 |-----------|----------------|
 | `status` missing | Treated as `ok`, so agents can be brought up incrementally |
+| `output.verdict` is `defect` / `clean` / `inconclusive` | Recorded and shown next to the step |
+| `output.verdict` is anything else | Ignored, with a warning |
+| `output.hitl_required` is `true` | Shown as `review required` |
 | `status: "error"` | Step fails, `error` is surfaced to the user |
 | `workflow_id` or `step_id` missing or mismatched | Warning logged, step still counted |
 | Non-2xx HTTP status | Step fails with the status code and a truncated body |
@@ -215,6 +218,21 @@ Failure is scoped to the graph rather than the whole plan. If a step fails, or
 was skipped because its agent is not deployed, only the steps that depend on
 it become `not_run`; unrelated branches still run. Their input was never
 produced, so dispatching them would spend a call to get a misleading answer.
+
+## Verdicts
+
+`status` says whether the call worked; it does not say what the agent found.
+An agent that inspects code and reports it is fine has succeeded, so a clean
+result is `status: "ok"`. Without reading the verdict, that is indistinguishable
+from finding a defect:
+
+```text
+  s1   KIO2   bug_localization   ok   911 ms  defect
+  s1   KIO2   bug_localization   ok   995 ms  clean
+```
+
+Both fields are optional and additive: an agent that sets neither produces
+exactly the output it did before they were read.
 
 ## Step statuses
 

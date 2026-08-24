@@ -86,6 +86,37 @@ Answer with HTTP `200` even when `status` is `"error"`. A non-2xx status is
 read as *your service is broken*, which is a different thing from *the task
 failed*.
 
+### Saying what you concluded
+
+`status` says whether the call worked. It does not say what you found, and
+those are different questions: an agent that inspects code and reports it is
+fine has **succeeded**. Reporting that as an error would fail every workflow
+run over healthy code.
+
+Two optional fields inside `output` carry the conclusion. KIO1 reads both and
+shows them next to the step:
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `verdict` | `"defect"`, `"clean"`, `"inconclusive"` | What you concluded. Anything else is ignored. |
+| `hitl_required` | `true` | You want a human to look, usually because you were not confident. Only a real boolean counts. |
+
+```json
+{ "status": "ok",
+  "output": { "verdict": "clean", "findings": [], "hitl_required": false } }
+```
+
+```text
+  s1   KIO2   bug_localization   ok   911 ms  defect
+  s1   KIO2   bug_localization   ok   995 ms  clean
+```
+
+Without `verdict` those two lines are identical. Say it explicitly rather than
+leaving a reader to infer it from the length of a list.
+
+Both fields are optional. An agent that sets neither behaves exactly as before
+they existed.
+
 > This reply format is **not** in the shared protocol document, which defines
 > only the request. It is KIO1's current proposal and still needs consortium
 > agreement. Raise it if it does not fit your KIO.
@@ -164,3 +195,8 @@ service must be listening when the message is sent.
 - **Parallel calls.** In a plan where several steps are independent, KIO1 may
   call you more than once at the same time. Handle concurrent requests.
 - **No retries.** A failed call is reported, not retried.
+- **Work that needs an earlier step's output.** If your capability only makes
+  sense after another step ran — replaying a recording, comparing two runs —
+  say so, so KIO1's planning prompt can require a `depends_on` and hand you the
+  earlier result through `data.upstream`. A capability that silently assumes a
+  predecessor will be called first and fail.

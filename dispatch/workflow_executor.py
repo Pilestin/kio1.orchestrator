@@ -32,6 +32,16 @@ STATUS_ERROR = "error"
 STATUS_SKIPPED = "skipped"
 STATUS_NOT_RUN = "not_run"
 
+# Optional fields an agent may put in its `output` to say what it concluded,
+# separately from whether the call succeeded. An agent that reports code is
+# clean has *succeeded*; without reading these, "nothing wrong here" and
+# "found the defect" are indistinguishable in a result table.
+VERDICT_DEFECT = "defect"
+VERDICT_CLEAN = "clean"
+VERDICT_INCONCLUSIVE = "inconclusive"
+
+_KNOWN_VERDICTS = frozenset({VERDICT_DEFECT, VERDICT_CLEAN, VERDICT_INCONCLUSIVE})
+
 
 @dataclass(frozen=True)
 class StepResult:
@@ -45,6 +55,11 @@ class StepResult:
         duration_ms: Wall-clock time spent dispatching, zero when not dispatched.
         output: The agent's `output` object, when it answered successfully.
         error: A human-readable failure reason, when the step did not succeed.
+        verdict: What the agent concluded, when it said so: `defect`, `clean`,
+            or `inconclusive`. Independent of `status`, which only says whether
+            the call itself worked.
+        review_required: Whether the agent asked for a human to look, usually
+            because it was not confident.
     """
 
     step_id: str
@@ -54,6 +69,8 @@ class StepResult:
     duration_ms: int = 0
     output: dict[str, Any] | None = None
     error: str | None = None
+    verdict: str | None = None
+    review_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -504,7 +521,48 @@ def _dispatch_step(
         status=STATUS_OK,
         duration_ms=elapsed_ms,
         output=output if isinstance(output, dict) else None,
+        verdict=_verdict_of(output),
+        review_required=_review_required_of(output),
     )
+
+
+def _verdict_of(output: Any) -> str | None:
+    """Return the agent's verdict, when it reported a recognized one.
+
+    Args:
+        output: The agent's `output` object, whatever shape it had.
+
+    Returns:
+        `defect`, `clean`, or `inconclusive`, or None when the agent said
+        nothing or used a value KIO1 does not know how to present.
+    """
+    if not isinstance(output, dict):
+        return None
+
+    verdict = output.get("verdict")
+
+    if not isinstance(verdict, str):
+        return None
+
+    normalized = verdict.strip().lower()
+
+    if normalized not in _KNOWN_VERDICTS:
+        logger.warning("Ignoring an unrecognized verdict: %r", verdict)
+        return None
+
+    return normalized
+
+
+def _review_required_of(output: Any) -> bool:
+    """Return whether the agent asked for human review.
+
+    Args:
+        output: The agent's `output` object, whatever shape it had.
+
+    Returns:
+        True only when the agent set the flag to a true boolean.
+    """
+    return isinstance(output, dict) and output.get("hitl_required") is True
 
 
 def _warn_on_correlation_mismatch(
@@ -616,7 +674,15 @@ def render_summary(result: WorkflowResult) -> str:
         detail = ""
 
         if step.status == STATUS_OK:
-            detail = f"{step.duration_ms} ms"
+            notes = [f"{step.duration_ms} ms"]
+
+            if step.verdict is not None:
+                notes.append(step.verdict)
+
+            if step.review_required:
+                notes.append("review required")
+
+            detail = "  ".join(notes)
         elif step.error:
             detail = step.error
 

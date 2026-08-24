@@ -67,6 +67,8 @@ Respond **ONLY** with valid JSON.
 
 2. **Step Ordering**:
    - Bug localization (KIO2) should come before diagnosis (KIO2), and diagnosis before code generation (KIO7). KIO2 never generates the fix itself.
+   - KIO2's replay and trace_alignment work on a recording made by an earlier KIO2 step, so they MUST follow a bug_localization or diagnosis step and declare it in depends_on. Never make one the first step of a plan.
+   - Only add replay or trace_alignment when the request actually asks to step through a failure or compare runs. A plain bug report does not need them.
    - Requirements (KIO3) should come before architecture (KIO4).
    - Architecture (KIO4) should come before code generation (KIO7).
    - Code generation (KIO7) should come before testing (KIO11).

@@ -894,3 +894,101 @@ def test_without_overrides_the_file_is_used(
 
     assert config.provider_options["endpoint"] == "http://127.0.0.1:11434"
     assert kio2 is not None and kio2.endpoint == "http://127.0.0.1:8102"
+
+
+# ── what an agent concluded, separate from whether the call worked ──────────
+
+
+def reply_with(output: dict[str, Any] | None) -> dict[str, Any]:
+    """Build a successful agent reply carrying the given output."""
+    return {
+        "workflow_id": "wf-test01",
+        "step_id": "s1",
+        "agent_id": "KIO2",
+        "status": "ok",
+        "output": output,
+        "error": None,
+    }
+
+
+@pytest.mark.parametrize("verdict", ["defect", "clean", "inconclusive"])
+def test_a_reported_verdict_is_carried_on_the_result(
+    registry: AgentRegistry, verdict: str
+) -> None:
+    transport = RecordingTransport({"s1": reply_with({"verdict": verdict})})
+
+    result = execute(build_plan_data(), registry, transport)
+
+    assert result.results[0].status == STATUS_OK
+    assert result.results[0].verdict == verdict
+
+
+def test_a_clean_verdict_is_still_a_successful_step(
+    registry: AgentRegistry,
+) -> None:
+    # An agent that reports code is fine has succeeded. Treating that as a
+    # failure would fail every workflow run over healthy code.
+    transport = RecordingTransport(
+        {"s1": reply_with({"verdict": "clean", "defect_found": False, "findings": []})}
+    )
+
+    result = execute(build_plan_data(), registry, transport)
+
+    assert result.succeeded == 1
+    assert result.failed == 0
+    assert result.results[0].verdict == "clean"
+
+
+def test_an_agent_that_reports_no_verdict_is_unaffected(
+    registry: AgentRegistry,
+) -> None:
+    result = execute(build_plan_data(), registry, RecordingTransport())
+
+    assert result.results[0].status == STATUS_OK
+    assert result.results[0].verdict is None
+    assert result.results[0].review_required is False
+
+
+@pytest.mark.parametrize("bad", ["maybe", "", 3, None, ["defect"]])
+def test_an_unrecognized_verdict_is_ignored(registry: AgentRegistry, bad: Any) -> None:
+    transport = RecordingTransport({"s1": reply_with({"verdict": bad})})
+
+    result = execute(build_plan_data(), registry, transport)
+
+    assert result.results[0].status == STATUS_OK
+    assert result.results[0].verdict is None
+
+
+def test_a_request_for_human_review_is_carried(registry: AgentRegistry) -> None:
+    transport = RecordingTransport(
+        {"s1": reply_with({"verdict": "defect", "hitl_required": True})}
+    )
+
+    result = execute(build_plan_data(), registry, transport)
+
+    assert result.results[0].review_required is True
+
+
+def test_a_non_boolean_review_flag_is_not_treated_as_a_request(
+    registry: AgentRegistry,
+) -> None:
+    transport = RecordingTransport({"s1": reply_with({"hitl_required": "yes"})})
+
+    result = execute(build_plan_data(), registry, transport)
+
+    assert result.results[0].review_required is False
+
+
+def test_the_summary_shows_the_verdict_and_the_review_request(
+    registry: AgentRegistry,
+) -> None:
+    # Without this, "nothing wrong here" and "found the defect" print
+    # identically as `ok`.
+    transport = RecordingTransport(
+        {"s1": reply_with({"verdict": "clean", "hitl_required": True})}
+    )
+
+    summary = render_summary(execute(build_plan_data(), registry, transport))
+
+    assert "clean" in summary
+    assert "review required" in summary
