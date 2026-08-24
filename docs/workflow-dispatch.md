@@ -329,6 +329,42 @@ Useful flags:
 It also answers `GET /health`, so reachability can be checked without
 sending a workflow step.
 
+## The stub fleet
+
+One stub is enough to test one step. A plan spanning the development lifecycle
+names most of KIO2-KIO13, and with only KIO2 deployed nearly every step comes
+back `skipped` — correct, but it shows nothing of the orchestration working.
+
+```bash
+python tools/dummy_fleet.py
+```
+
+That starts one stub per KIO on the registry's port convention (`KIO<N>` on
+`81<NN>`, so KIO7 is 8107), each declaring the capabilities KIO1's system
+prompt lists for it and answering with a plausible canned result. KIO2 is left
+out by default so a stub does not take the port from the real service; add it
+with `--include KIO2`.
+
+`--print-config` emits the matching `dispatch.agents` block, and `--host
+0.0.0.0` makes the stubs reachable from a container.
+
+With the fleet up, a full request runs to completion:
+
+```text
+Workflow wf-med-sched01 (sequential): 7 ok, 0 error, 0 not dispatched
+  s1   KIO3   requirements_engineering     ok         2 ms  clean
+  s2   KIO4   architecture_design          ok        25 ms  clean
+  s3   KIO7   code_generation              ok         2 ms  clean
+  s4   KIO9   compliance_review            ok        12 ms  defect  review required
+  s5   KIO12  cybersecurity_validation     ok         2 ms  defect
+  s6   KIO11  test_automation              ok         1 ms  defect
+  s7   KIO8   deployment                   ok        26 ms  clean
+```
+
+The canned answers deliberately disagree with each other — some report a
+defect, one asks for human review — so the verdict handling is visible rather
+than every step looking alike.
+
 ## Known gaps
 
 These are deliberate omissions, listed so they are not mistaken for

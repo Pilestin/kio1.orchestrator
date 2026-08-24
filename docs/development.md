@@ -57,6 +57,7 @@ services/                      - HTTP services
 
 tools/                         - Developer utilities
   dummy_agent.py               - Stub KIO agent for protocol validation
+  dummy_fleet.py               - One stub per KIO, for running a whole plan
 
 deploy/                        - Dockerfile and compose stack
 

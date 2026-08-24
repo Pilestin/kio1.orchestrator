@@ -40,6 +40,7 @@ _MAX_REQUEST_BYTES = 1_048_576
 _CAPABILITY_OUTPUTS: dict[str, dict[str, Any]] = {
     "bug_localization": {
         "summary": "Located 1 candidate defect.",
+        "verdict": "defect",
         "findings": [
             {
                 "file": "payment/processor.py",
@@ -51,20 +52,173 @@ _CAPABILITY_OUTPUTS: dict[str, dict[str, Any]] = {
     },
     "diagnosis": {
         "summary": "Null dereference reachable from the retry path.",
+        "verdict": "defect",
         "root_cause": "process_refund() assumes lookup_account() never returns None.",
     },
     "fix_recommendation": {
         "summary": "Guard the lookup result before use.",
+        "verdict": "defect",
         "patch_hint": "if account is None: raise AccountNotFound(account_id)",
     },
-    "energy_efficiency": {
-        "summary": "Edge deployment is feasible with quantization.",
-        "estimated_energy_mj": 41.6,
-        "recommendations": ["int8 quantization", "batch size 1 on-device"],
+    "requirements_engineering": {
+        "summary": "Derived 6 functional and 2 non-functional requirements.",
+        "verdict": "clean",
+        "requirements": [
+            {"id": "FR-01", "text": "A user can register with an email address."},
+            {"id": "FR-02", "text": "A registered user can sign in."},
+            {"id": "NFR-01", "text": "A request answers within 300 ms at p95."},
+        ],
+    },
+    "user_stories": {
+        "summary": "Wrote 4 user stories with acceptance criteria.",
+        "verdict": "clean",
+        "stories": [
+            {
+                "as_a": "customer",
+                "i_want": "to see my order total before paying",
+                "so_that": "there are no surprises at checkout",
+            }
+        ],
+    },
+    "acceptance_criteria": {
+        "summary": "Defined 9 acceptance criteria across 4 stories.",
+        "verdict": "clean",
+        "criteria": ["Given an empty cart, the total is 0.00"],
+    },
+    "architecture_design": {
+        "summary": "Proposed a 3-component service with a relational store.",
+        "verdict": "clean",
+        "components": [
+            {"name": "api", "responsibility": "HTTP surface and validation"},
+            {"name": "domain", "responsibility": "pricing and order rules"},
+            {"name": "store", "responsibility": "persistence"},
+        ],
+        "decisions": [
+            "Keep pricing rules out of the HTTP layer so they can be tested alone."
+        ],
+    },
+    "component_design": {
+        "summary": "Detailed the pricing component: 2 interfaces, 1 value object.",
+        "verdict": "clean",
+        "interfaces": ["PriceCalculator.total(items) -> Money"],
+    },
+    "synthetic_data_generation": {
+        "summary": "Generated 500 order records across 4 customer tiers.",
+        "verdict": "clean",
+        "record_count": 500,
+        "sample": {"order_id": "o-0001", "tier": "gold", "items": 3, "total": 184.5},
+    },
+    "data_validation": {
+        "summary": "Validated 500 records; 3 failed the tier constraint.",
+        "verdict": "defect",
+        "checked": 500,
+        "violations": [
+            {"record": "o-0184", "rule": "tier must be one of gold/silver/bronze"}
+        ],
+    },
+    "quality_analysis": {
+        "summary": "Completeness 99.4%, no duplicate keys, 1 skewed column.",
+        "verdict": "clean",
+        "completeness_pct": 99.4,
+    },
+    "code_generation": {
+        "summary": "Generated 3 files and 1 test module.",
+        "verdict": "clean",
+        "files": [
+            {"path": "app/main.py", "lines": 42},
+            {"path": "app/pricing.py", "lines": 61},
+            {"path": "tests/test_pricing.py", "lines": 38},
+        ],
+        "notes": "Guards an empty item list before dividing, per the diagnosis.",
+    },
+    "code_understanding": {
+        "summary": "Mapped 12 functions across 4 modules and their call graph.",
+        "verdict": "clean",
+        "entry_points": ["app/main.py:main"],
+    },
+    "build": {
+        "summary": "Build succeeded in 12.4 s; 1 warning.",
+        "verdict": "clean",
+        "artifact": "dist/app-1.0.0.whl",
+    },
+    "deployment": {
+        "summary": "Deployed to staging; health checks green.",
+        "verdict": "clean",
+        "environment": "staging",
+        "url": "https://staging.example.invalid",
+    },
+    "devops": {
+        "summary": "Pipeline defined: lint, test, build, deploy.",
+        "verdict": "clean",
+        "stages": ["lint", "test", "build", "deploy"],
+    },
+    "packaging": {
+        "summary": "Packaged for linux/amd64 and linux/arm64.",
+        "verdict": "clean",
+        "platforms": ["linux/amd64", "linux/arm64"],
+    },
+    "responsible_ai": {
+        "summary": "No personal data leaves the service; 1 logging concern.",
+        "verdict": "defect",
+        "concerns": [
+            {
+                "severity": "medium",
+                "detail": "Customer email is written to the request log.",
+            }
+        ],
+    },
+    "compliance_review": {
+        "summary": "GDPR review passed with 1 action before release.",
+        "verdict": "defect",
+        "actions": ["Add a retention policy for order records."],
+        "hitl_required": True,
     },
     "tinyml": {
         "summary": "Model fits a 512 KB flash budget after pruning.",
+        "verdict": "clean",
         "model_size_kb": 428,
+    },
+    "energy_efficiency": {
+        "summary": "Edge deployment is feasible with quantization.",
+        "verdict": "clean",
+        "estimated_energy_mj": 41.6,
+        "recommendations": ["int8 quantization", "batch size 1 on-device"],
+    },
+    "test_automation": {
+        "summary": "Generated 18 tests; 17 pass, 1 fails.",
+        "verdict": "defect",
+        "total": 18,
+        "passed": 17,
+        "failed": [
+            {
+                "test": "tests/test_pricing.py::test_empty_cart",
+                "error": "ZeroDivisionError",
+            }
+        ],
+    },
+    "validation": {
+        "summary": "All acceptance criteria met.",
+        "verdict": "clean",
+        "criteria_met": 9,
+        "criteria_total": 9,
+    },
+    "cybersecurity_validation": {
+        "summary": "No critical findings; 2 medium issues.",
+        "verdict": "defect",
+        "findings": [
+            {"severity": "medium", "detail": "Missing rate limiting on /orders."},
+            {"severity": "medium", "detail": "Dependency with a known advisory."},
+        ],
+    },
+    "developer_training": {
+        "summary": "Prepared a 4-module onboarding path.",
+        "verdict": "clean",
+        "modules": ["Repository tour", "Local setup", "Testing", "Release"],
+    },
+    "onboarding": {
+        "summary": "Checklist for a new developer's first week.",
+        "verdict": "clean",
+        "steps": ["Clone and install", "Run the suite", "Ship a small change"],
     },
 }
 

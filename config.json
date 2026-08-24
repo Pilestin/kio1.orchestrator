@@ -32,7 +32,7 @@
         },
         "agents": {
             "KIO2": {
-                "endpoint": "http://127.0.0.1:8102",
+                "endpoint": "http://localhost:8102",
                 "path": "/execute",
                 "capabilities": [
                     "bug_localization",
@@ -41,12 +41,93 @@
                     "trace_alignment"
                 ]
             },
+            "KIO3": {
+                "endpoint": "http://127.0.0.1:8103",
+                "path": "/execute",
+                "capabilities": [
+                    "requirements_engineering",
+                    "user_stories",
+                    "acceptance_criteria"
+                ]
+            },
+            "KIO4": {
+                "endpoint": "http://127.0.0.1:8104",
+                "path": "/execute",
+                "capabilities": [
+                    "architecture_design",
+                    "component_design"
+                ]
+            },
+            "KIO5": {
+                "endpoint": "http://127.0.0.1:8105",
+                "path": "/execute",
+                "capabilities": [
+                    "synthetic_data_generation"
+                ]
+            },
+            "KIO6": {
+                "endpoint": "http://127.0.0.1:8106",
+                "path": "/execute",
+                "capabilities": [
+                    "data_validation",
+                    "quality_analysis"
+                ]
+            },
+            "KIO7": {
+                "endpoint": "http://127.0.0.1:8107",
+                "path": "/execute",
+                "capabilities": [
+                    "code_generation",
+                    "code_understanding"
+                ]
+            },
+            "KIO8": {
+                "endpoint": "http://127.0.0.1:8108",
+                "path": "/execute",
+                "capabilities": [
+                    "build",
+                    "deployment",
+                    "devops",
+                    "packaging"
+                ]
+            },
+            "KIO9": {
+                "endpoint": "http://127.0.0.1:8109",
+                "path": "/execute",
+                "capabilities": [
+                    "responsible_ai",
+                    "compliance_review"
+                ]
+            },
             "KIO10": {
                 "endpoint": "http://127.0.0.1:8110",
                 "path": "/execute",
                 "capabilities": [
                     "tinyml",
                     "energy_efficiency"
+                ]
+            },
+            "KIO11": {
+                "endpoint": "http://127.0.0.1:8111",
+                "path": "/execute",
+                "capabilities": [
+                    "test_automation",
+                    "validation"
+                ]
+            },
+            "KIO12": {
+                "endpoint": "http://127.0.0.1:8112",
+                "path": "/execute",
+                "capabilities": [
+                    "cybersecurity_validation"
+                ]
+            },
+            "KIO13": {
+                "endpoint": "http://127.0.0.1:8113",
+                "path": "/execute",
+                "capabilities": [
+                    "developer_training",
+                    "onboarding"
                 ]
             }
         }

@@ -62,7 +62,15 @@ See the [Observability Guide](docs/observability.md) for configuration, querying
 
 KIO1 can send the steps of a generated plan to the KIO agents that carry them out, following the `KIO1 - KIO10` integration protocol. Dispatch is disabled by default; enable it with `dispatch.enabled` in `config.json` and list the reachable agents under `dispatch.agents`.
 
-A dependency-free stub agent is included for validating the protocol before real agents exist:
+Only KIO2 exists as a real service today, so most plan steps have nowhere to go and are
+reported as `skipped`. To watch a whole plan execute, start a stand-in for every KIO:
+
+```bash
+python tools/dummy_fleet.py
+```
+
+Their answers are canned — nothing does real work — but the plan runs end to end, results
+flow between steps, and everything is recorded. A single stub is also available:
 
 ```bash
 python tools/dummy_agent.py --agent-id KIO2 --port 8102
