@@ -92,9 +92,13 @@ make services
 
 That starts PostgreSQL, the Session Manager on port 8001, and the Workflow API on port 8000.
 
+There is no prompt in a container: `http://localhost:8000/docs` gives a browser form, or
+
 ```bash
 curl -X POST http://localhost:8000/workflow/run -H 'Content-Type: application/json' -d '{"request":"fix the null pointer exception in the payment module"}'
 ```
+
+which answers with a session id to poll for the result.
 
 See the [Services Guide](docs/services.md) for the full route reference, configuration, and known gaps.
 

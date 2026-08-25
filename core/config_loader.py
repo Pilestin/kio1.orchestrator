@@ -22,6 +22,10 @@ _ALLOWED_DISPATCH_TRANSPORTS = frozenset({"http", "nats"})
 # so the environment wins over the file.
 PROVIDER_ENDPOINT_ENV = "KIO1_PROVIDER_ENDPOINT"
 AGENT_ENDPOINT_ENV_PREFIX = "KIO1_AGENT_ENDPOINT_"
+# Every agent usually moves together — from a laptop's loopback to the Docker
+# host, say — so one variable rehosts all of them. Naming an agent explicitly
+# still wins, and adding an agent to the file needs no new variable.
+AGENT_HOST_ENV = "KIO1_AGENT_HOST"
 
 _PLACEHOLDER_OTLP_HOSTS = ("your_host", "your-host", "changeme", "example.com")
 
@@ -46,6 +50,27 @@ def _agent_endpoint_overrides() -> dict[str, str]:
         overrides[name[len(AGENT_ENDPOINT_ENV_PREFIX) :].upper()] = value.strip()
 
     return overrides
+
+
+def _rehost(endpoint: str, host: str) -> str:
+    """Return an endpoint pointing at a different host, port and scheme intact.
+
+    Args:
+        endpoint: The configured endpoint.
+        host: The host to substitute.
+
+    Returns:
+        The endpoint with its host replaced, or unchanged if it cannot be
+        parsed.
+    """
+    parsed = urlparse(endpoint)
+
+    if not parsed.scheme or not parsed.netloc:
+        return endpoint
+
+    netloc = host if parsed.port is None else f"{host}:{parsed.port}"
+
+    return parsed._replace(netloc=netloc).geturl()
 
 
 def _is_placeholder_host(hostname: str | None) -> bool:
@@ -328,11 +353,16 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
             raise ValueError(f"dispatch.workspace.{name} must be a string.")
 
     overrides = _agent_endpoint_overrides()
+    shared_host = os.environ.get(AGENT_HOST_ENV, "").strip()
 
     for agent_id, agent_data in agents_data.items():
-        override = overrides.get(str(agent_id).upper())
+        if not isinstance(agent_data, dict):
+            continue
 
-        if override is not None and isinstance(agent_data, dict):
+        override = overrides.get(str(agent_id).upper())
+        endpoint = agent_data.get("endpoint")
+
+        if override is not None:
             logger.info(
                 "Agent endpoint overridden from the environment: agent_id=%s "
                 "endpoint=%s",
@@ -340,6 +370,16 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
                 override,
             )
             agent_data["endpoint"] = override
+        elif shared_host and isinstance(endpoint, str):
+            rehosted = _rehost(endpoint, shared_host)
+
+            if rehosted != endpoint:
+                logger.info(
+                    "Agent rehosted from the environment: agent_id=%s " "endpoint=%s",
+                    agent_id,
+                    rehosted,
+                )
+                agent_data["endpoint"] = rehosted
 
     registry = load_agent_registry(agents_data)
 

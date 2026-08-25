@@ -992,3 +992,74 @@ def test_the_summary_shows_the_verdict_and_the_review_request(
 
     assert "clean" in summary
     assert "review required" in summary
+
+
+def test_one_variable_rehosts_every_agent(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Agents usually move together, from a laptop's loopback to the Docker
+    # host. Without this, registering another agent means remembering to add
+    # another variable, and forgetting it fails only at dispatch time.
+    monkeypatch.setenv("KIO1_AGENT_HOST", "host.docker.internal")
+
+    config = load_config(make_config_file(tmp_path))
+    endpoints = {
+        agent_id: config.dispatch.registry.resolve(agent_id).endpoint  # type: ignore[union-attr]
+        for agent_id in ("KIO2", "KIO10")
+    }
+
+    assert endpoints == {
+        "KIO2": "http://host.docker.internal:8102",
+        "KIO10": "http://host.docker.internal:8110",
+    }
+
+
+def test_naming_one_agent_wins_over_the_shared_host(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KIO1_AGENT_HOST", "host.docker.internal")
+    monkeypatch.setenv("KIO1_AGENT_ENDPOINT_KIO2", "http://elsewhere:9999")
+
+    config = load_config(make_config_file(tmp_path))
+    kio2 = config.dispatch.registry.resolve("KIO2")
+    kio10 = config.dispatch.registry.resolve("KIO10")
+
+    assert kio2 is not None and kio2.endpoint == "http://elsewhere:9999"
+    assert kio10 is not None and kio10.endpoint == "http://host.docker.internal:8110"
+
+
+def test_rehosting_keeps_the_port_and_scheme(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "provider": "ollama",
+                "allowed_providers": ["ollama"],
+                "model": "test-model",
+                "prompt_path": "prompts/test.txt",
+                "chat_directory": "chats",
+                "temperature": 0.2,
+                "request_timeout": 120,
+                "dispatch": {"agents": {"KIO2": {"endpoint": "https://old-host:8443"}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KIO1_AGENT_HOST", "new-host")
+
+    kio2 = load_config(str(config_path)).dispatch.registry.resolve("KIO2")
+
+    assert kio2 is not None and kio2.endpoint == "https://new-host:8443"
+
+
+def test_without_the_variable_agents_stay_where_the_file_puts_them(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("KIO1_AGENT_HOST", raising=False)
+
+    config = load_config(make_config_file(tmp_path))
+    kio2 = config.dispatch.registry.resolve("KIO2")
+
+    assert kio2 is not None and kio2.endpoint == "http://127.0.0.1:8102"

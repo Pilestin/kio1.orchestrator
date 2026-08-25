@@ -97,7 +97,8 @@ settings. Deployment-specific values come from the environment:
 | `KIO1_TEST_DATABASE_URL` | Tests | Enables the PostgreSQL repository tests; they are skipped when unset. |
 | `KIO1_TEST_NATS_SERVERS` | Tests | Enables the live NATS round-trip tests; they are skipped when unset. |
 | `KIO1_PROVIDER_ENDPOINT` | Both | Overrides `provider_options.endpoint`. |
-| `KIO1_AGENT_ENDPOINT_<AGENT_ID>` | Both | Overrides one agent's endpoint, e.g. `KIO1_AGENT_ENDPOINT_KIO2`. |
+| `KIO1_AGENT_HOST` | Both | Rehosts every agent, keeping each port. |
+| `KIO1_AGENT_ENDPOINT_<AGENT_ID>` | Both | Overrides one agent's endpoint, e.g. `KIO1_AGENT_ENDPOINT_KIO2`. Wins over `KIO1_AGENT_HOST`. |
 
 `config.json` is committed and shared, but the model provider and the KIO
 agents sit at different addresses depending on where KIO1 runs. The last two
@@ -107,6 +108,50 @@ environment wins wherever it differs.
 The Session Manager reads `config.json` for its telemetry settings. If that
 file is missing or unreadable it serves requests without tracing rather than
 refusing to start: telemetry is an aid, not a dependency.
+
+## Triggering a workflow
+
+There is no prompt in a container. The Workflow API takes the place of the
+terminal's input line, and there are three ways to use it.
+
+**A browser form.** The API publishes an interactive page at
+`http://localhost:8000/docs`. Open `POST /workflow/run`, press *Try it out*,
+type the request, and send it. Nothing to install.
+
+**One command.**
+
+```bash
+curl -X POST http://localhost:8000/workflow/run -H 'Content-Type: application/json' -d '{"request":"build a medical shift scheduling app and deploy it"}'
+```
+
+It answers immediately with a session id and keeps working in the background:
+
+```json
+{ "session_id": "a0503eac-…", "status": "pending",
+  "status_url": "http://localhost:8000/workflow/a0503eac-…" }
+```
+
+**Then read the result** from that `status_url`. It returns the same thing the
+terminal prints as a table, plus everything the terminal does not keep:
+
+```text
+wf-med-sched01  (sequential)  ->  completed
+  s1  KIO3   requirements_engineering  ok   24 ms  clean
+  s2  KIO4   architecture_design       ok    6 ms  clean
+  s3  KIO7   code_generation           ok    4 ms  clean
+  s4  KIO9   compliance_review         ok    5 ms  defect
+  s5  KIO11  test_automation           ok    5 ms  defect
+  s6  KIO8   deployment                ok    4 ms  clean
+```
+
+Before the first run, three things have to be true. `dispatch.enabled` must be
+`true` in `config.json`; the file is mounted into the containers, so a change
+needs `docker compose restart` rather than a rebuild. The agents must be
+running and reachable — `KIO1_AGENT_HOST` already points them at the developer
+machine, but each one must bind `0.0.0.0` rather than loopback, which for the
+stub fleet means `python tools/dummy_fleet.py --host 0.0.0.0`. And the model
+provider must accept connections from outside the host, which for Ollama means
+`OLLAMA_HOST=0.0.0.0`.
 
 ## Running
 
