@@ -184,6 +184,55 @@ def _looks_like_a_filesystem_path(value: str) -> bool:
     return "\\" in value or (len(value) > 1 and value[1] == ":")
 
 
+def merge_registries(
+    configured: AgentRegistry, discovered: AgentRegistry
+) -> AgentRegistry:
+    """Combine hand-written and discovered agents, letting configuration win.
+
+    A hand-written entry is explicit intent, and it is also where a deployment
+    records an address only it can know — the host an agent answers on from
+    inside a container, say. A manifest cannot know that, so it never
+    overrides one.
+
+    Args:
+        configured: Agents read from `dispatch.agents`.
+        discovered: Agents read from manifest sources.
+
+    Returns:
+        A registry holding both, in configured-then-discovered order.
+    """
+    merged = {entry.agent_id: entry for entry in configured.entries()}
+
+    for entry in discovered.entries():
+        if entry.agent_id in merged:
+            logger.info(
+                "Discovered agent %s is already configured by hand; keeping "
+                "the configured entry",
+                entry.agent_id,
+            )
+            continue
+
+        merged[entry.agent_id] = entry
+
+    return AgentRegistry(merged)
+
+
+def load_agent_entry(agent_id: str, agent_data: dict[str, Any]) -> AgentEndpoint:
+    """Build one registry entry, raising on anything malformed.
+
+    Args:
+        agent_id: The identifier the entry is keyed by.
+        agent_data: The raw entry object.
+
+    Returns:
+        The validated entry.
+
+    Raises:
+        ValueError: If the entry is malformed.
+    """
+    return load_agent_registry({agent_id: agent_data}).entries()[0]
+
+
 def _read_capabilities(agent_id: str, agent_data: dict[str, Any]) -> frozenset[str]:
     """Read and validate an entry's declared capabilities.
 

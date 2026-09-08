@@ -7,7 +7,7 @@ from core.chat_history import (
     create_chat_file,
     load_messages,
 )
-from core.config_loader import load_config
+from core.config_loader import load_config, resolve_discovery
 from core.formatter import format_json, parse_response
 from core.prompt_loader import load_prompt
 from core.session_logger import (
@@ -57,6 +57,11 @@ def main() -> None:
         }
 
         with trace_operation("kio1.startup", startup_attributes):
+            # Agents that describe themselves are asked first, so the catalog
+            # below and the routing table are built from the same, complete
+            # set of targets.
+            config.dispatch = resolve_discovery(config.dispatch)
+
             # The registry is passed in so the prompt's catalog is generated
             # from the same entries that decide routing. Editing config.json
             # is then the only step needed to teach KIO1 about a new target.

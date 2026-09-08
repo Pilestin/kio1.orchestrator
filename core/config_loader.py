@@ -1,12 +1,19 @@
 import json
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from dispatch.agent_registry import AgentRegistry, load_agent_registry
+from dispatch.agent_registry import (
+    AgentEndpoint,
+    AgentRegistry,
+    load_agent_entry,
+    load_agent_registry,
+    merge_registries,
+)
+from dispatch.discovery import DiscoveryConfig, fetch_entries, load_discovery_config
 from dispatch.policy import Policy, load_policy
 
 logger = logging.getLogger(__name__)
@@ -163,6 +170,7 @@ class DispatchConfig:
             themselves. `{agent}` is replaced with the lowercased agent id.
         workspace: The repository and entry point agents should analyse.
         policy: Gates deciding what must have passed before a step runs.
+        discovery: Manifest sources agents describe themselves through.
     """
 
     enabled: bool = False
@@ -174,6 +182,7 @@ class DispatchConfig:
     nats_subject_template: str = "kio.{agent}.execute"
     workspace: Workspace = field(default_factory=Workspace)
     policy: Policy = field(default_factory=Policy)
+    discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
 
 
 @dataclass
@@ -385,6 +394,7 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
                 agent_data["endpoint"] = rehosted
 
     policy = load_policy(dispatch_data.get("policy"))
+    discovery = load_discovery_config(dispatch_data.get("discovery"))
 
     registry = load_agent_registry(agents_data)
 
@@ -407,6 +417,52 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
             entry_point=entry_point.strip(),
         ),
         policy=policy,
+        discovery=discovery,
+    )
+
+
+def resolve_discovery(dispatch_config: DispatchConfig) -> DispatchConfig:
+    """Fetch the configured manifests and add what they declared.
+
+    Kept out of `load_config` on purpose: reading a file should not make
+    network calls. Callers that want discovery ask for it, once, at startup.
+
+    A discovered entry that does not validate is dropped with a warning
+    rather than raised on. One agent publishing a broken manifest must not
+    stop the orchestrator from starting without it.
+
+    Args:
+        dispatch_config: Dispatch settings holding the discovery sources and
+            the hand-written registry.
+
+    Returns:
+        The settings, with discovered agents merged into the registry.
+        Returned unchanged when no source is configured.
+
+    Raises:
+        ValueError: If a source failed and `dispatch.discovery.required` is set.
+    """
+    if not dispatch_config.discovery.sources:
+        return dispatch_config
+
+    discovered: dict[str, AgentEndpoint] = {}
+
+    for agent_id, entry in fetch_entries(dispatch_config.discovery).items():
+        try:
+            discovered[agent_id] = load_agent_entry(agent_id, entry)
+        except ValueError as error:
+            logger.warning(
+                "Discovered agent %s is not usable and was ignored: %s",
+                agent_id,
+                error,
+            )
+
+    if not discovered:
+        return dispatch_config
+
+    return replace(
+        dispatch_config,
+        registry=merge_registries(dispatch_config.registry, AgentRegistry(discovered)),
     )
 
 

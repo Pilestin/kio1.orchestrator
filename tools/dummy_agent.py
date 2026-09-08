@@ -230,6 +230,9 @@ class _AgentRequestHandler(BaseHTTPRequestHandler):
     path_prefix = "/execute"
     latency_seconds = 0.0
     fail_capabilities: frozenset[str] = frozenset()
+    # What /manifest publishes. Empty means the stub declares nothing, so
+    # KIO1 applies no capability check to it.
+    capabilities: frozenset[str] = frozenset()
 
     protocol_version = "HTTP/1.1"
 
@@ -288,9 +291,29 @@ class _AgentRequestHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:
-        """Answer a liveness probe on /health."""
-        if self.path.rstrip("/") == "/health":
+        """Answer a liveness probe on /health or a self-description on /manifest."""
+        path = self.path.rstrip("/")
+
+        if path == "/health":
             self._send_json(200, {"agent_id": self.agent_id, "status": "ok"})
+            return
+
+        if path == "/manifest":
+            # What a real agent would publish so KIO1 needs no entry in
+            # config.json for it. `endpoint` is deliberately absent: KIO1
+            # defaults it to the address it just fetched this from, which is
+            # the one address a manifest cannot get wrong.
+            self._send_json(
+                200,
+                {
+                    "agent_id": self.agent_id,
+                    "description": (
+                        f"Simulated {self.agent_id}, answering with canned results."
+                    ),
+                    "path": self.path_prefix,
+                    "capabilities": sorted(self.capabilities),
+                },
+            )
             return
 
         self._send_json(404, {"error": f"Unknown path: {self.path}"})
@@ -391,6 +414,7 @@ def build_server(
     path: str = "/execute",
     latency_seconds: float = 0.0,
     fail_capabilities: frozenset[str] = frozenset(),
+    capabilities: frozenset[str] = frozenset(),
 ) -> ThreadingHTTPServer:
     """Create a stub agent server without starting it.
 
@@ -401,6 +425,8 @@ def build_server(
         path: Request path execution messages are posted to.
         latency_seconds: Artificial delay before replying, for timeout tests.
         fail_capabilities: Capabilities that answer with `status: error`.
+        capabilities: Capabilities the stub publishes on `/manifest`, so a
+            discovering KIO1 learns what it can ask for.
 
     Returns:
         A server ready for `serve_forever()` or `handle_request()`.
@@ -413,6 +439,7 @@ def build_server(
             "path_prefix": path,
             "latency_seconds": latency_seconds,
             "fail_capabilities": fail_capabilities,
+            "capabilities": capabilities,
         },
     )
 
@@ -566,6 +593,8 @@ class NatsStubAgent:
             subject: Subject to listen on. Defaults to the shared template.
             latency_seconds: Artificial delay before replying.
             fail_capabilities: Capabilities that answer with `status: error`.
+        capabilities: Capabilities the stub publishes on `/manifest`, so a
+            discovering KIO1 learns what it can ask for.
         """
         self.agent_id = agent_id
         self.subject = subject or DEFAULT_SUBJECT_TEMPLATE.format(

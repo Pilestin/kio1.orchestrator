@@ -123,6 +123,11 @@ they existed.
 
 ## 3. Get registered
 
+Either KIO1's operator writes you into `config.json`, or you publish a
+manifest and they point at it. The manifest is less work for both sides and
+cannot drift — see [Discovery](discovery.md) for the four lines it takes.
+
+
 Add your KIO to `dispatch.agents` in KIO1's `config.json`:
 
 ```json

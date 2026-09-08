@@ -123,5 +123,6 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Connecting a KIO](docs/connecting-a-kio.md) — What a KIO must accept and reply to be reachable
 - [Connecting your own module](docs/connecting-a-tool.md) — Registering a REST API or a local command as a workflow target
 - [Policy gates](docs/policy-gates.md) — Stopping a step until the checks it depends on have passed
+- [Discovery](docs/discovery.md) — Letting agents publish their own capabilities instead of listing them by hand
 - [Workflow Dispatch](docs/workflow-dispatch.md) — Sending plan steps to KIO agents
 - [Observability](docs/observability.md) — Tracing, metrics, storage, querying, and safe shutdown

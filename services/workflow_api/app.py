@@ -10,7 +10,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, s
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from core.config_loader import load_config
+from core.config_loader import load_config, resolve_discovery
 from core.prompt_loader import load_prompt
 from core.service_telemetry import TraceContextMiddleware
 from core.session_client import NullSessionClient, SessionClient, SessionClientError
@@ -57,6 +57,7 @@ def _build_state() -> _State:
     config = load_config()
     init_telemetry(config.telemetry, llm=config.model)
 
+    config.dispatch = resolve_discovery(config.dispatch)
     system_prompt = load_prompt(config.prompt_path, config.dispatch.registry)
     provider = load_provider(config.provider, config.allowed_providers)
     provider_client = provider.create_client(config)

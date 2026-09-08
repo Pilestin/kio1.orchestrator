@@ -106,7 +106,12 @@ def start(agent_ids: list[str], host: str) -> list[Any]:
     servers = []
 
     for agent_id in agent_ids:
-        server = build_server(agent_id=agent_id, host=host, port=port_of(agent_id))
+        server = build_server(
+            agent_id=agent_id,
+            host=host,
+            port=port_of(agent_id),
+            capabilities=frozenset(FLEET[agent_id]),
+        )
         threading.Thread(
             target=server.serve_forever,
             name=f"kio1-stub-{agent_id}",

@@ -133,6 +133,9 @@ Write a real `description`. It is what the model reads when deciding whether
 your tool fits the request. Without one the catalog falls back to listing the
 capability names, which is much weaker.
 
+If your module can serve one more URL, it can publish this entry itself and
+skip the configuration edit entirely. See [Discovery](discovery.md).
+
 ## Checking it works
 
 ```bash
