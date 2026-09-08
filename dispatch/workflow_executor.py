@@ -13,9 +13,11 @@ from core.telemetry import (
 )
 from dispatch.agent_registry import AgentRegistry
 from dispatch.agent_transport import AgentTransport, AgentTransportError
+from dispatch.policy import Policy, apply_gates, applies_to, providers_of
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_planner import (
     ExecutionMessage,
+    PlanStep,
     RoutingResult,
     WorkflowPlan,
     descendants_of,
@@ -107,6 +109,7 @@ def execute_workflow(
     timeout: float,
     max_parallel_steps: int,
     workspace_data: dict[str, Any] | None = None,
+    policy: Policy | None = None,
 ) -> WorkflowResult:
     """Route a workflow plan to agents and collect their results.
 
@@ -118,10 +121,16 @@ def execute_workflow(
         max_parallel_steps: Upper bound on concurrent dispatches in
             `parallel` mode.
         workspace_data: The `data` fragment naming the code under analysis.
+        policy: Gates deciding what must have passed before a step may run.
+            Omitted runs the plan exactly as it was produced.
 
     Returns:
         One `StepResult` per plan step, in the plan's own step order.
     """
+    policy = policy if policy is not None else Policy()
+    # Gates add the ordering they need before routing, so a guarded step is
+    # never dispatched alongside the step that has to clear it.
+    plan = apply_gates(plan, policy)
     routing = route_plan(plan, registry, workspace_data=workspace_data)
 
     with trace_workflow_execution(
@@ -130,7 +139,7 @@ def execute_workflow(
         step_count=len(plan.steps),
         dispatchable_step_count=len(routing.messages),
     ):
-        if has_dependencies(plan):
+        if has_dependencies(plan) or applies_to(plan, policy):
             # Declared dependencies define the order, so execution_mode only
             # decides whether independent steps share a level concurrently.
             dispatched = _execute_levels(
@@ -141,6 +150,7 @@ def execute_workflow(
                 timeout=timeout,
                 max_parallel_steps=max_parallel_steps,
                 concurrent=plan.execution_mode != "sequential",
+                policy=policy,
             )
         elif plan.execution_mode == "parallel":
             dispatched = _dispatch_concurrently(
@@ -285,12 +295,16 @@ def _execute_levels(
     timeout: float,
     max_parallel_steps: int,
     concurrent: bool,
+    policy: Policy | None = None,
 ) -> dict[str, StepResult]:
     """Dispatch a plan level by level, honouring its declared dependencies.
 
     A step whose dependency failed or was skipped is never dispatched: its
     input was never produced, so asking an agent to act on it would waste a
     call and invite a misleading answer. Such steps surface as `not_run`.
+
+    A step barred by a policy gate is stopped the same way, with the gate's
+    reason recorded in its place.
 
     Args:
         plan: The validated plan, read for its dependency graph.
@@ -300,54 +314,108 @@ def _execute_levels(
         timeout: Seconds to wait for each agent's reply.
         max_parallel_steps: Upper bound on concurrent dispatches within a level.
         concurrent: Whether steps in the same level may run at the same time.
+        policy: Gates deciding what must have passed before a step may run.
 
     Returns:
-        Step results keyed by step id, covering only the steps that ran.
+        Step results keyed by step id, covering only the steps that ran and
+        the steps a gate stopped.
     """
+    policy = policy if policy is not None else Policy()
     by_step = {message.step_id: message for message in routing.messages}
+    steps_by_id = {step.step_id: step for step in plan.steps}
     results: dict[str, StepResult] = {}
     blocked: set[str] = set()
 
     for skipped in routing.skipped:
         blocked.update(descendants_of(plan, skipped.step_id))
 
+    def block_if_gated(message: ExecutionMessage) -> bool:
+        """Record a policy block for a step, and report whether it was blocked."""
+        reason = _gate_block_reason(steps_by_id[message.step_id], plan, policy, results)
+
+        if reason is None:
+            return False
+
+        logger.warning(
+            "Step blocked by policy: step_id=%s capability=%s reason=%s",
+            message.step_id,
+            message.capability,
+            reason,
+        )
+        results[message.step_id] = StepResult(
+            step_id=message.step_id,
+            agent_id=message.agent_id,
+            capability=message.capability,
+            status=STATUS_NOT_RUN,
+            error=reason,
+        )
+        blocked.add(message.step_id)
+        blocked.update(descendants_of(plan, message.step_id))
+
+        return True
+
+    def note_failure(step_id: str, result: StepResult) -> None:
+        """Stop everything downstream of a step that failed."""
+        if result.status != STATUS_ERROR:
+            return
+
+        blocked.update(descendants_of(plan, step_id))
+        logger.warning(
+            "Blocking steps that depend on the failed step: step_id=%s", step_id
+        )
+
     for level in execution_levels(plan):
-        runnable = [
+        candidates = [
             by_step[step_id]
             for step_id in level
             if step_id in by_step and step_id not in blocked
         ]
 
-        if not runnable:
+        if not candidates:
             continue
 
-        prepared = [_with_upstream_data(message, plan, results) for message in runnable]
+        if concurrent and len(candidates) > 1:
+            # Steps sharing a level really do run at the same time, so every
+            # gate is evaluated against what finished in earlier levels.
+            runnable = [
+                message for message in candidates if not block_if_gated(message)
+            ]
 
-        if concurrent and len(prepared) > 1:
+            if not runnable:
+                continue
+
             level_results = _dispatch_concurrently(
-                tuple(prepared),
+                tuple(
+                    _with_upstream_data(message, plan, results) for message in runnable
+                ),
                 registry,
                 transport,
                 timeout=timeout,
                 max_parallel_steps=max_parallel_steps,
             )
-        else:
-            level_results = {
-                message.step_id: _dispatch_step(
-                    message, registry, transport, timeout=timeout
-                )
-                for message in prepared
-            }
+            results.update(level_results)
 
-        results.update(level_results)
+            for step_id, result in level_results.items():
+                note_failure(step_id, result)
 
-        for step_id, result in level_results.items():
-            if result.status == STATUS_ERROR:
-                blocked.update(descendants_of(plan, step_id))
-                logger.warning(
-                    "Blocking steps that depend on the failed step: step_id=%s",
-                    step_id,
-                )
+            continue
+
+        # One at a time, so a gate sees what the step just before it reported
+        # even when both sit in the same level. A plan with no declared
+        # dependencies is one single level, and this is the only place a
+        # review request can stop the steps that follow it.
+        for message in candidates:
+            if message.step_id in blocked or block_if_gated(message):
+                continue
+
+            result = _dispatch_step(
+                _with_upstream_data(message, plan, results),
+                registry,
+                transport,
+                timeout=timeout,
+            )
+            results[message.step_id] = result
+            note_failure(message.step_id, result)
 
     return results
 
@@ -526,6 +594,93 @@ def _dispatch_step(
     )
 
 
+def _gate_block_reason(
+    step: PlanStep,
+    plan: WorkflowPlan,
+    policy: Policy,
+    results: dict[str, StepResult],
+) -> str | None:
+    """Return why a policy bars a step from running, or None if it does not.
+
+    The reason is written to be actionable on its own: it names the gate that
+    applied, the step that failed to clear it, and what that step reported.
+
+    Args:
+        step: The plan step about to be dispatched.
+        plan: The plan, read for which steps provide a capability.
+        policy: The configured policy.
+        results: Results of the steps that have already run.
+
+    Returns:
+        A human-readable reason, or None when the step may proceed.
+    """
+    if policy.block_on_review_required:
+        waiting = next(
+            (
+                completed.step_id
+                for completed in results.values()
+                if completed.review_required
+            ),
+            None,
+        )
+
+        if waiting is not None:
+            return (
+                f"Blocked: {waiting} asked for human review, and "
+                "block_on_review_required is set."
+            )
+
+    for gate in policy.gates_for(step.capability):
+        for capability in sorted(gate.requires):
+            providers = tuple(
+                step_id
+                for step_id in providers_of(plan, capability)
+                if step_id != step.step_id
+            )
+
+            if not providers:
+                return (
+                    f"Blocked: {step.capability} requires {capability} to have "
+                    "passed first, and no step in this plan provides it."
+                )
+
+            for provider in providers:
+                outcome = results.get(provider)
+
+                if outcome is None:
+                    return (
+                        f"Blocked: {step.capability} requires {capability}, and "
+                        f"{provider} has not run."
+                    )
+
+                if outcome.status != STATUS_OK:
+                    return (
+                        f"Blocked: {step.capability} requires {capability} to "
+                        f"have passed, and {provider} is {outcome.status}."
+                    )
+
+                if not gate.verdict:
+                    continue
+
+                expected = ", ".join(sorted(gate.verdict))
+
+                if outcome.verdict is None:
+                    return (
+                        f"Blocked: {step.capability} requires {capability} to "
+                        f"report one of [{expected}], and {provider} reported "
+                        "no verdict."
+                    )
+
+                if outcome.verdict not in gate.verdict:
+                    return (
+                        f"Blocked: {step.capability} requires {capability} to "
+                        f"report one of [{expected}], and {provider} reported "
+                        f"{outcome.verdict!r}."
+                    )
+
+    return None
+
+
 def _verdict_of(output: Any) -> str | None:
     """Return the agent's verdict, when it reported a recognized one.
 
@@ -646,7 +801,7 @@ def _merge_results(
                 agent_id=step.agent_id,
                 capability=step.capability,
                 status=STATUS_NOT_RUN,
-                error="An earlier step in the sequential workflow failed",
+                error="An earlier step it depends on did not complete",
             )
         )
 
@@ -740,4 +895,5 @@ def dispatch_plan(
         timeout=dispatch_config.request_timeout,
         max_parallel_steps=dispatch_config.max_parallel_steps,
         workspace_data=dispatch_config.workspace.to_data(),
+        policy=dispatch_config.policy,
     )

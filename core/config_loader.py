@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from dispatch.agent_registry import AgentRegistry, load_agent_registry
+from dispatch.policy import Policy, load_policy
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,7 @@ class DispatchConfig:
         nats_subject_template: Subject used for agents that do not name one
             themselves. `{agent}` is replaced with the lowercased agent id.
         workspace: The repository and entry point agents should analyse.
+        policy: Gates deciding what must have passed before a step runs.
     """
 
     enabled: bool = False
@@ -171,6 +173,7 @@ class DispatchConfig:
     nats_servers: tuple[str, ...] = ()
     nats_subject_template: str = "kio.{agent}.execute"
     workspace: Workspace = field(default_factory=Workspace)
+    policy: Policy = field(default_factory=Policy)
 
 
 @dataclass
@@ -381,6 +384,8 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
                 )
                 agent_data["endpoint"] = rehosted
 
+    policy = load_policy(dispatch_data.get("policy"))
+
     registry = load_agent_registry(agents_data)
 
     if enabled and not len(registry):
@@ -401,6 +406,7 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
             path=workspace_path.strip(),
             entry_point=entry_point.strip(),
         ),
+        policy=policy,
     )
 
 

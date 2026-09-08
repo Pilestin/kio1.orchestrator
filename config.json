@@ -30,6 +30,24 @@
             "path": "E:/Kodlar/AI4SWeng/Trace/py-test-codes-for-focustracer/codes",
             "entry_point": "01_siparis_toplami_hesaplama.py"
         },
+        "policy": {
+            "gates": [
+                {
+                    "before": [
+                        "deployment",
+                        "packaging"
+                    ],
+                    "requires": [
+                        "test_automation",
+                        "cybersecurity_validation"
+                    ],
+                    "verdict": [
+                        "clean"
+                    ]
+                }
+            ],
+            "block_on_review_required": false
+        },
         "agents": {
             "KIO2": {
                 "endpoint": "http://localhost:8102",

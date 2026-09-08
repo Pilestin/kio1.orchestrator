@@ -157,9 +157,9 @@ Workflow wf-tools01 (mixed): 2 ok, 1 error, 0 not dispatched
 - **No retries.** A failed call is reported, not retried.
 - **One timeout for everyone.** `dispatch.request_timeout` applies to every
   target. A slow tool needs the timeout raised for all of them.
-- **Nothing acts on `verdict`.** A tool reporting `defect` is recorded and
-  shown, but does not stop a later step from running. Gating on the verdict
-  is planned, not built.
+- **A `verdict` only stops things you gate on.** Reporting `defect` is
+  recorded and shown, but it stops a later step only when a policy gate says
+  it should. See [Policy gates](policy-gates.md).
 - **Commands run wherever KIO1 runs.** A `cli` entry is local to the
   orchestrator process, including inside a container. A tool on another
   machine needs to be an `http` entry.

@@ -61,6 +61,7 @@ graph TD
 | `core/telemetry.py` | Initializes OpenTelemetry, creates spans and metrics, records metadata, and flushes exporters |
 | `dispatch/workflow_planner.py` | Validates a workflow plan and turns its steps into protocol execution messages |
 | `dispatch/agent_registry.py` | Maps `agent_id` values from a plan to configured targets: KIO agents, REST APIs, and local commands |
+| `dispatch/policy.py` | Gates: which capabilities may not run until others have passed, and the ordering they imply |
 | `dispatch/tool_transport.py` | Adapts a REST API or a local command to the execution message and reply the executor reads |
 | `dispatch/agent_transport.py` | Transport interface and the HTTP implementation |
 | `dispatch/nats_transport.py` | NATS request/reply implementation of the same interface |
