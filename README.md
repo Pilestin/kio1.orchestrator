@@ -60,7 +60,7 @@ See the [Observability Guide](docs/observability.md) for configuration, querying
 
 ## Workflow Dispatch
 
-KIO1 can send the steps of a generated plan to the KIO agents that carry them out, following the `KIO1 - KIO10` integration protocol. Dispatch is disabled by default; enable it with `dispatch.enabled` in `config.json` and list the reachable agents under `dispatch.agents`.
+KIO1 sends the steps of a generated plan to whatever carries them out. A target can be a KIO agent following the `KIO1 - KIO10` integration protocol, an ordinary REST API of your own, or a command line tool on this machine. All three are listed under `dispatch.agents` in `config.json`, each with a `type`, and a single plan can mix them.
 
 Only KIO2 exists as a real service today, so most plan steps have nowhere to go and are
 reported as `skipped`. To watch a whole plan execute, start a stand-in for every KIO:
@@ -78,7 +78,7 @@ python tools/dummy_agent.py --agent-id KIO2 --port 8102
 
 Steps can declare dependencies with an optional `depends_on` field, and a step's output is fed to the steps that depend on it through the protocol's own `data` field. Messages travel over HTTP by default, or over NATS with `dispatch.transport`; the message body is identical either way.
 
-If you own a KIO and want KIO1 to call it, [Connecting a KIO](docs/connecting-a-kio.md) is the whole contract on one page.
+If you own a KIO and want KIO1 to call it, [Connecting a KIO](docs/connecting-a-kio.md) is the whole contract on one page. To plug in something that is not a KIO — your own API, a script, a build tool — see [Connecting your own module](docs/connecting-a-tool.md).
 
 See the [Workflow Dispatch Guide](docs/workflow-dispatch.md) for the message format, reply contract, dependencies, execution modes, transports, and known gaps.
 
@@ -121,5 +121,6 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Troubleshooting](docs/troubleshooting.md) — Common errors and how to resolve them
 - [Services](docs/services.md) — Workflow API, Session Manager, and PostgreSQL
 - [Connecting a KIO](docs/connecting-a-kio.md) — What a KIO must accept and reply to be reachable
+- [Connecting your own module](docs/connecting-a-tool.md) — Registering a REST API or a local command as a workflow target
 - [Workflow Dispatch](docs/workflow-dispatch.md) — Sending plan steps to KIO agents
 - [Observability](docs/observability.md) — Tracing, metrics, storage, querying, and safe shutdown

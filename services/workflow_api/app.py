@@ -57,7 +57,7 @@ def _build_state() -> _State:
     config = load_config()
     init_telemetry(config.telemetry, llm=config.model)
 
-    system_prompt = load_prompt(config.prompt_path)
+    system_prompt = load_prompt(config.prompt_path, config.dispatch.registry)
     provider = load_provider(config.provider, config.allowed_providers)
     provider_client = provider.create_client(config)
 

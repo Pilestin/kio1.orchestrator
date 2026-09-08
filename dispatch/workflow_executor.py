@@ -670,6 +670,15 @@ def render_summary(result: WorkflowResult) -> str:
         ),
     ]
 
+    # Sized to the content rather than to `KIO<N>`: a registered target may be
+    # a local command or an API with a name of any length, and a column that
+    # overflows pushes every later column out of line.
+    step_width = max((len(step.step_id) for step in result.results), default=4)
+    agent_width = max((len(step.agent_id) for step in result.results), default=6)
+    capability_width = max(
+        (len(step.capability) for step in result.results), default=28
+    )
+
     for step in result.results:
         detail = ""
 
@@ -687,8 +696,8 @@ def render_summary(result: WorkflowResult) -> str:
             detail = step.error
 
         lines.append(
-            f"  {step.step_id:<4} {step.agent_id:<6} {step.capability:<28} "
-            f"{step.status:<9} {detail}"
+            f"  {step.step_id:<{step_width}} {step.agent_id:<{agent_width}} "
+            f"{step.capability:<{capability_width}} {step.status:<9} {detail}".rstrip()
         )
 
     return "\n".join(lines)

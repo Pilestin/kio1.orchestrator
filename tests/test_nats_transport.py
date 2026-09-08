@@ -6,10 +6,17 @@ from urllib.error import HTTPError
 import pytest
 
 from core.config_loader import DispatchConfig
-from dispatch.agent_registry import AgentEndpoint, AgentRegistry
+from dispatch.agent_registry import (
+    KIND_CLI,
+    KIND_HTTP,
+    KIND_KIO,
+    AgentEndpoint,
+    AgentRegistry,
+)
 from dispatch.agent_transport import AgentTransportError, HttpAgentTransport
 from dispatch.nats_transport import NatsAgentTransport
-from dispatch.transport_factory import build_transport
+from dispatch.tool_transport import CliToolTransport, HttpToolTransport
+from dispatch.transport_factory import RoutingTransport, build_transport
 from dispatch.workflow_planner import ExecutionMessage
 
 MESSAGE = ExecutionMessage(
@@ -317,10 +324,14 @@ def test_close_is_safe_before_anything_was_sent() -> None:
 # ── transport selection ──────────────────────────────────────────────────────
 
 
-def test_the_factory_returns_http_by_default() -> None:
+def test_the_factory_returns_http_for_kio_agents_by_default() -> None:
+    # The factory now returns a router, because one plan can address KIO
+    # agents, plain HTTP APIs, and local commands at once. `dispatch.transport`
+    # still only chooses how KIO agents are reached.
     transport = build_transport(DispatchConfig(enabled=True))
 
-    assert isinstance(transport, HttpAgentTransport)
+    assert isinstance(transport, RoutingTransport)
+    assert isinstance(transport.transport_for(KIND_KIO), HttpAgentTransport)
 
 
 def test_the_factory_returns_nats_when_configured() -> None:
@@ -335,8 +346,30 @@ def test_the_factory_returns_nats_when_configured() -> None:
     )
 
     try:
-        assert isinstance(transport, NatsAgentTransport)
-        assert transport.subject_for(AGENT) == "ai4sweng.kio10.execute"
+        assert isinstance(transport, RoutingTransport)
+        kio_transport = transport.transport_for(KIND_KIO)
+        assert isinstance(kio_transport, NatsAgentTransport)
+        assert kio_transport.subject_for(AGENT) == "ai4sweng.kio10.execute"
+    finally:
+        transport.close()
+
+
+def test_choosing_nats_does_not_change_how_tools_are_reached() -> None:
+    # A local command is not reached over a broker, and a plain REST API is
+    # called directly whatever the KIO transport is.
+    transport = build_transport(
+        DispatchConfig(
+            enabled=True,
+            transport="nats",
+            nats_servers=("nats://localhost:4222",),
+            registry=AgentRegistry({"KIO10": AGENT}),
+        )
+    )
+
+    try:
+        assert isinstance(transport, RoutingTransport)
+        assert isinstance(transport.transport_for(KIND_HTTP), HttpToolTransport)
+        assert isinstance(transport.transport_for(KIND_CLI), CliToolTransport)
     finally:
         transport.close()
 

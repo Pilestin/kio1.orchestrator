@@ -160,7 +160,7 @@ Then send yourself a message shaped exactly like a real one:
 curl -X POST http://127.0.0.1:8102/execute -H 'Content-Type: application/json' -d '{"workflow_id":"wf-test","step_id":"s1","agent_id":"KIO2","capability":"diagnosis","endpoint":"http://127.0.0.1:8102","task":"test","data":{}}'
 ```
 
-Then run the real thing: set `dispatch.enabled` to `true` in `config.json`,
+Then run the real thing: make sure `dispatch.enabled` is `true` in `config.json`,
 start `python main.py`, and ask something your KIO should handle. You will see
 a per-step table under the plan:
 

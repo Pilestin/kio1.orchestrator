@@ -6,7 +6,7 @@
         "anthropic"
     ],
     "model": "ministral-3:3b",
-    "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
+    "prompt_path": "prompts/kio1_system_prompt_ver2.txt",
     "chat_directory": "chats",
     "temperature": 0.2,
     "request_timeout": 120,
@@ -23,7 +23,7 @@
         "deployment_environment": "local"
     },
     "dispatch": {
-        "enabled": false,
+        "enabled": true,
         "request_timeout": 60,
         "max_parallel_steps": 4,
         "workspace": {
@@ -34,6 +34,7 @@
             "KIO2": {
                 "endpoint": "http://localhost:8102",
                 "path": "/execute",
+                "description": "Bug localization, diagnosis, dynamic slicing, execution replay, and trace comparison. Does NOT generate fixes.",
                 "capabilities": [
                     "bug_localization",
                     "diagnosis",
@@ -44,6 +45,7 @@
             "KIO3": {
                 "endpoint": "http://127.0.0.1:8103",
                 "path": "/execute",
+                "description": "Natural-language requirements engineering, user stories, and acceptance criteria.",
                 "capabilities": [
                     "requirements_engineering",
                     "user_stories",
@@ -53,6 +55,7 @@
             "KIO4": {
                 "endpoint": "http://127.0.0.1:8104",
                 "path": "/execute",
+                "description": "Software architecture planning and component design.",
                 "capabilities": [
                     "architecture_design",
                     "component_design"
@@ -61,6 +64,7 @@
             "KIO5": {
                 "endpoint": "http://127.0.0.1:8105",
                 "path": "/execute",
+                "description": "Synthetic data generation.",
                 "capabilities": [
                     "synthetic_data_generation"
                 ]
@@ -68,6 +72,7 @@
             "KIO6": {
                 "endpoint": "http://127.0.0.1:8106",
                 "path": "/execute",
+                "description": "Data validation and quality analysis.",
                 "capabilities": [
                     "data_validation",
                     "quality_analysis"
@@ -76,6 +81,7 @@
             "KIO7": {
                 "endpoint": "http://127.0.0.1:8107",
                 "path": "/execute",
+                "description": "Code generation and code understanding.",
                 "capabilities": [
                     "code_generation",
                     "code_understanding"
@@ -84,6 +90,7 @@
             "KIO8": {
                 "endpoint": "http://127.0.0.1:8108",
                 "path": "/execute",
+                "description": "Build, deployment, DevOps, and packaging.",
                 "capabilities": [
                     "build",
                     "deployment",
@@ -94,6 +101,7 @@
             "KIO9": {
                 "endpoint": "http://127.0.0.1:8109",
                 "path": "/execute",
+                "description": "Responsible AI and regulatory compliance review.",
                 "capabilities": [
                     "responsible_ai",
                     "compliance_review"
@@ -102,6 +110,7 @@
             "KIO10": {
                 "endpoint": "http://127.0.0.1:8110",
                 "path": "/execute",
+                "description": "TinyML and energy-efficiency analysis.",
                 "capabilities": [
                     "tinyml",
                     "energy_efficiency"
@@ -110,6 +119,7 @@
             "KIO11": {
                 "endpoint": "http://127.0.0.1:8111",
                 "path": "/execute",
+                "description": "Test automation and validation.",
                 "capabilities": [
                     "test_automation",
                     "validation"
@@ -118,6 +128,7 @@
             "KIO12": {
                 "endpoint": "http://127.0.0.1:8112",
                 "path": "/execute",
+                "description": "Cybersecurity validation.",
                 "capabilities": [
                     "cybersecurity_validation"
                 ]
@@ -125,9 +136,37 @@
             "KIO13": {
                 "endpoint": "http://127.0.0.1:8113",
                 "path": "/execute",
+                "description": "Developer training and onboarding material.",
                 "capabilities": [
                     "developer_training",
                     "onboarding"
+                ]
+            },
+            "Pytest": {
+                "type": "cli",
+                "description": "Runs this repository's own test suite and reports the result.",
+                "command": [
+                    "python",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "tests/"
+                ],
+                "capabilities": [
+                    "test_execution"
+                ]
+            },
+            "GitHistory": {
+                "type": "cli",
+                "description": "Reads the recent commit history of this repository.",
+                "command": [
+                    "git",
+                    "log",
+                    "--oneline",
+                    "-20"
+                ],
+                "capabilities": [
+                    "repository_history"
                 ]
             }
         }

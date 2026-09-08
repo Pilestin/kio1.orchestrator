@@ -29,7 +29,7 @@ All application settings are stored in `config.json` at the project root.
 | `dispatch.request_timeout` | number | Positive per-agent reply timeout in seconds (default: `60`) |
 | `dispatch.max_parallel_steps` | int | Positive bound on concurrent dispatches in `parallel` mode (default: `4`) |
 | `dispatch.transport` | string | How execution messages travel: `http` (default) or `nats` |
-| `dispatch.agents` | object | Agent id to endpoint mapping; see [Workflow Dispatch](workflow-dispatch.md) |
+| `dispatch.agents` | object | Everything KIO1 can dispatch to, keyed by the id plans use. Each entry has a `type`: `kio` (default, the KIO1-KIO10 protocol), `http` (any REST API), or `cli` (a local command). See [Workflow Dispatch](workflow-dispatch.md) and [Connecting your own module](connecting-a-tool.md) |
 | `dispatch.workspace.path` | string | Repository root the agents should analyse, as *they* can see it (default: `""`, not sent) |
 | `dispatch.workspace.entry_point` | string | Runnable script reproducing the behaviour, relative to `workspace.path` (default: `""`, not sent) |
 | `dispatch.nats.servers` | array of strings | NATS server URLs; required when `transport` is `nats` |
@@ -174,6 +174,10 @@ The `dispatch` object is optional. When it is omitted or `dispatch.enabled` is `
 When enabled, each plan step is turned into an execution message and posted to the agent configured under `dispatch.agents`. Steps addressed to agents that are not configured are reported as `skipped`; they are not errors, because a plan spanning KIO2-KIO13 will always name agents that are not deployed yet.
 
 Enabling dispatch with an empty `dispatch.agents` object is rejected at startup, since there would be nowhere to send any step.
+
+Entries are not limited to KIO agents. An `http` entry calls an ordinary REST API and an `cli` entry runs a local command; both are adapted into the same execution message and reply the executor already reads, so a single plan can mix all three. [Connecting your own module](connecting-a-tool.md) is the whole contract.
+
+The same entries also generate the planner's catalog: a prompt containing `{{AGENT_CATALOG}}` has it replaced at startup with the registered targets, their descriptions, and their capabilities. Adding an entry is therefore the only step needed to make it both known to the model and routable.
 
 An agent that analyses code has to be told which code. The plan's `task` is free text, so `dispatch.workspace` travels in the execution message's `data` field as `repository.path` and `target.entry_point`. Leaving it unset sends neither key, which is correct for agents that do not touch a repository. In a containerized deployment the path must be the one inside the agent's container, not KIO1's.
 

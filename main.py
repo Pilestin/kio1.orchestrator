@@ -57,7 +57,10 @@ def main() -> None:
         }
 
         with trace_operation("kio1.startup", startup_attributes):
-            system_prompt = load_prompt(config.prompt_path)
+            # The registry is passed in so the prompt's catalog is generated
+            # from the same entries that decide routing. Editing config.json
+            # is then the only step needed to teach KIO1 about a new target.
+            system_prompt = load_prompt(config.prompt_path, config.dispatch.registry)
 
             provider = load_provider(config.provider, config.allowed_providers)
             client = provider.create_client(config)
