@@ -125,6 +125,7 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Policy gates](docs/policy-gates.md) — Stopping a step until the checks it depends on have passed
 - [Failover](docs/failover.md) — Running a step on another target when the one the plan named cannot
 - [Choosing by history](docs/selection.md) — Asking the target that has actually been working, not the one listed first
+- [The console](docs/console.md) — The web page for watching targets and runs, and registering agents
 - [Discovery](docs/discovery.md) — Letting agents publish their own capabilities instead of listing them by hand
 - [The live directory](docs/live-directory.md) — Health probing, background refresh, and the registration API
 - [Workflow Dispatch](docs/workflow-dispatch.md) — Sending plan steps to KIO agents

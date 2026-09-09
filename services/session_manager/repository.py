@@ -35,6 +35,10 @@ class SessionRepository(Protocol):
         """Return a session with its steps and lineage, or None if unknown."""
         ...
 
+    def list_sessions(self, limit: int) -> list[Session]:
+        """Return the most recent sessions, newest first."""
+        ...
+
     def update_session(
         self, session_id: UUID, update: UpdateSessionRequest
     ) -> Session | None:
@@ -85,6 +89,28 @@ class InMemorySessionRepository:
             steps=list(self._steps[session_id]),
             lineage=list(self._lineage[session_id]),
         )
+
+    def list_sessions(self, limit: int) -> list[Session]:
+        """Return the most recent sessions, newest first.
+
+        Args:
+            limit: How many to return.
+
+        Returns:
+            Sessions ordered by when they were opened, newest first. Steps are
+            left out: this is the list a console renders, and each row is
+            opened separately for its detail.
+        """
+        # Two sessions opened in the same instant carry the same timestamp, so
+        # insertion order is part of the key rather than left to sort
+        # stability: without it the older of the two comes back first.
+        ordered = sorted(
+            enumerate(self._sessions.values()),
+            key=lambda item: (item[1].created_at, item[0]),
+            reverse=True,
+        )
+
+        return [session for _, session in ordered[:limit]]
 
     def update_session(
         self, session_id: UUID, update: UpdateSessionRequest
@@ -252,6 +278,31 @@ class PostgresSessionRepository:
                 for row in lineage_rows
             ],
         )
+
+    def list_sessions(self, limit: int) -> list[Session]:
+        """Return the most recent sessions, newest first.
+
+        Args:
+            limit: How many to return.
+
+        Returns:
+            Sessions ordered by when they were opened, newest first. Steps are
+            left out: this is the list a console renders, and each row is
+            opened separately for its detail.
+        """
+        with self._pool.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT session_id, request_text, status, workflow_id,
+                       execution_mode, error, created_at, updated_at
+                FROM sessions
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [_to_session(row) for row in rows]
 
     def update_session(
         self, session_id: UUID, update: UpdateSessionRequest

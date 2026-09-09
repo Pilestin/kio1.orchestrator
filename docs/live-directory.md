@@ -121,6 +121,9 @@ live.
 
 ## Seeing the state
 
+The [console](console.md) at `/` shows all of this in a table. For a
+terminal:
+
 ```bash
 curl -s localhost:8000/registry/agents -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" | jq
 ```

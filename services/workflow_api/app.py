@@ -3,12 +3,14 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import lru_cache
 from hmac import compare_digest
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from core.config_loader import load_config
@@ -191,6 +193,36 @@ def get_state() -> _State:
     return _state
 
 
+CONSOLE_FILE = Path(__file__).with_name("static") / "console.html"
+
+
+@lru_cache(maxsize=1)
+def _console_page() -> str:
+    """Return the console's HTML, read once.
+
+    Returns:
+        The page source, or a plain message when the file is missing so a
+        trimmed deployment answers something readable rather than a traceback.
+    """
+    try:
+        return CONSOLE_FILE.read_text(encoding="utf-8")
+    except OSError:
+        logger.warning("Console page is missing at %s", CONSOLE_FILE)
+        return "<h1>KIO1</h1><p>The console page is not installed.</p>"
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def console() -> HTMLResponse:
+    """Serve the operator console.
+
+    Returns:
+        A single self-contained page. It talks to this service's own API and
+        loads nothing from anywhere else, so it works on a machine with no
+        route to the internet.
+    """
+    return HTMLResponse(_console_page())
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     """Report that the service is up."""
@@ -244,6 +276,32 @@ def run_workflow(
         status="pending",
         status_url=str(request.url_for("get_workflow", session_id=session_id)),
     )
+
+
+@app.get("/workflows")
+def list_workflows(
+    limit: int = 25,
+    state: _State = Depends(get_state),
+) -> dict[str, Any]:
+    """Return the most recent runs, newest first.
+
+    Args:
+        limit: How many to return.
+        state: The Session Manager client.
+
+    Returns:
+        Recent sessions without their steps. An empty list when nothing
+        is recorded, rather than an error: a console asking what has run
+        wants an empty answer when the answer is nothing.
+    """
+    try:
+        return {"workflows": state.session_client.list_sessions(limit)}
+    except SessionClientError as error:
+        logger.warning("Could not list workflows: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Session Manager is unavailable",
+        ) from error
 
 
 @app.get("/workflow/{session_id}", name="get_workflow")

@@ -463,3 +463,39 @@ def test_declared_dependencies_suppress_order_inference(
         ("s1", "s2"): "execution_order",
         ("s1", "s3"): "declared_dependency",
     }
+
+
+def test_recent_sessions_are_listed_newest_first() -> None:
+    repository = InMemorySessionRepository()
+    first = repository.create_session("first")
+    second = repository.create_session("second")
+
+    listed = repository.list_sessions(10)
+
+    assert [session.session_id for session in listed] == [
+        second.session_id,
+        first.session_id,
+    ]
+
+
+def test_listing_sessions_honours_its_limit() -> None:
+    repository = InMemorySessionRepository()
+
+    for index in range(5):
+        repository.create_session(f"request {index}")
+
+    assert len(repository.list_sessions(2)) == 2
+
+
+def test_the_sessions_route_returns_the_recent_ones(client: TestClient) -> None:
+    client.post("/sessions", json={"request_text": "a request"})
+
+    response = client.get("/sessions?limit=5")
+
+    assert response.status_code == 200
+    assert [item["request_text"] for item in response.json()] == ["a request"]
+
+
+def test_an_absurd_limit_is_clamped(client: TestClient) -> None:
+    # One call must not be able to pull the whole table.
+    assert client.get("/sessions?limit=100000").status_code == 200

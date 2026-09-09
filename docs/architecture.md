@@ -72,7 +72,8 @@ graph TD
 | `dispatch/transport_factory.py` | Routes each step to the transport its target's kind requires; `dispatch.transport` chooses only how KIO agents are reached |
 | `dispatch/workflow_executor.py` | Runs a routed plan sequentially or in parallel and collects per-step results |
 | `tools/dummy_agent.py` | Dependency-free stub agent used to validate the protocol end to end |
-| `services/workflow_api/` | HTTP entry point; accepts a request and runs the workflow in the background |
+| `services/workflow_api/` | HTTP entry point; accepts a request, runs the workflow in the background, and serves the operator console |
+| `services/workflow_api/static/console.html` | The console: one self-contained page, no build step and no external requests |
 | `services/session_manager/` | Records sessions, steps, artifacts, and lineage in PostgreSQL |
 | `core/session_client.py` | Client the Workflow API and terminal use to talk to the Session Manager |
 | `core/service_telemetry.py` | Trace export and the server-span middleware shared by both services |

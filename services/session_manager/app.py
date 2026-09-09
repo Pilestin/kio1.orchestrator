@@ -164,6 +164,24 @@ def create_session(
     return session
 
 
+@app.get("/sessions")
+def list_sessions(
+    limit: int = 25,
+    repository: SessionRepository = Depends(get_repository),
+) -> list[Session]:
+    """Return the most recent sessions, newest first.
+
+    Args:
+        limit: How many to return, clamped so one call cannot pull the whole
+            table.
+        repository: Where sessions are stored.
+
+    Returns:
+        Recent sessions without their steps.
+    """
+    return repository.list_sessions(max(1, min(limit, 200)))
+
+
 @app.get("/sessions/{session_id}")
 def get_session(
     session_id: UUID,

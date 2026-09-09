@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.config_loader import Config, DispatchConfig
-from core.session_client import SessionClientError
+from core.session_client import NullSessionClient, SessionClientError
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.directory import AgentDirectory
 from dispatch.scoreboard import Scoreboard
@@ -275,6 +275,9 @@ class FakeSessionClient:
         self.detail = detail
         self.fail = fail
         self.created: list[str] = []
+        self.sessions: list[dict[str, Any]] = [
+            {"session_id": str(self.session_id), "status": "completed"}
+        ]
 
     def create_session(self, request_text: str) -> UUID:
         if self.fail:
@@ -289,6 +292,12 @@ class FakeSessionClient:
             raise SessionClientError("unknown session")
 
         return self.detail
+
+    def list_sessions(self, limit: int = 25) -> list[dict[str, Any]]:
+        if self.fail:
+            raise SessionClientError("Session Manager is unreachable")
+
+        return self.sessions[:limit]
 
 
 class SpyRunner:
@@ -402,3 +411,49 @@ def test_get_workflow_rejects_a_malformed_session_id() -> None:
     client, _ = build_client(FakeSessionClient())
 
     assert client.get("/workflow/not-a-uuid").status_code == 422
+
+
+# ── the operator console ─────────────────────────────────────────────────────
+
+
+def test_the_console_is_served_from_the_service_itself() -> None:
+    client, _ = build_client(FakeSessionClient())
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "KIO1 Console" in response.text
+
+
+def test_the_console_loads_nothing_from_anywhere_else() -> None:
+    # It has to work on a machine with no route to the internet, so no CDN,
+    # no font host, no analytics. Only the placeholder inside the example
+    # manifest names a host, and that one is a loopback address.
+    client, _ = build_client(FakeSessionClient())
+
+    page = client.get("/").text
+
+    assert "https://" not in page
+    assert page.count("http://") == page.count("http://127.0.0.1")
+
+
+def test_recent_runs_are_listed() -> None:
+    recorder = FakeSessionClient()
+    client, _ = build_client(recorder)
+
+    response = client.get("/workflows?limit=5")
+
+    assert response.status_code == 200
+    assert response.json()["workflows"] == recorder.sessions
+
+
+def test_listing_runs_reports_an_unavailable_session_manager() -> None:
+    client, _ = build_client(FakeSessionClient(fail=True))
+
+    assert client.get("/workflows").status_code == 503
+
+
+def test_recording_being_off_lists_nothing_rather_than_failing() -> None:
+    # A console asking what has run wants an empty answer when the answer is
+    # nothing, not an error.
+    assert NullSessionClient().list_sessions() == []

@@ -104,10 +104,32 @@ class SessionClient:
         """
         return self._call("GET", f"/sessions/{session_id}", None)
 
+    def list_sessions(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Return the most recent sessions, newest first.
+
+        Args:
+            limit: How many to return.
+
+        Returns:
+            Decoded `Session` objects without their steps.
+
+        Raises:
+            SessionClientError: If the list could not be read.
+        """
+        decoded = self._request("GET", f"/sessions?limit={int(limit)}", None)
+
+        if not isinstance(decoded, list):
+            raise SessionClientError(
+                f"Session Manager returned {type(decoded).__name__}, "
+                "expected a JSON array of sessions"
+            )
+
+        return [item for item in decoded if isinstance(item, dict)]
+
     def _call(
         self, method: str, path: str, body: dict[str, Any] | None
     ) -> dict[str, Any]:
-        """Send one request and decode the reply.
+        """Send one request and decode the reply as an object.
 
         Args:
             method: HTTP method.
@@ -120,6 +142,31 @@ class SessionClient:
         Raises:
             SessionClientError: If the request failed or the reply was not a
                 JSON object.
+        """
+        decoded = self._request(method, path, body)
+
+        if not isinstance(decoded, dict):
+            raise SessionClientError(
+                f"Session Manager returned {type(decoded).__name__}, "
+                "expected a JSON object"
+            )
+
+        return decoded
+
+    def _request(self, method: str, path: str, body: dict[str, Any] | None) -> Any:
+        """Send one request and decode whatever JSON came back.
+
+        Args:
+            method: HTTP method.
+            path: Path below the base URL, starting with a slash.
+            body: JSON request body, or None for a bodyless request.
+
+        Returns:
+            The decoded reply, an object or an array.
+
+        Raises:
+            SessionClientError: If the request failed or the reply was
+                not JSON.
         """
         url = f"{self._base_url}{path}"
         headers: dict[str, str] = {}
@@ -162,12 +209,6 @@ class SessionClient:
             raise SessionClientError(
                 f"Session Manager returned a non-JSON reply: {error}"
             ) from error
-
-        if not isinstance(decoded, dict):
-            raise SessionClientError(
-                f"Session Manager returned {type(decoded).__name__}, "
-                "expected a JSON object"
-            )
 
         return decoded
 
@@ -215,6 +256,16 @@ class NullSessionClient:
         raise SessionClientError(
             "Session recording is disabled; no session detail is available"
         )
+
+    def list_sessions(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Report that there is nothing to list.
+
+        Returns:
+            An empty list. A console asking what has run recently wants
+            an empty answer, not an error: nothing has been recorded
+            because recording is off, which is not a failure.
+        """
+        return []
 
 
 def _read_error_body(error: urllib.error.HTTPError) -> str:
