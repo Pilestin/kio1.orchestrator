@@ -157,7 +157,9 @@ Workflow wf-tools01 (mixed): 2 ok, 1 error, 0 not dispatched
 
 ## What a tool cannot do yet
 
-- **No retries.** A failed call is reported, not retried.
+- **No retry of the same target.** A failed call is not retried on the same
+  target, though it may move to another one declaring the same capability;
+  see [Failover](failover.md).
 - **One timeout for everyone.** `dispatch.request_timeout` applies to every
   target. A slow tool needs the timeout raised for all of them.
 - **A `verdict` only stops things you gate on.** Reporting `defect` is

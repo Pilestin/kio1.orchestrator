@@ -36,6 +36,9 @@ class HttpToolSpec:
             which is the useful default for an API that already speaks it.
         result_path: Keys to follow into the decoded response to find the part
             worth keeping. Empty keeps the whole response.
+        health_url: URL that answers a liveness check. Empty means this API
+            cannot be probed, and KIO1 will not guess a path: an arbitrary
+            REST API has no convention it may assume.
     """
 
     url: str
@@ -43,6 +46,7 @@ class HttpToolSpec:
     headers: dict[str, str] = field(default_factory=dict)
     body: Any = None
     result_path: tuple[str, ...] = ()
+    health_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -230,7 +234,7 @@ def load_agent_entry(agent_id: str, agent_data: dict[str, Any]) -> AgentEndpoint
     Raises:
         ValueError: If the entry is malformed.
     """
-    return load_agent_registry({agent_id: agent_data}).entries()[0]
+    return load_agent_registry({agent_id: agent_data}, announce=False).entries()[0]
 
 
 def _read_capabilities(agent_id: str, agent_data: dict[str, Any]) -> frozenset[str]:
@@ -335,6 +339,10 @@ def _read_tool_entry(
                 f"{sorted(_ALLOWED_HTTP_METHODS)}."
             )
 
+        health_url = agent_data.get("health_url", "")
+        if not isinstance(health_url, str):
+            raise ValueError(f"dispatch.agents.{agent_id}.health_url must be a string.")
+
         result_path_data = agent_data.get("result_path", [])
         if not isinstance(result_path_data, list) or not all(
             isinstance(key, str) and key for key in result_path_data
@@ -360,6 +368,7 @@ def _read_tool_entry(
                 headers=_read_string_map(agent_id, agent_data, "headers"),
                 body=agent_data.get("body"),
                 result_path=tuple(result_path_data),
+                health_url=health_url.strip(),
             ),
         )
 
@@ -395,11 +404,16 @@ def _read_tool_entry(
     )
 
 
-def load_agent_registry(agents_data: dict[str, object]) -> AgentRegistry:
+def load_agent_registry(
+    agents_data: dict[str, object], *, announce: bool = True
+) -> AgentRegistry:
     """Build an `AgentRegistry` from the `dispatch.agents` configuration block.
 
     Args:
         agents_data: Decoded `dispatch.agents` object, keyed by agent id.
+        announce: Whether to log what was loaded. Off for the single-entry
+            path, which runs on every background refresh and would otherwise
+            fill the log with a line per agent per pass.
 
     Returns:
         A registry containing every configured agent.
@@ -496,6 +510,7 @@ def load_agent_registry(agents_data: dict[str, object]) -> AgentRegistry:
             description=description.strip(),
         )
 
-    logger.info("Agent registry loaded: agents=%s", sorted(agents))
+    if announce:
+        logger.info("Agent registry loaded: agents=%s", sorted(agents))
 
     return AgentRegistry(agents)

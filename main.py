@@ -1,5 +1,6 @@
 import logging
 import sys
+from dataclasses import replace
 
 from core.chat_history import (
     append_assistant_message,
@@ -7,9 +8,9 @@ from core.chat_history import (
     create_chat_file,
     load_messages,
 )
-from core.config_loader import load_config, resolve_discovery
+from core.config_loader import load_config
 from core.formatter import format_json, parse_response
-from core.prompt_loader import load_prompt
+from core.prompt_loader import fill_catalog, load_prompt
 from core.session_logger import (
     configure_console_encoding,
     generate_session_id,
@@ -25,6 +26,7 @@ from core.telemetry import (
     trace_provider_preload,
     trace_turn,
 )
+from dispatch.directory import STATUS_UNREACHABLE, AgentDirectory
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_executor import dispatch_plan, render_summary
 from providers.provider_client import load_provider
@@ -57,15 +59,19 @@ def main() -> None:
         }
 
         with trace_operation("kio1.startup", startup_attributes):
-            # Agents that describe themselves are asked first, so the catalog
-            # below and the routing table are built from the same, complete
-            # set of targets.
-            config.dispatch = resolve_discovery(config.dispatch)
+            # Read once and kept as a template: the catalog inside it is filled
+            # per turn, because the directory changes while the session runs.
+            prompt_template = load_prompt(config.prompt_path)
 
-            # The registry is passed in so the prompt's catalog is generated
-            # from the same entries that decide routing. Editing config.json
-            # is then the only step needed to teach KIO1 about a new target.
-            system_prompt = load_prompt(config.prompt_path, config.dispatch.registry)
+            directory = AgentDirectory(
+                config.dispatch.registry,
+                discovery=config.dispatch.discovery,
+                health=config.dispatch.health,
+            )
+            # Reads every manifest and probes every target before the first
+            # turn, then keeps doing both in the background.
+            directory.start()
+            system_prompt = fill_catalog(prompt_template, directory.snapshot())
 
             provider = load_provider(config.provider, config.allowed_providers)
             client = provider.create_client(config)
@@ -93,6 +99,21 @@ def main() -> None:
         )
         shutdown_telemetry()
         sys.exit(1)
+
+    ready = [record for record in directory.records() if record.usable]
+    withdrawn = [
+        record.agent_id
+        for record in directory.records()
+        if record.status == STATUS_UNREACHABLE
+    ]
+    print(
+        f"Targets: {len(ready)} available"
+        + (
+            f", {len(withdrawn)} not answering ({', '.join(sorted(withdrawn))})"
+            if withdrawn
+            else ""
+        )
+    )
 
     print("KIO1 Orchestrator (type 'exit' to quit)")
     print("-" * 40)
@@ -130,6 +151,11 @@ def main() -> None:
                     provider=config.provider,
                     model=config.model,
                 ):
+                    # Built fresh each turn: an agent may have joined,
+                    # gone away, or changed what it offers since the last one.
+                    registry = directory.snapshot()
+                    system_prompt = fill_catalog(prompt_template, registry)
+
                     messages = load_messages(chat_file)
                     messages.append({"role": "user", "content": query})
 
@@ -158,7 +184,7 @@ def main() -> None:
                     if transport is not None:
                         workflow_result = dispatch_plan(
                             parse_response(content),
-                            config.dispatch,
+                            replace(config.dispatch, registry=registry),
                             transport,
                         )
 
@@ -177,6 +203,8 @@ def main() -> None:
             model=config.model,
             success=session_success,
         )
+        directory.stop()
+
         if transport is not None:
             transport.close()
 

@@ -16,12 +16,12 @@ from core.service_telemetry import TraceContextMiddleware, init_service_tracing
 from core.session_client import SessionClient
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.agent_transport import HttpAgentTransport
+from dispatch.directory import AgentDirectory
 from services.session_manager.app import app as session_manager_app
 from services.session_manager.app import get_repository
 from services.session_manager.repository import InMemorySessionRepository
-from services.workflow_api.app import _State
+from services.workflow_api.app import _State, get_state
 from services.workflow_api.app import app as workflow_app
-from services.workflow_api.app import get_state
 from services.workflow_api.runner import WorkflowRunner
 from tests.test_services_integration import _serve
 from tools.dummy_agent import build_server, server_address
@@ -289,13 +289,15 @@ def test_one_request_produces_a_single_connected_trace(
     workflow_app.dependency_overrides[get_state] = lambda: _State(
         runner=WorkflowRunner(
             config=config,
-            system_prompt="You are KIO1.",
+            prompt_template="You are KIO1.",
             provider=PlanningProvider(),
             provider_client=None,
             recorder=session_client,
             transport=HttpAgentTransport(),
+            directory=AgentDirectory(config.dispatch.registry),
         ),
         session_client=session_client,
+        directory=AgentDirectory(config.dispatch.registry),
     )
 
     try:

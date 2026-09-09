@@ -126,16 +126,20 @@ Workflow wf-disc01 (sequential): 3 ok, 0 error, 0 not dispatched
   s3 Pytest test_execution           ok    12015 ms
 ```
 
+## Startup is only the beginning
+
+Everything above describes one fetch. On its own that would answer "what
+existed when we booted", which goes stale the moment an agent restarts.
+
+Sources are re-read on an interval, agents are probed so one that went away
+stops being offered, and an agent can push its own manifest to a running
+orchestrator instead of waiting to be asked. See
+[The live directory](live-directory.md).
+
 ## Limits
 
-- **Startup only.** Manifests are fetched once. An agent that comes up later,
-  or changes what it can do, is not noticed until KIO1 restarts.
-- **Pull only.** KIO1 asks; an agent cannot announce itself. That needs a
-  registration endpoint on a running KIO1, which the terminal application
-  does not have.
-- **No health tracking.** A discovered agent that later goes down stays in
-  the catalog, and a step addressed to it fails at dispatch with a clear
-  message. Nothing removes it from the model's options.
 - **Reachable at fetch time is the only verification.** A manifest that
-  parses is trusted; there is no probe confirming the agent really answers
-  the capabilities it claims.
+  parses and an agent that answers a probe are both trusted; nothing confirms
+  the agent really does what its capabilities claim.
+- **One manifest per source.** A source that answers with several agents is
+  fine, but there is no pagination for a registry with hundreds.

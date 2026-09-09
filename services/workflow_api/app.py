@@ -3,6 +3,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from hmac import compare_digest
 from typing import Any
 from uuid import UUID
 
@@ -10,17 +11,23 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, s
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from core.config_loader import load_config, resolve_discovery
+from core.config_loader import load_config
 from core.prompt_loader import load_prompt
 from core.service_telemetry import TraceContextMiddleware
 from core.session_client import NullSessionClient, SessionClient, SessionClientError
 from core.telemetry import init_telemetry, shutdown_telemetry, trace_provider_preload
+from dispatch.directory import ORIGIN_REGISTRATION, AgentDirectory
+from dispatch.discovery import DiscoveryError, ManifestSource, entries_from_manifest
 from providers.provider_client import load_provider
 from services.workflow_api.runner import WorkflowRunner, build_runner
 
 logger = logging.getLogger(__name__)
 
 SESSION_MANAGER_URL_ENV = "KIO1_SESSION_MANAGER_URL"
+# Registering an agent means task text and upstream results start flowing
+# to an address someone supplied over the network. That is not something to
+# leave open by default, so the endpoints stay closed until a token is set.
+REGISTRY_TOKEN_ENV = "KIO1_REGISTRY_TOKEN"
 
 
 class RunWorkflowRequest(BaseModel):
@@ -37,12 +44,23 @@ class RunWorkflowResponse(BaseModel):
     status_url: str
 
 
+class RegisterAgentRequest(BaseModel):
+    """An agent describing itself to a running orchestrator.
+
+    The body is a manifest in any shape `dispatch.discovery` accepts, so an
+    agent that already publishes one can post the same document.
+    """
+
+    manifest: dict[str, Any] | list[Any]
+
+
 @dataclass
 class _State:
     """Everything resolved once at startup and reused per request."""
 
     runner: WorkflowRunner
     session_client: SessionClient | NullSessionClient
+    directory: AgentDirectory
 
 
 _state: _State | None = None
@@ -57,8 +75,17 @@ def _build_state() -> _State:
     config = load_config()
     init_telemetry(config.telemetry, llm=config.model)
 
-    config.dispatch = resolve_discovery(config.dispatch)
-    system_prompt = load_prompt(config.prompt_path, config.dispatch.registry)
+    # The prompt keeps its catalog placeholder: the runner fills it per
+    # request from whatever the directory can reach at that moment.
+    prompt_template = load_prompt(config.prompt_path)
+
+    directory = AgentDirectory(
+        config.dispatch.registry,
+        discovery=config.dispatch.discovery,
+        health=config.dispatch.health,
+    )
+    directory.start()
+
     provider = load_provider(config.provider, config.allowed_providers)
     provider_client = provider.create_client(config)
 
@@ -95,12 +122,14 @@ def _build_state() -> _State:
     return _State(
         runner=build_runner(
             config=config,
-            system_prompt=system_prompt,
+            prompt_template=prompt_template,
             provider=provider,
             provider_client=provider_client,
             recorder=session_client,
+            directory=directory,
         ),
         session_client=session_client,
+        directory=directory,
     )
 
 
@@ -117,6 +146,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state, _state = _state, None
 
         if state is not None:
+            state.directory.stop()
             state.runner.transport.close()
 
         shutdown_telemetry()
@@ -236,3 +266,153 @@ def get_workflow(
         ) from error
 
     return JSONResponse(content=detail)
+
+
+def _require_registry_token(request: Request) -> None:
+    """Reject a registry call that is not authorised.
+
+    Args:
+        request: The incoming request, read for its `Authorization` header.
+
+    Raises:
+        HTTPException: 503 when no token is configured, so the endpoints stay
+            closed on a deployment that never opted in; 401 when the header
+            does not match.
+    """
+    expected = os.environ.get(REGISTRY_TOKEN_ENV, "").strip()
+
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "The agent registry API is closed. Set "
+                f"{REGISTRY_TOKEN_ENV} to a shared secret to open it, and send "
+                "it as 'Authorization: Bearer <token>'."
+            ),
+        )
+
+    header = request.headers.get("Authorization", "")
+    offered = header[len("Bearer ") :].strip() if header.startswith("Bearer ") else ""
+
+    if not compare_digest(offered, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid registry token",
+        )
+
+
+@app.get("/registry/agents")
+def list_agents(
+    request: Request,
+    state: _State = Depends(get_state),
+) -> dict[str, Any]:
+    """Return every known target and what is currently known about it.
+
+    Args:
+        request: The incoming request, checked for the registry token.
+        state: The live directory.
+
+    Returns:
+        Every record, including the ones currently withdrawn, so a caller can
+        see *why* an agent is not being planned for.
+    """
+    _require_registry_token(request)
+
+    return {"agents": [record.to_summary() for record in state.directory.records()]}
+
+
+@app.post("/registry/agents", status_code=status.HTTP_201_CREATED)
+def register_agent(
+    body: RegisterAgentRequest,
+    request: Request,
+    state: _State = Depends(get_state),
+) -> dict[str, Any]:
+    """Add or update targets from a manifest an agent posted about itself.
+
+    The manifest is probed before the agent is trusted, and the outcome is in
+    the response: an agent that did not answer is recorded as `unreachable`
+    rather than rejected, so a slow starter joins on the next health pass
+    instead of having to post again.
+
+    Args:
+        body: The manifest, in any shape discovery accepts.
+        request: The incoming request, checked for the registry token.
+        state: The live directory.
+
+    Returns:
+        A summary of every record the manifest produced.
+
+    Raises:
+        HTTPException: 400 when the manifest cannot be read or names nothing
+            usable.
+    """
+    _require_registry_token(request)
+
+    source = ManifestSource(url=str(request.url))
+
+    try:
+        entries = entries_from_manifest(body.manifest, source)
+    except DiscoveryError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    registered = []
+
+    for agent_id, entry in entries.items():
+        try:
+            record = state.directory.register(agent_id, entry, ORIGIN_REGISTRATION)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{agent_id}: {error}",
+            ) from error
+
+        registered.append(record.to_summary())
+
+    logger.info(
+        "Agents registered: %s", ", ".join(item["agent_id"] for item in registered)
+    )
+
+    return {"agents": registered}
+
+
+@app.delete("/registry/agents/{agent_id}")
+def unregister_agent(
+    agent_id: str,
+    request: Request,
+    state: _State = Depends(get_state),
+) -> dict[str, str]:
+    """Remove a discovered or registered target.
+
+    Args:
+        agent_id: The target to remove.
+        request: The incoming request, checked for the registry token.
+        state: The live directory.
+
+    Returns:
+        Confirmation that it is gone.
+
+    Raises:
+        HTTPException: 404 when it is unknown, 409 when it came from
+            `config.json` and so cannot be removed while running.
+    """
+    _require_registry_token(request)
+
+    record = state.directory.record_for(agent_id)
+
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown agent {agent_id}"
+        )
+
+    if not state.directory.forget(agent_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{agent_id} is defined in config.json, which is its source of "
+                "truth. Remove it there and restart."
+            ),
+        )
+
+    return {"agent_id": agent_id, "status": "removed"}

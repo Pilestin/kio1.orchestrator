@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from core.config_loader import Config, DispatchConfig
 from core.session_client import SessionClientError
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
+from dispatch.directory import AgentDirectory
 from services.workflow_api.app import _State, app, get_state
 from services.workflow_api.runner import WorkflowRunner
 
@@ -138,11 +139,14 @@ def make_runner(
     """Assemble a runner from fakes."""
     return WorkflowRunner(
         config=config if config is not None else make_config(),
-        system_prompt="You are KIO1.",
+        prompt_template="You are KIO1.",
         provider=provider,
         provider_client=None,
         recorder=recorder,
         transport=transport if transport is not None else FakeTransport(),
+        directory=AgentDirectory(
+            (config if config is not None else make_config()).dispatch.registry
+        ),
     )
 
 
@@ -308,6 +312,7 @@ def build_client(
     app.dependency_overrides[get_state] = lambda: _State(
         runner=spy,  # type: ignore[arg-type]
         session_client=session_client,  # type: ignore[arg-type]
+        directory=AgentDirectory(AgentRegistry({})),
     )
 
     return TestClient(app), spy

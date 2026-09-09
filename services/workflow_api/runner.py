@@ -5,8 +5,11 @@ from uuid import UUID
 
 from core.config_loader import Config
 from core.formatter import parse_response
+from core.prompt_loader import fill_catalog
 from core.telemetry import trace_gen_ai_request, trace_operation
+from dispatch.agent_registry import AgentRegistry
 from dispatch.agent_transport import AgentTransport
+from dispatch.directory import AgentDirectory
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_executor import (
     STATUS_OK,
@@ -34,17 +37,21 @@ class SessionRecorder(Protocol):
 class WorkflowRunner:
     """Turns one request into a plan, dispatches it, and records the outcome.
 
-    Everything the run needs is resolved once at service startup: the provider
-    client and system prompt are reused across requests rather than reloaded
-    per call.
+    The provider client and the prompt file are resolved once at startup. The
+    set of targets is not: it changes while the service runs, so each run
+    takes one snapshot and uses it for both the catalog the model sees and the
+    routing that follows. Planning against one set of agents and dispatching
+    against another would produce steps addressed to agents that had just gone
+    away.
     """
 
     config: Config
-    system_prompt: str
+    prompt_template: str
     provider: Any
     provider_client: Any
     recorder: SessionRecorder
     transport: AgentTransport
+    directory: AgentDirectory
 
     def run(self, session_id: UUID, request_text: str) -> None:
         """Execute one workflow to completion, recording progress as it goes.
@@ -69,8 +76,10 @@ class WorkflowRunner:
         with trace_operation("kio1.workflow.run", attributes):
             self.recorder.update_session(session_id, status="running")
 
+            registry = self.directory.snapshot()
+
             try:
-                plan = self._build_plan(session_id, request_text)
+                plan = self._build_plan(session_id, request_text, registry)
             except Exception as error:
                 logger.exception("Planning failed: session_id=%s", session_id)
                 self.recorder.update_session(
@@ -89,11 +98,13 @@ class WorkflowRunner:
             try:
                 result = execute_workflow(
                     plan,
-                    self.config.dispatch.registry,
+                    registry,
                     self.transport,
                     timeout=self.config.dispatch.request_timeout,
                     max_parallel_steps=self.config.dispatch.max_parallel_steps,
                     workspace_data=self.config.dispatch.workspace.to_data(),
+                    policy=self.config.dispatch.policy,
+                    failover=self.config.dispatch.failover,
                 )
             except Exception as error:
                 logger.exception("Dispatch failed: session_id=%s", session_id)
@@ -117,12 +128,15 @@ class WorkflowRunner:
                 result.failed,
             )
 
-    def _build_plan(self, session_id: UUID, request_text: str) -> WorkflowPlan:
+    def _build_plan(
+        self, session_id: UUID, request_text: str, registry: AgentRegistry
+    ) -> WorkflowPlan:
         """Ask the model for a workflow plan and validate it.
 
         Args:
             session_id: The session this run belongs to, for trace correlation.
             request_text: The user request.
+            registry: The targets to describe in the prompt's catalog.
 
         Returns:
             The validated plan.
@@ -144,7 +158,7 @@ class WorkflowRunner:
             response = self.provider.send_request(
                 config=self.config,
                 client=self.provider_client,
-                system_prompt=self.system_prompt,
+                system_prompt=fill_catalog(self.prompt_template, registry),
                 messages=messages,
             )
 
@@ -193,32 +207,42 @@ class WorkflowRunner:
 
 def build_runner(
     config: Config,
-    system_prompt: str,
+    prompt_template: str,
     provider: Any,
     provider_client: Any,
     recorder: SessionRecorder,
     transport: AgentTransport | None = None,
+    directory: AgentDirectory | None = None,
 ) -> WorkflowRunner:
     """Assemble a runner with the transport the configuration selects.
 
     Args:
         config: Application configuration.
-        system_prompt: The loaded system prompt.
+        prompt_template: The prompt as read from disk, catalog placeholder
+            still in it.
         provider: The loaded provider module.
         provider_client: The provider's client object.
         recorder: Session Manager client used to record progress.
         transport: Transport override, mainly for tests.
+        directory: The live set of targets. Omitted builds one holding just
+            the configured registry, which is how a run behaves with neither
+            discovery nor health checks turned on.
 
     Returns:
         A ready runner.
     """
     return WorkflowRunner(
         config=config,
-        system_prompt=system_prompt,
+        prompt_template=prompt_template,
         provider=provider,
         provider_client=provider_client,
         recorder=recorder,
         transport=(
             transport if transport is not None else build_transport(config.dispatch)
+        ),
+        directory=(
+            directory
+            if directory is not None
+            else AgentDirectory(config.dispatch.registry)
         ),
     )

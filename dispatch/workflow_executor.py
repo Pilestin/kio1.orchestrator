@@ -11,9 +11,10 @@ from core.telemetry import (
     trace_step_dispatch,
     trace_workflow_execution,
 )
-from dispatch.agent_registry import AgentRegistry
+from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.agent_transport import AgentTransport, AgentTransportError
-from dispatch.policy import Policy, apply_gates, applies_to, providers_of
+from dispatch.failover import FailoverConfig
+from dispatch.policy import Policy, applies_to, apply_gates, providers_of
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_planner import (
     ExecutionMessage,
@@ -46,6 +47,23 @@ _KNOWN_VERDICTS = frozenset({VERDICT_DEFECT, VERDICT_CLEAN, VERDICT_INCONCLUSIVE
 
 
 @dataclass(frozen=True)
+class StepAttempt:
+    """One target's answer to a step, kept even when another one followed.
+
+    Attributes:
+        agent_id: The target that was asked.
+        status: `ok` or `error`.
+        duration_ms: Wall-clock time this attempt took.
+        error: Why it failed, when it did.
+    """
+
+    agent_id: str
+    status: str
+    duration_ms: int = 0
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class StepResult:
     """The outcome of a single workflow step.
 
@@ -62,6 +80,12 @@ class StepResult:
             the call itself worked.
         review_required: Whether the agent asked for a human to look, usually
             because it was not confident.
+        attempts: Every target this step was tried against, in order. One
+            entry is the ordinary case; more than one means the step was
+            carried out somewhere else after the first could not.
+        planned_agent_id: The agent the plan named, when the step ran
+            somewhere else. None when it ran where it was sent, so a reader
+            never has to compare two fields to find out whether it moved.
     """
 
     step_id: str
@@ -73,6 +97,8 @@ class StepResult:
     error: str | None = None
     verdict: str | None = None
     review_required: bool = False
+    attempts: tuple[StepAttempt, ...] = ()
+    planned_agent_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +136,7 @@ def execute_workflow(
     max_parallel_steps: int,
     workspace_data: dict[str, Any] | None = None,
     policy: Policy | None = None,
+    failover: FailoverConfig | None = None,
 ) -> WorkflowResult:
     """Route a workflow plan to agents and collect their results.
 
@@ -123,15 +150,20 @@ def execute_workflow(
         workspace_data: The `data` fragment naming the code under analysis.
         policy: Gates deciding what must have passed before a step may run.
             Omitted runs the plan exactly as it was produced.
+        failover: Whether a step may be carried out by a target other than the
+            one the plan named. Omitted keeps every step where it was sent.
 
     Returns:
         One `StepResult` per plan step, in the plan's own step order.
     """
     policy = policy if policy is not None else Policy()
+    failover = failover if failover is not None else FailoverConfig()
     # Gates add the ordering they need before routing, so a guarded step is
     # never dispatched alongside the step that has to clear it.
     plan = apply_gates(plan, policy)
-    routing = route_plan(plan, registry, workspace_data=workspace_data)
+    routing = route_plan(
+        plan, registry, workspace_data=workspace_data, failover=failover
+    )
 
     with trace_workflow_execution(
         workflow_id=plan.workflow_id,
@@ -159,6 +191,7 @@ def execute_workflow(
                 transport,
                 timeout=timeout,
                 max_parallel_steps=max_parallel_steps,
+                alternatives=routing.alternatives,
             )
         else:
             if plan.execution_mode == "mixed":
@@ -175,6 +208,7 @@ def execute_workflow(
                 registry,
                 transport,
                 timeout=timeout,
+                alternatives=routing.alternatives,
             )
 
     results = _merge_results(plan, routing, dispatched)
@@ -200,6 +234,7 @@ def _execute_sequential(
     transport: AgentTransport,
     *,
     timeout: float,
+    alternatives: dict[str, tuple[AgentEndpoint, ...]] | None = None,
 ) -> dict[str, StepResult]:
     """Dispatch messages one at a time, stopping at the first failure.
 
@@ -212,14 +247,21 @@ def _execute_sequential(
         registry: Registry used to resolve each message's endpoint.
         transport: Transport used to deliver execution messages.
         timeout: Seconds to wait for each agent's reply.
+        alternatives: Further candidates per step id, from routing.
 
     Returns:
         Step results keyed by step id, covering only the steps that ran.
     """
+    alternatives = alternatives if alternatives is not None else {}
     results: dict[str, StepResult] = {}
 
     for message in messages:
-        result = _dispatch_step(message, registry, transport, timeout=timeout)
+        result = _dispatch_step(
+            message,
+            _candidates_for_message(message, registry, alternatives),
+            transport,
+            timeout=timeout,
+        )
         results[message.step_id] = result
 
         if result.status == STATUS_ERROR:
@@ -239,6 +281,7 @@ def _dispatch_concurrently(
     *,
     timeout: float,
     max_parallel_steps: int,
+    alternatives: dict[str, tuple[AgentEndpoint, ...]] | None = None,
 ) -> dict[str, StepResult]:
     """Dispatch every message concurrently and wait for all of them.
 
@@ -274,7 +317,9 @@ def _dispatch_concurrently(
                 context.run,
                 _dispatch_step,
                 message,
-                registry,
+                _candidates_for_message(
+                    message, registry, alternatives if alternatives else {}
+                ),
                 transport,
                 timeout=timeout,
             )
@@ -392,6 +437,7 @@ def _execute_levels(
                 transport,
                 timeout=timeout,
                 max_parallel_steps=max_parallel_steps,
+                alternatives=routing.alternatives,
             )
             results.update(level_results)
 
@@ -408,9 +454,10 @@ def _execute_levels(
             if message.step_id in blocked or block_if_gated(message):
                 continue
 
+            prepared = _with_upstream_data(message, plan, results)
             result = _dispatch_step(
-                _with_upstream_data(message, plan, results),
-                registry,
+                prepared,
+                _candidates_for_message(prepared, registry, routing.alternatives),
                 transport,
                 timeout=timeout,
             )
@@ -461,39 +508,117 @@ def _with_upstream_data(
     return replace(message, data={**message.data, "upstream": upstream})
 
 
-def _dispatch_step(
+def _candidates_for_message(
     message: ExecutionMessage,
     registry: AgentRegistry,
+    alternatives: dict[str, tuple[AgentEndpoint, ...]],
+) -> tuple[AgentEndpoint, ...]:
+    """Return the targets a step may be tried against, best first.
+
+    Args:
+        message: The execution message, addressed to the first candidate.
+        registry: Registry used to resolve that first candidate.
+        alternatives: Further candidates per step id, from routing.
+
+    Returns:
+        The full ordered list.
+    """
+    first = registry.resolve(message.agent_id)
+    rest = alternatives.get(message.step_id, ())
+
+    return ((first,) if first is not None else ()) + rest
+
+
+def _dispatch_step(
+    message: ExecutionMessage,
+    candidates: tuple[AgentEndpoint, ...],
     transport: AgentTransport,
     *,
     timeout: float,
 ) -> StepResult:
-    """Deliver one execution message and interpret the agent's reply.
+    """Deliver a step, moving to the next target when one cannot carry it out.
+
+    The plan named an agent, but what it asked for was a capability. When the
+    named agent fails and another target declares the same capability, the
+    step is tried there rather than abandoned — and every attempt is recorded,
+    so a step that moved never looks like one that ran where it was sent.
 
     Args:
-        message: The execution message to deliver.
-        registry: Registry used to resolve the message's endpoint.
+        message: The execution message, addressed to the first candidate.
+        candidates: Targets to try, in order.
         transport: Transport used to deliver the message.
-        timeout: Seconds to wait for the agent's reply.
+        timeout: Seconds to wait for each reply.
 
     Returns:
-        The step's result. Transport and protocol failures are captured as an
-        `error` result rather than raised, so one unreachable agent cannot
-        abort the whole workflow.
+        The step's result, carrying the whole attempt history. Transport and
+        protocol failures are captured as an `error` result rather than
+        raised, so one unreachable agent cannot abort the whole workflow.
     """
-    agent = registry.resolve(message.agent_id)
-
-    if agent is None:
-        # Unreachable in practice: route_plan only emits messages for agents
-        # the registry resolved. Kept so this function is safe to call alone.
+    if not candidates:
+        # Unreachable in practice: route_plan only emits messages for steps
+        # something can carry out. Kept so this is safe to call alone.
         return StepResult(
             step_id=message.step_id,
             agent_id=message.agent_id,
             capability=message.capability,
             status=STATUS_ERROR,
-            error=f"No endpoint configured for {message.agent_id}",
+            error=f"No target available for {message.agent_id}",
         )
 
+    attempts: list[StepAttempt] = []
+    result = None
+
+    for index, agent in enumerate(candidates):
+        addressed = (
+            message
+            if agent.agent_id == message.agent_id
+            else replace(message, agent_id=agent.agent_id, endpoint=agent.endpoint)
+        )
+        result = _attempt_step(addressed, agent, transport, timeout=timeout)
+        attempts.append(
+            StepAttempt(
+                agent_id=agent.agent_id,
+                status=result.status,
+                duration_ms=result.duration_ms,
+                error=result.error,
+            )
+        )
+
+        if result.status == STATUS_OK:
+            break
+
+        if index + 1 < len(candidates):
+            logger.warning(
+                "Step failed on %s; trying %s next: step_id=%s capability=%s",
+                agent.agent_id,
+                candidates[index + 1].agent_id,
+                message.step_id,
+                message.capability,
+            )
+
+    assert result is not None  # candidates is non-empty
+
+    return replace(result, attempts=tuple(attempts))
+
+
+def _attempt_step(
+    message: ExecutionMessage,
+    agent: AgentEndpoint,
+    transport: AgentTransport,
+    *,
+    timeout: float,
+) -> StepResult:
+    """Deliver one execution message to one target and read its reply.
+
+    Args:
+        message: The execution message, already addressed to this target.
+        agent: The target to deliver it to.
+        transport: Transport used to deliver the message.
+        timeout: Seconds to wait for the reply.
+
+    Returns:
+        The outcome of this single attempt.
+    """
     started_at = perf_counter()
 
     with trace_step_dispatch(
@@ -780,7 +905,12 @@ def _merge_results(
 
     for step in plan.steps:
         if step.step_id in dispatched:
-            results.append(dispatched[step.step_id])
+            outcome = dispatched[step.step_id]
+            results.append(
+                outcome
+                if outcome.agent_id == step.agent_id
+                else replace(outcome, planned_agent_id=step.agent_id)
+            )
             continue
 
         if step.step_id in skipped_reasons:
@@ -835,20 +965,25 @@ def render_summary(result: WorkflowResult) -> str:
     )
 
     for step in result.results:
-        detail = ""
+        notes: list[str] = []
 
         if step.status == STATUS_OK:
-            notes = [f"{step.duration_ms} ms"]
+            notes.append(f"{step.duration_ms} ms")
 
             if step.verdict is not None:
                 notes.append(step.verdict)
 
             if step.review_required:
                 notes.append("review required")
-
-            detail = "  ".join(notes)
         elif step.error:
-            detail = step.error
+            notes.append(step.error)
+
+        if step.planned_agent_id:
+            # The agent column shows who ran it. Without this, a step that
+            # moved reads as a step the model planned there.
+            notes.append(f"planned {step.planned_agent_id}")
+
+        detail = "  ".join(notes)
 
         lines.append(
             f"  {step.step_id:<{step_width}} {step.agent_id:<{agent_width}} "
@@ -896,4 +1031,5 @@ def dispatch_plan(
         max_parallel_steps=dispatch_config.max_parallel_steps,
         workspace_data=dispatch_config.workspace.to_data(),
         policy=dispatch_config.policy,
+        failover=dispatch_config.failover,
     )

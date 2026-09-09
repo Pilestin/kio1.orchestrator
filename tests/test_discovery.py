@@ -13,7 +13,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from core.config_loader import DispatchConfig, load_config, resolve_discovery
+from core.config_loader import DispatchConfig, load_config
 from core.prompt_loader import render_catalog
 from dispatch.agent_registry import (
     KIND_CLI,
@@ -22,6 +22,7 @@ from dispatch.agent_registry import (
     load_agent_registry,
     merge_registries,
 )
+from dispatch.directory import AgentDirectory
 from dispatch.discovery import (
     DiscoveryConfig,
     DiscoveryError,
@@ -315,21 +316,27 @@ def test_discovery_reaches_both_the_registry_and_the_prompt(
         ),
     )
 
-    resolved = resolve_discovery(dispatch)
-    catalog = render_catalog(resolved.registry)
+    directory = AgentDirectory(dispatch.registry, discovery=dispatch.discovery)
+    directory.refresh()
+    resolved = directory.snapshot()
+    catalog = render_catalog(resolved)
 
-    assert resolved.registry.agent_ids() == {"Pytest", "KIO7"}
+    assert resolved.agent_ids() == {"Pytest", "KIO7"}
     assert "**KIO7** — Generates and explains code." in catalog
     assert "`code_generation`" in catalog
     # The hand-written entry is untouched by discovery.
-    local = resolved.registry.resolve("Pytest")
+    local = resolved.resolve("Pytest")
     assert local is not None and local.kind == KIND_CLI
 
 
-def test_a_deployment_with_no_sources_makes_no_network_calls() -> None:
-    dispatch = DispatchConfig(enabled=True, registry=AgentRegistry({}))
+def test_a_deployment_with_no_sources_is_left_as_configured() -> None:
+    configured = load_agent_registry(
+        {"KIO2": {"endpoint": "http://127.0.0.1:8102", "capabilities": ["diagnosis"]}}
+    )
+    directory = AgentDirectory(configured)
+    directory.refresh()
 
-    assert resolve_discovery(dispatch) is dispatch
+    assert directory.snapshot().agent_ids() == {"KIO2"}
 
 
 def test_a_broken_manifest_entry_is_dropped_not_fatal(manifest_url: str) -> None:
@@ -340,11 +347,13 @@ def test_a_broken_manifest_entry_is_dropped_not_fatal(manifest_url: str) -> None
             {"agent_id": "KIO7", "capabilities": ["code_generation"]},
         ]
     )
-    dispatch = DispatchConfig(
-        discovery=DiscoveryConfig(sources=(ManifestSource(url=manifest_url),))
+    directory = AgentDirectory(
+        AgentRegistry({}),
+        discovery=DiscoveryConfig(sources=(ManifestSource(url=manifest_url),)),
     )
+    directory.refresh()
 
-    assert resolve_discovery(dispatch).registry.agent_ids() == {"KIO7"}
+    assert directory.snapshot().agent_ids() == {"KIO7"}
 
 
 def test_a_stub_agent_publishes_a_manifest_kio1_can_read() -> None:
@@ -360,19 +369,19 @@ def test_a_stub_agent_publishes_a_manifest_kio1_can_read() -> None:
     host, port = server_address(server)
 
     try:
-        dispatch = resolve_discovery(
-            DispatchConfig(
-                discovery=DiscoveryConfig(
-                    sources=(ManifestSource(url=f"http://{host}:{port}/manifest"),),
-                    timeout=5,
-                )
-            )
+        directory = AgentDirectory(
+            AgentRegistry({}),
+            discovery=DiscoveryConfig(
+                sources=(ManifestSource(url=f"http://{host}:{port}/manifest"),),
+                timeout=5,
+            ),
         )
+        directory.refresh()
     finally:
         server.shutdown()
         server.server_close()
 
-    kio11 = dispatch.registry.resolve("KIO11")
+    kio11 = directory.snapshot().resolve("KIO11")
 
     assert kio11 is not None
     assert kio11.capabilities == frozenset({"test_automation", "validation"})

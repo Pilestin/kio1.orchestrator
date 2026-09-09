@@ -76,6 +76,26 @@ def render_catalog(registry: AgentRegistry) -> str:
     return "\n".join(lines)
 
 
+def fill_catalog(prompt: str, registry: AgentRegistry) -> str:
+    """Substitute the catalog into an already-loaded prompt.
+
+    Separate from `load_prompt` because the registry changes while KIO1 runs:
+    the file is read once, and this is applied per request against whatever is
+    reachable at that moment.
+
+    Args:
+        prompt: The prompt text as written on disk.
+        registry: The targets to describe.
+
+    Returns:
+        The prompt, unchanged when it does not ask for a catalog.
+    """
+    if CATALOG_PLACEHOLDER not in prompt:
+        return prompt
+
+    return prompt.replace(CATALOG_PLACEHOLDER, render_catalog(registry))
+
+
 def load_prompt(prompt_path: str, registry: AgentRegistry | None = None) -> str:
     """Load a system prompt from a text file.
 
@@ -91,7 +111,7 @@ def load_prompt(prompt_path: str, registry: AgentRegistry | None = None) -> str:
     path = Path(prompt_path)
     prompt = path.read_text(encoding="utf-8").strip()
 
-    if registry is None or CATALOG_PLACEHOLDER not in prompt:
+    if registry is None:
         return prompt
 
-    return prompt.replace(CATALOG_PLACEHOLDER, render_catalog(registry))
+    return fill_catalog(prompt, registry)

@@ -12,12 +12,12 @@ from core.config_loader import Config, DispatchConfig
 from core.session_client import SessionClient
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.agent_transport import HttpAgentTransport
+from dispatch.directory import AgentDirectory
 from services.session_manager.app import app as session_manager_app
 from services.session_manager.app import get_repository
 from services.session_manager.repository import InMemorySessionRepository
-from services.workflow_api.app import _State
+from services.workflow_api.app import _State, get_state
 from services.workflow_api.app import app as workflow_app
-from services.workflow_api.app import get_state
 from services.workflow_api.runner import WorkflowRunner
 from tools.dummy_agent import build_server, server_address
 
@@ -147,15 +147,17 @@ def client(
     session_client = SessionClient(session_manager_url)
     runner = WorkflowRunner(
         config=config,
-        system_prompt="You are KIO1.",
+        prompt_template="You are KIO1.",
         provider=PlanningProvider(),
         provider_client=None,
         recorder=session_client,
         transport=HttpAgentTransport(),
+        directory=AgentDirectory(config.dispatch.registry),
     )
     workflow_app.dependency_overrides[get_state] = lambda: _State(
         runner=runner,
         session_client=session_client,
+        directory=AgentDirectory(AgentRegistry({})),
     )
 
     try:
@@ -236,13 +238,15 @@ def test_an_unreachable_agent_is_recorded_as_a_failed_session(
     workflow_app.dependency_overrides[get_state] = lambda: _State(
         runner=WorkflowRunner(
             config=config,
-            system_prompt="You are KIO1.",
+            prompt_template="You are KIO1.",
             provider=PlanningProvider(),
             provider_client=None,
             recorder=session_client,
             transport=HttpAgentTransport(),
+            directory=AgentDirectory(config.dispatch.registry),
         ),
         session_client=session_client,
+        directory=AgentDirectory(AgentRegistry({})),
     )
 
     try:
@@ -320,13 +324,15 @@ def test_declared_dependencies_reach_the_agent_and_the_lineage_record(
     workflow_app.dependency_overrides[get_state] = lambda: _State(
         runner=WorkflowRunner(
             config=config,
-            system_prompt="You are KIO1.",
+            prompt_template="You are KIO1.",
             provider=DependentPlanningProvider(),
             provider_client=None,
             recorder=session_client,
             transport=HttpAgentTransport(),
+            directory=AgentDirectory(config.dispatch.registry),
         ),
         session_client=session_client,
+        directory=AgentDirectory(AgentRegistry({})),
     )
 
     try:

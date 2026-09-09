@@ -29,6 +29,8 @@ All application settings are stored in `config.json` at the project root.
 | `dispatch.request_timeout` | number | Positive per-agent reply timeout in seconds (default: `60`) |
 | `dispatch.max_parallel_steps` | int | Positive bound on concurrent dispatches in `parallel` mode (default: `4`) |
 | `dispatch.transport` | string | How execution messages travel: `http` (default) or `nats` |
+| `dispatch.failover` | object | Whether a step may run on a target other than the one the plan named; see [Failover](failover.md) |
+| `dispatch.health` | object | How often targets are probed and refreshed, and when an unreachable one is withdrawn; see [The live directory](live-directory.md) |
 | `dispatch.discovery` | object | Manifest URLs agents describe themselves through; see [Discovery](discovery.md) |
 | `dispatch.policy` | object | Gates saying what must have passed before a step runs; see [Policy gates](policy-gates.md) |
 | `dispatch.agents` | object | Everything KIO1 can dispatch to, keyed by the id plans use. Each entry has a `type`: `kio` (default, the KIO1-KIO10 protocol), `http` (any REST API), or `cli` (a local command). See [Workflow Dispatch](workflow-dispatch.md) and [Connecting your own module](connecting-a-tool.md) |

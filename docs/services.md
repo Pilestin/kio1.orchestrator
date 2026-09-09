@@ -18,6 +18,11 @@ Workflow API  ──────────────►  Session Manager  �
 KIO agents (KIO2 … KIO13)
 ```
 
+> The Workflow API also exposes a registry API — `GET`/`POST /registry/agents`
+> and `DELETE /registry/agents/{agent_id}` — for agents that announce
+> themselves to a running orchestrator. It is closed until
+> `KIO1_REGISTRY_TOKEN` is set. See [The live directory](live-directory.md).
+
 ## Workflow API
 
 | Route | Purpose |

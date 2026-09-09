@@ -30,6 +30,17 @@
             "path": "E:/Kodlar/AI4SWeng/Trace/py-test-codes-for-focustracer/codes",
             "entry_point": "01_siparis_toplami_hesaplama.py"
         },
+        "health": {
+            "enabled": true,
+            "interval": 30,
+            "timeout": 3,
+            "failures_before_unreachable": 2,
+            "path": "/health"
+        },
+        "failover": {
+            "enabled": true,
+            "max_attempts": 2
+        },
         "policy": {
             "gates": [
                 {

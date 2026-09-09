@@ -2,7 +2,8 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from dispatch.agent_registry import AgentRegistry
+from dispatch.agent_registry import AgentEndpoint, AgentRegistry
+from dispatch.failover import FailoverConfig, candidates_for
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +96,20 @@ class SkippedStep:
 
 @dataclass(frozen=True)
 class RoutingResult:
-    """The outcome of routing a whole plan against the agent registry."""
+    """The outcome of routing a whole plan against the agent registry.
+
+    Attributes:
+        messages: One message per routable step, addressed to the first
+            candidate.
+        skipped: Steps nothing could carry out.
+        alternatives: Further candidates per step id, in the order they should
+            be tried if the first one cannot do it. Empty for every step when
+            failover is off, which is how routing behaved before it existed.
+    """
 
     messages: tuple[ExecutionMessage, ...]
     skipped: tuple[SkippedStep, ...]
+    alternatives: dict[str, tuple[AgentEndpoint, ...]] = field(default_factory=dict)
 
 
 def parse_plan(parsed_response: Any) -> WorkflowPlan:
@@ -365,12 +376,18 @@ def route_plan(
     registry: AgentRegistry,
     *,
     workspace_data: dict[str, Any] | None = None,
+    failover: FailoverConfig | None = None,
 ) -> RoutingResult:
-    """Turn plan steps into execution messages for the agents that exist.
+    """Turn plan steps into execution messages for the targets that exist.
 
-    Steps addressed to agents without a configured endpoint are reported as
-    skipped rather than raising, because a plan spanning KIO2-KIO13 will
-    always reference agents that are not deployed yet.
+    Steps nothing can carry out are reported as skipped rather than raising,
+    because a plan spanning KIO2-KIO13 will always reference agents that are
+    not deployed yet.
+
+    With failover on, a step whose named agent is missing or does not declare
+    the capability is not skipped while another target does declare it: the
+    plan asked for the capability, and the name was only the model's guess at
+    who provides it.
 
     Args:
         plan: The validated workflow plan.
@@ -378,19 +395,28 @@ def route_plan(
         workspace_data: The `data` fragment naming the code under analysis,
             attached to every message. Omitted means an empty `data`, which
             is how plans behaved before a workspace could be configured.
+        failover: Whether a step may be carried out by a target other than the
+            one the plan named. Omitted keeps every step where it was sent.
 
     Returns:
-        Execution messages for routable steps and a record of the rest.
+        Execution messages for routable steps, the further candidates for
+        each, and a record of the steps nothing can carry out.
     """
+    failover = failover if failover is not None else FailoverConfig()
     messages: list[ExecutionMessage] = []
     skipped: list[SkippedStep] = []
+    alternatives: dict[str, tuple[AgentEndpoint, ...]] = {}
 
     for step in plan.steps:
-        agent = registry.resolve(step.agent_id)
+        candidates = candidates_for(step.agent_id, step.capability, registry, failover)
 
-        if agent is None:
-            logger.info(
-                "Step skipped, no endpoint configured: step_id=%s agent_id=%s",
+        if not candidates:
+            named = registry.resolve(step.agent_id)
+            reason = SKIP_CAPABILITY_MISMATCH if named is not None else SKIP_NO_ENDPOINT
+            logger.log(
+                logging.WARNING if named is not None else logging.INFO,
+                "Step skipped, nothing provides %s: step_id=%s agent_id=%s",
+                step.capability,
                 step.step_id,
                 step.agent_id,
             )
@@ -399,28 +425,25 @@ def route_plan(
                     step_id=step.step_id,
                     agent_id=step.agent_id,
                     capability=step.capability,
-                    reason=SKIP_NO_ENDPOINT,
+                    reason=reason,
                 )
             )
             continue
 
-        if not agent.accepts(step.capability):
-            logger.warning(
-                "Step skipped, capability not declared: step_id=%s agent_id=%s "
-                "capability=%s",
+        agent = candidates[0]
+
+        if agent.agent_id != step.agent_id:
+            logger.info(
+                "Step reassigned before dispatch: step_id=%s planned=%s "
+                "running_on=%s capability=%s",
                 step.step_id,
                 step.agent_id,
+                agent.agent_id,
                 step.capability,
             )
-            skipped.append(
-                SkippedStep(
-                    step_id=step.step_id,
-                    agent_id=step.agent_id,
-                    capability=step.capability,
-                    reason=SKIP_CAPABILITY_MISMATCH,
-                )
-            )
-            continue
+
+        if len(candidates) > 1:
+            alternatives[step.step_id] = candidates[1:]
 
         messages.append(
             ExecutionMessage(
@@ -441,4 +464,8 @@ def route_plan(
         len(skipped),
     )
 
-    return RoutingResult(messages=tuple(messages), skipped=tuple(skipped))
+    return RoutingResult(
+        messages=tuple(messages),
+        skipped=tuple(skipped),
+        alternatives=alternatives,
+    )
