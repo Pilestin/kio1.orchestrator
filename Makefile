@@ -71,6 +71,14 @@ run-workflow-api: ## Run the Workflow API from source (needs the Session Manager
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
+.PHONY: example
+example: ## Run the Use-Case 1 example end to end
+	$(PYTHON) examples/uc1/run.py
+
+.PHONY: example-console
+example-console: ## Serve Use-Case 1 at http://127.0.0.1:8000/
+	$(PYTHON) examples/uc1/serve.py
+
 .PHONY: test
 test: ## Run test suite
 	$(VENV)/bin/pytest tests/ -v

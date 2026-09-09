@@ -1,5 +1,6 @@
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -10,6 +11,7 @@ from core.config_loader import Config, DispatchConfig
 from core.session_client import NullSessionClient, SessionClientError
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.directory import AgentDirectory
+from dispatch.policy import Gate, Policy
 from dispatch.scoreboard import Scoreboard
 from services.workflow_api.app import _State, app, get_state
 from services.workflow_api.runner import WorkflowRunner
@@ -457,3 +459,72 @@ def test_recording_being_off_lists_nothing_rather_than_failing() -> None:
     # A console asking what has run wants an empty answer when the answer is
     # nothing, not an error.
     assert NullSessionClient().list_sessions() == []
+
+
+def test_a_workflow_stopped_by_a_gate_is_not_reported_as_completed() -> None:
+    # The console shows this word before anything else. A release a policy
+    # refused has not completed, even though every call that ran succeeded.
+    recorder = FakeRecorder()
+    plan = json.dumps(
+        {
+            "workflow_id": "wf-gated",
+            "execution_mode": "sequential",
+            "steps": [
+                {
+                    "step_id": "s1",
+                    "agent_id": "KIO11",
+                    "capability": "test_automation",
+                    "task": "Run the suite",
+                },
+                {
+                    "step_id": "s2",
+                    "agent_id": "KIO8",
+                    "capability": "deployment",
+                    "task": "Release it",
+                },
+            ],
+            "explanation": "Check then ship.",
+        }
+    )
+    config = make_config(
+        {
+            "KIO11": AgentEndpoint(
+                "KIO11", "http://localhost:8111", "/execute", frozenset()
+            ),
+            "KIO8": AgentEndpoint(
+                "KIO8", "http://localhost:8108", "/execute", frozenset()
+            ),
+        }
+    )
+    config.dispatch = replace(
+        config.dispatch,
+        policy=Policy(
+            gates=(
+                Gate(
+                    before=frozenset({"deployment"}),
+                    requires=frozenset({"test_automation"}),
+                    verdict=frozenset({"clean"}),
+                ),
+            )
+        ),
+    )
+    runner = make_runner(
+        FakeProvider(plan),
+        recorder,
+        transport=FakeTransport(
+            {
+                "s1": {
+                    "workflow_id": "wf-gated",
+                    "step_id": "s1",
+                    "agent_id": "KIO11",
+                    "status": "ok",
+                    "output": {"verdict": "defect"},
+                }
+            }
+        ),
+        config=config,
+    )
+
+    runner.run(uuid4(), "Ship the pricing change")
+
+    assert recorder.statuses[-1] == "failed"

@@ -13,7 +13,7 @@
     "keep_alive": -1,
     "max_output_tokens": 4096,
     "telemetry": {
-        "enabled": true,
+        "enabled": false,
         "service_name": "kio1-orchestrator",
         "otlp_http_endpoint": "http://YOUR_HOST:4318",
         "otlp_bearer_token": "local-dev-otlp-token",

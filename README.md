@@ -126,6 +126,8 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Failover](docs/failover.md) — Running a step on another target when the one the plan named cannot
 - [Choosing by history](docs/selection.md) — Asking the target that has actually been working, not the one listed first
 - [The console](docs/console.md) — The web page for watching targets and runs, and registering agents
+- [Usage](docs/usage.md) — From a clone to a lifecycle running in your browser
+- [Use-Case 1, end to end](examples/uc1/README.md) — A runnable lifecycle: real files, a real failing test, a refused release
 - [Discovery](docs/discovery.md) — Letting agents publish their own capabilities instead of listing them by hand
 - [The live directory](docs/live-directory.md) — Health probing, background refresh, and the registration API
 - [Workflow Dispatch](docs/workflow-dispatch.md) — Sending plan steps to KIO agents

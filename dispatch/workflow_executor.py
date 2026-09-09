@@ -121,6 +121,18 @@ class WorkflowResult:
         return sum(1 for result in self.results if result.status == STATUS_ERROR)
 
     @property
+    def blocked(self) -> int:
+        """Return the number of steps that were stopped before they could run.
+
+        A step is blocked when a policy gate refused it, or when something it
+        depends on did not complete. Either way the workflow did not do what
+        the plan asked, which is a different outcome from every step
+        succeeding — and from a step being skipped because the agent it named
+        is simply not deployed.
+        """
+        return sum(1 for result in self.results if result.status == STATUS_NOT_RUN)
+
+    @property
     def dispatched(self) -> int:
         """Return the number of steps that were actually sent to an agent."""
         return sum(
@@ -455,6 +467,7 @@ def _execute_levels(
                 timeout=timeout,
                 max_parallel_steps=max_parallel_steps,
                 alternatives=routing.alternatives,
+                scoreboard=scoreboard,
             )
             results.update(level_results)
 

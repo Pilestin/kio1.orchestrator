@@ -493,3 +493,49 @@ def test_a_clearly_worse_target_does_not_win_on_speed() -> None:
     feed(board, "Gamma", "xxxxxoooo", duration_ms=5)
 
     assert order(board, planned="Beta")[0] == "Beta"
+
+
+def test_history_is_recorded_for_steps_that_run_side_by_side() -> None:
+    # A level dispatches its steps concurrently, and that path has its own
+    # call into the transport. Without the scoreboard reaching it, every
+    # parallel and mixed workflow would leave no history behind at all.
+    board = Scoreboard(ON)
+    plan = {
+        "workflow_id": "wf-parallel",
+        "execution_mode": "mixed",
+        "steps": [
+            {
+                "step_id": "s1",
+                "agent_id": "KIO7",
+                "capability": "code_generation",
+                "task": "Write it",
+            },
+            {
+                "step_id": "s2",
+                "agent_id": "Beta",
+                "capability": "code_generation",
+                "task": "Write something else",
+            },
+            {
+                "step_id": "s3",
+                "agent_id": "Gamma",
+                "capability": "code_generation",
+                "task": "And this",
+                "depends_on": ["s1"],
+            },
+        ],
+        "explanation": "Two steps share a level.",
+    }
+
+    execute_workflow(
+        parse_plan(plan),
+        REGISTRY,
+        ScriptedTransport({"KIO7": OK, "Beta": OK, "Gamma": OK}),
+        timeout=5,
+        max_parallel_steps=4,
+        scoreboard=board,
+    )
+
+    recorded = {score.agent_id for score in board.summary()}
+
+    assert recorded == {"KIO7", "Beta", "Gamma"}

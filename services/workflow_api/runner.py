@@ -120,9 +120,12 @@ class WorkflowRunner:
 
             self._record_results(session_id, plan, result)
 
+            # A workflow whose release was refused by a gate did not
+            # complete, whatever the individual calls did. Reporting it as
+            # completed puts the wrong word in the first place anyone looks.
             self.recorder.update_session(
                 session_id,
-                status="failed" if result.failed else "completed",
+                status="failed" if result.failed or result.blocked else "completed",
             )
             logger.info(
                 "Workflow run finished: session_id=%s ok=%d error=%d",
