@@ -17,6 +17,7 @@ from core.session_client import SessionClient
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.agent_transport import HttpAgentTransport
 from dispatch.directory import AgentDirectory
+from dispatch.scoreboard import Scoreboard
 from services.session_manager.app import app as session_manager_app
 from services.session_manager.app import get_repository
 from services.session_manager.repository import InMemorySessionRepository
@@ -295,9 +296,11 @@ def test_one_request_produces_a_single_connected_trace(
             recorder=session_client,
             transport=HttpAgentTransport(),
             directory=AgentDirectory(config.dispatch.registry),
+            scoreboard=Scoreboard(),
         ),
         session_client=session_client,
         directory=AgentDirectory(config.dispatch.registry),
+        scoreboard=Scoreboard(),
     )
 
     try:

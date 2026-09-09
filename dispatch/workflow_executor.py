@@ -15,6 +15,7 @@ from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.agent_transport import AgentTransport, AgentTransportError
 from dispatch.failover import FailoverConfig
 from dispatch.policy import Policy, applies_to, apply_gates, providers_of
+from dispatch.scoreboard import Scoreboard
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_planner import (
     ExecutionMessage,
@@ -137,6 +138,7 @@ def execute_workflow(
     workspace_data: dict[str, Any] | None = None,
     policy: Policy | None = None,
     failover: FailoverConfig | None = None,
+    scoreboard: Scoreboard | None = None,
 ) -> WorkflowResult:
     """Route a workflow plan to agents and collect their results.
 
@@ -152,6 +154,9 @@ def execute_workflow(
             Omitted runs the plan exactly as it was produced.
         failover: Whether a step may be carried out by a target other than the
             one the plan named. Omitted keeps every step where it was sent.
+        scoreboard: Recent outcomes, used to order the candidates and
+            updated with what this run learns. Omitted leaves the order
+            alone and records nothing.
 
     Returns:
         One `StepResult` per plan step, in the plan's own step order.
@@ -162,7 +167,11 @@ def execute_workflow(
     # never dispatched alongside the step that has to clear it.
     plan = apply_gates(plan, policy)
     routing = route_plan(
-        plan, registry, workspace_data=workspace_data, failover=failover
+        plan,
+        registry,
+        workspace_data=workspace_data,
+        failover=failover,
+        scoreboard=scoreboard,
     )
 
     with trace_workflow_execution(
@@ -183,6 +192,7 @@ def execute_workflow(
                 max_parallel_steps=max_parallel_steps,
                 concurrent=plan.execution_mode != "sequential",
                 policy=policy,
+                scoreboard=scoreboard,
             )
         elif plan.execution_mode == "parallel":
             dispatched = _dispatch_concurrently(
@@ -192,6 +202,7 @@ def execute_workflow(
                 timeout=timeout,
                 max_parallel_steps=max_parallel_steps,
                 alternatives=routing.alternatives,
+                scoreboard=scoreboard,
             )
         else:
             if plan.execution_mode == "mixed":
@@ -209,6 +220,7 @@ def execute_workflow(
                 transport,
                 timeout=timeout,
                 alternatives=routing.alternatives,
+                scoreboard=scoreboard,
             )
 
     results = _merge_results(plan, routing, dispatched)
@@ -235,6 +247,7 @@ def _execute_sequential(
     *,
     timeout: float,
     alternatives: dict[str, tuple[AgentEndpoint, ...]] | None = None,
+    scoreboard: Scoreboard | None = None,
 ) -> dict[str, StepResult]:
     """Dispatch messages one at a time, stopping at the first failure.
 
@@ -261,6 +274,7 @@ def _execute_sequential(
             _candidates_for_message(message, registry, alternatives),
             transport,
             timeout=timeout,
+            scoreboard=scoreboard,
         )
         results[message.step_id] = result
 
@@ -282,6 +296,7 @@ def _dispatch_concurrently(
     timeout: float,
     max_parallel_steps: int,
     alternatives: dict[str, tuple[AgentEndpoint, ...]] | None = None,
+    scoreboard: Scoreboard | None = None,
 ) -> dict[str, StepResult]:
     """Dispatch every message concurrently and wait for all of them.
 
@@ -322,6 +337,7 @@ def _dispatch_concurrently(
                 ),
                 transport,
                 timeout=timeout,
+                scoreboard=scoreboard,
             )
             futures[future] = message
 
@@ -341,6 +357,7 @@ def _execute_levels(
     max_parallel_steps: int,
     concurrent: bool,
     policy: Policy | None = None,
+    scoreboard: Scoreboard | None = None,
 ) -> dict[str, StepResult]:
     """Dispatch a plan level by level, honouring its declared dependencies.
 
@@ -460,6 +477,7 @@ def _execute_levels(
                 _candidates_for_message(prepared, registry, routing.alternatives),
                 transport,
                 timeout=timeout,
+                scoreboard=scoreboard,
             )
             results[message.step_id] = result
             note_failure(message.step_id, result)
@@ -535,6 +553,7 @@ def _dispatch_step(
     transport: AgentTransport,
     *,
     timeout: float,
+    scoreboard: Scoreboard | None = None,
 ) -> StepResult:
     """Deliver a step, moving to the next target when one cannot carry it out.
 
@@ -548,6 +567,9 @@ def _dispatch_step(
         candidates: Targets to try, in order.
         transport: Transport used to deliver the message.
         timeout: Seconds to wait for each reply.
+        scoreboard: Recorded with the outcome of every attempt, including
+            the ones that lost the step to a substitute. That a target
+            failed is exactly what the next routing decision needs.
 
     Returns:
         The step's result, carrying the whole attempt history. Transport and
@@ -583,6 +605,14 @@ def _dispatch_step(
                 error=result.error,
             )
         )
+
+        if scoreboard is not None:
+            scoreboard.record(
+                agent.agent_id,
+                message.capability,
+                ok=result.status == STATUS_OK,
+                duration_ms=result.duration_ms,
+            )
 
         if result.status == STATUS_OK:
             break
@@ -997,6 +1027,7 @@ def dispatch_plan(
     parsed_response: Any,
     dispatch_config: DispatchConfig,
     transport: AgentTransport | None = None,
+    scoreboard: Scoreboard | None = None,
 ) -> WorkflowResult | None:
     """Validate a decoded model response and dispatch it to KIO agents.
 
@@ -1007,6 +1038,8 @@ def dispatch_plan(
             more than once should build one transport and reuse it: a NATS
             transport owns a connection and a thread. Omitting it builds a
             throwaway transport, which is only cheap for HTTP.
+        scoreboard: Recent outcomes, shared across dispatches so history
+            accumulates. Omitting it records nothing and reorders nothing.
 
     Returns:
         The workflow result, or None when dispatch is disabled or the
@@ -1032,4 +1065,5 @@ def dispatch_plan(
         workspace_data=dispatch_config.workspace.to_data(),
         policy=dispatch_config.policy,
         failover=dispatch_config.failover,
+        scoreboard=scoreboard,
     )

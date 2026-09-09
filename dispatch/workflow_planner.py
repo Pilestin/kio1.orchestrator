@@ -4,6 +4,7 @@ from typing import Any
 
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.failover import FailoverConfig, candidates_for
+from dispatch.scoreboard import Scoreboard
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +378,7 @@ def route_plan(
     *,
     workspace_data: dict[str, Any] | None = None,
     failover: FailoverConfig | None = None,
+    scoreboard: Scoreboard | None = None,
 ) -> RoutingResult:
     """Turn plan steps into execution messages for the targets that exist.
 
@@ -397,6 +399,8 @@ def route_plan(
             is how plans behaved before a workspace could be configured.
         failover: Whether a step may be carried out by a target other than the
             one the plan named. Omitted keeps every step where it was sent.
+        scoreboard: Recent outcomes used to order the candidates. Omitted
+            leaves the planned agent first.
 
     Returns:
         Execution messages for routable steps, the further candidates for
@@ -408,7 +412,9 @@ def route_plan(
     alternatives: dict[str, tuple[AgentEndpoint, ...]] = {}
 
     for step in plan.steps:
-        candidates = candidates_for(step.agent_id, step.capability, registry, failover)
+        candidates = candidates_for(
+            step.agent_id, step.capability, registry, failover, scoreboard
+        )
 
         if not candidates:
             named = registry.resolve(step.agent_id)

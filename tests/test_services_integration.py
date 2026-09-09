@@ -13,6 +13,7 @@ from core.session_client import SessionClient
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.agent_transport import HttpAgentTransport
 from dispatch.directory import AgentDirectory
+from dispatch.scoreboard import Scoreboard
 from services.session_manager.app import app as session_manager_app
 from services.session_manager.app import get_repository
 from services.session_manager.repository import InMemorySessionRepository
@@ -153,11 +154,13 @@ def client(
         recorder=session_client,
         transport=HttpAgentTransport(),
         directory=AgentDirectory(config.dispatch.registry),
+        scoreboard=Scoreboard(),
     )
     workflow_app.dependency_overrides[get_state] = lambda: _State(
         runner=runner,
         session_client=session_client,
         directory=AgentDirectory(AgentRegistry({})),
+        scoreboard=Scoreboard(),
     )
 
     try:
@@ -244,9 +247,11 @@ def test_an_unreachable_agent_is_recorded_as_a_failed_session(
             recorder=session_client,
             transport=HttpAgentTransport(),
             directory=AgentDirectory(config.dispatch.registry),
+            scoreboard=Scoreboard(),
         ),
         session_client=session_client,
         directory=AgentDirectory(AgentRegistry({})),
+        scoreboard=Scoreboard(),
     )
 
     try:
@@ -330,9 +335,11 @@ def test_declared_dependencies_reach_the_agent_and_the_lineage_record(
             recorder=session_client,
             transport=HttpAgentTransport(),
             directory=AgentDirectory(config.dispatch.registry),
+            scoreboard=Scoreboard(),
         ),
         session_client=session_client,
         directory=AgentDirectory(AgentRegistry({})),
+        scoreboard=Scoreboard(),
     )
 
     try:

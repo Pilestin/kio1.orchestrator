@@ -28,6 +28,7 @@ from dispatch.directory import (
     probe_target,
 )
 from dispatch.discovery import DiscoveryConfig, ManifestSource
+from dispatch.scoreboard import Scoreboard
 from services.workflow_api.app import REGISTRY_TOKEN_ENV, _State, app, get_state
 
 HEALTH = HealthConfig(enabled=True, interval=0.1, timeout=1)
@@ -400,6 +401,7 @@ def make_client(directory: AgentDirectory) -> TestClient:
         runner=None,  # type: ignore[arg-type]
         session_client=None,  # type: ignore[arg-type]
         directory=directory,
+        scoreboard=Scoreboard(),
     )
 
     return TestClient(app)

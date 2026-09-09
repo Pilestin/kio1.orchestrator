@@ -18,6 +18,7 @@ from core.session_client import NullSessionClient, SessionClient, SessionClientE
 from core.telemetry import init_telemetry, shutdown_telemetry, trace_provider_preload
 from dispatch.directory import ORIGIN_REGISTRATION, AgentDirectory
 from dispatch.discovery import DiscoveryError, ManifestSource, entries_from_manifest
+from dispatch.scoreboard import Scoreboard
 from providers.provider_client import load_provider
 from services.workflow_api.runner import WorkflowRunner, build_runner
 
@@ -61,6 +62,7 @@ class _State:
     runner: WorkflowRunner
     session_client: SessionClient | NullSessionClient
     directory: AgentDirectory
+    scoreboard: Scoreboard
 
 
 _state: _State | None = None
@@ -85,6 +87,9 @@ def _build_state() -> _State:
         health=config.dispatch.health,
     )
     directory.start()
+    # One scoreboard for the process, so history accumulates across
+    # requests instead of resetting with every workflow.
+    scoreboard = Scoreboard(config.dispatch.selection)
 
     provider = load_provider(config.provider, config.allowed_providers)
     provider_client = provider.create_client(config)
@@ -127,9 +132,11 @@ def _build_state() -> _State:
             provider_client=provider_client,
             recorder=session_client,
             directory=directory,
+            scoreboard=scoreboard,
         ),
         session_client=session_client,
         directory=directory,
+        scoreboard=scoreboard,
     )
 
 
@@ -313,12 +320,24 @@ def list_agents(
         state: The live directory.
 
     Returns:
-        Every record, including the ones currently withdrawn, so a caller can
-        see *why* an agent is not being planned for.
+        Every record, including the ones currently withdrawn, so a caller
+        can see *why* an agent is not being planned for, and what each has
+        recently done per capability.
     """
     _require_registry_token(request)
 
-    return {"agents": [record.to_summary() for record in state.directory.records()]}
+    return {
+        "agents": [
+            {
+                **record.to_summary(),
+                "history": [
+                    score.to_summary()
+                    for score in state.scoreboard.scores_for_agent(record.agent_id)
+                ],
+            }
+            for record in state.directory.records()
+        ]
+    }
 
 
 @app.post("/registry/agents", status_code=status.HTTP_201_CREATED)

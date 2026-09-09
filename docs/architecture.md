@@ -63,6 +63,7 @@ graph TD
 | `dispatch/agent_registry.py` | Maps `agent_id` values from a plan to configured targets: KIO agents, REST APIs, and local commands |
 | `dispatch/policy.py` | Gates: which capabilities may not run until others have passed, and the ordering they imply |
 | `dispatch/failover.py` | Which targets can carry out a step, and in what order they are tried |
+| `dispatch/scoreboard.py` | What each target has recently done, and the ranking that follows from it |
 | `dispatch/discovery.py` | Fetches agent manifests and turns them into registry entries |
 | `dispatch/directory.py` | The live set of targets: probes them, re-reads manifests on an interval, accepts registrations, and hands out fixed snapshots |
 | `dispatch/tool_transport.py` | Adapts a REST API or a local command to the execution message and reply the executor reads |

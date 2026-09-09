@@ -10,6 +10,7 @@ from core.config_loader import Config, DispatchConfig
 from core.session_client import SessionClientError
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.directory import AgentDirectory
+from dispatch.scoreboard import Scoreboard
 from services.workflow_api.app import _State, app, get_state
 from services.workflow_api.runner import WorkflowRunner
 
@@ -147,6 +148,7 @@ def make_runner(
         directory=AgentDirectory(
             (config if config is not None else make_config()).dispatch.registry
         ),
+        scoreboard=Scoreboard(),
     )
 
 
@@ -313,6 +315,7 @@ def build_client(
         runner=spy,  # type: ignore[arg-type]
         session_client=session_client,  # type: ignore[arg-type]
         directory=AgentDirectory(AgentRegistry({})),
+        scoreboard=Scoreboard(),
     )
 
     return TestClient(app), spy

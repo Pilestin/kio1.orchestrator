@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
+from dispatch.scoreboard import Scoreboard
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ def candidates_for(
     capability: str,
     registry: AgentRegistry,
     failover: FailoverConfig,
+    scoreboard: Scoreboard | None = None,
 ) -> tuple[AgentEndpoint, ...]:
     """Return the targets that could carry out a step, best first.
 
@@ -49,11 +51,16 @@ def candidates_for(
     Everything else declaring the same capability follows, in registry order,
     which puts hand-written entries ahead of discovered ones.
 
+    A scoreboard reorders that list from what these targets have actually
+    been doing. The cap is applied afterwards, so history decides *which*
+    candidates are worth the attempts, not just their order.
+
     Args:
         agent_id: The agent the plan named.
         capability: The capability the step asked for.
         registry: The targets reachable for this run.
         failover: Whether and how far to look past the named agent.
+        scoreboard: Recent outcomes to rank by. Omitted keeps the order above.
 
     Returns:
         Candidates in the order they should be tried, capped at
@@ -76,7 +83,12 @@ def candidates_for(
     if not ordered:
         return ()
 
-    return tuple(ordered[: max(1, failover.max_attempts)])
+    ranked = tuple(ordered)
+
+    if scoreboard is not None:
+        ranked = scoreboard.rank(ranked, capability, agent_id)
+
+    return ranked[: max(1, failover.max_attempts)]
 
 
 def load_failover_config(failover_data: Any) -> FailoverConfig:

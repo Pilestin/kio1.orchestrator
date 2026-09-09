@@ -10,6 +10,7 @@ from core.telemetry import trace_gen_ai_request, trace_operation
 from dispatch.agent_registry import AgentRegistry
 from dispatch.agent_transport import AgentTransport
 from dispatch.directory import AgentDirectory
+from dispatch.scoreboard import Scoreboard
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_executor import (
     STATUS_OK,
@@ -52,6 +53,7 @@ class WorkflowRunner:
     recorder: SessionRecorder
     transport: AgentTransport
     directory: AgentDirectory
+    scoreboard: Scoreboard
 
     def run(self, session_id: UUID, request_text: str) -> None:
         """Execute one workflow to completion, recording progress as it goes.
@@ -105,6 +107,7 @@ class WorkflowRunner:
                     workspace_data=self.config.dispatch.workspace.to_data(),
                     policy=self.config.dispatch.policy,
                     failover=self.config.dispatch.failover,
+                    scoreboard=self.scoreboard,
                 )
             except Exception as error:
                 logger.exception("Dispatch failed: session_id=%s", session_id)
@@ -213,6 +216,7 @@ def build_runner(
     recorder: SessionRecorder,
     transport: AgentTransport | None = None,
     directory: AgentDirectory | None = None,
+    scoreboard: Scoreboard | None = None,
 ) -> WorkflowRunner:
     """Assemble a runner with the transport the configuration selects.
 
@@ -227,6 +231,9 @@ def build_runner(
         directory: The live set of targets. Omitted builds one holding just
             the configured registry, which is how a run behaves with neither
             discovery nor health checks turned on.
+        scoreboard: Recent outcomes shared across requests. Omitted builds
+            an empty one, which records history but reorders nothing until
+            selection is turned on.
 
     Returns:
         A ready runner.
@@ -244,5 +251,10 @@ def build_runner(
             directory
             if directory is not None
             else AgentDirectory(config.dispatch.registry)
+        ),
+        scoreboard=(
+            scoreboard
+            if scoreboard is not None
+            else Scoreboard(config.dispatch.selection)
         ),
     )

@@ -108,9 +108,9 @@ makes failure slower.
   Manager stores the final `agent_id`, which is truthful, but the attempt
   history and the planned agent do not reach the database. They are in the
   terminal summary and in `StepResult`.
-- **Order is static.** Candidates are tried in registry order, not by which
-  one has been succeeding lately. Choosing by past success, latency, or
-  energy is the next step and the telemetry for it already exists.
+- **Order is by history when selection is on.** Candidates are tried in
+  registry order only until there is a record to go on; see
+  [Choosing by history](selection.md).
 - **No re-planning.** Failover substitutes *who* carries out a step. It never
   changes *what* the steps are: a plan that turned out to need a capability
   nobody has still fails at that step.

@@ -11,6 +11,7 @@ from dispatch.directory import HealthConfig, load_health_config
 from dispatch.discovery import DiscoveryConfig, load_discovery_config
 from dispatch.failover import FailoverConfig, load_failover_config
 from dispatch.policy import Policy, load_policy
+from dispatch.scoreboard import SelectionConfig, load_selection_config
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,8 @@ class DispatchConfig:
         health: How the live directory probes targets and keeps current.
         failover: Whether a step may run on a target other than the one
             the plan named.
+        selection: Whether recent outcomes reorder the candidates for a
+            step.
     """
 
     enabled: bool = False
@@ -184,6 +187,7 @@ class DispatchConfig:
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     health: HealthConfig = field(default_factory=HealthConfig)
     failover: FailoverConfig = field(default_factory=FailoverConfig)
+    selection: SelectionConfig = field(default_factory=SelectionConfig)
 
 
 @dataclass
@@ -398,6 +402,7 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
     discovery = load_discovery_config(dispatch_data.get("discovery"))
     health = load_health_config(dispatch_data.get("health"))
     failover = load_failover_config(dispatch_data.get("failover"))
+    selection = load_selection_config(dispatch_data.get("selection"))
 
     registry = load_agent_registry(agents_data)
 
@@ -423,6 +428,7 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
         discovery=discovery,
         health=health,
         failover=failover,
+        selection=selection,
     )
 
 

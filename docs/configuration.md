@@ -29,6 +29,7 @@ All application settings are stored in `config.json` at the project root.
 | `dispatch.request_timeout` | number | Positive per-agent reply timeout in seconds (default: `60`) |
 | `dispatch.max_parallel_steps` | int | Positive bound on concurrent dispatches in `parallel` mode (default: `4`) |
 | `dispatch.transport` | string | How execution messages travel: `http` (default) or `nats` |
+| `dispatch.selection` | object | Whether recent outcomes reorder the candidates for a step; see [Choosing by history](selection.md) |
 | `dispatch.failover` | object | Whether a step may run on a target other than the one the plan named; see [Failover](failover.md) |
 | `dispatch.health` | object | How often targets are probed and refreshed, and when an unreachable one is withdrawn; see [The live directory](live-directory.md) |
 | `dispatch.discovery` | object | Manifest URLs agents describe themselves through; see [Discovery](discovery.md) |

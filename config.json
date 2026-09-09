@@ -41,6 +41,11 @@
             "enabled": true,
             "max_attempts": 2
         },
+        "selection": {
+            "enabled": true,
+            "window": 20,
+            "explore_every": 10
+        },
         "policy": {
             "gates": [
                 {

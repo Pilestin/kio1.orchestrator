@@ -127,7 +127,8 @@ curl -s localhost:8000/registry/agents -H "Authorization: Bearer $KIO1_REGISTRY_
 
 Each record carries `status`, `origin`, `failures`, `last_checked` and
 `last_error`, which together answer "why is this agent not being planned
-for". The terminal application prints a one-line version at startup:
+for", plus a `history` of what it has recently done per capability (see
+[Choosing by history](selection.md)). The terminal application prints a one-line version at startup:
 
 ```text
 Targets: 13 available, 1 not answering (KIO5)

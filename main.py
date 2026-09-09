@@ -27,6 +27,7 @@ from core.telemetry import (
     trace_turn,
 )
 from dispatch.directory import STATUS_UNREACHABLE, AgentDirectory
+from dispatch.scoreboard import Scoreboard
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_executor import dispatch_plan, render_summary
 from providers.provider_client import load_provider
@@ -71,6 +72,9 @@ def main() -> None:
             # Reads every manifest and probes every target before the first
             # turn, then keeps doing both in the background.
             directory.start()
+            # One scoreboard for the whole session, so what each target
+            # does in one turn informs who is asked in the next.
+            scoreboard = Scoreboard(config.dispatch.selection)
             system_prompt = fill_catalog(prompt_template, directory.snapshot())
 
             provider = load_provider(config.provider, config.allowed_providers)
@@ -186,6 +190,7 @@ def main() -> None:
                             parse_response(content),
                             replace(config.dispatch, registry=registry),
                             transport,
+                            scoreboard,
                         )
 
                         if workflow_result is not None:
