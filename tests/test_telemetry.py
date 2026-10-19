@@ -1,17 +1,15 @@
 import json
 from formatter import format_json
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 from opentelemetry.trace import StatusCode
 
 import telemetry
-from anthropic_client import send_request as send_anthropic_request
 from config_loader import Config, TelemetryConfig
-from ollama_client import send_request as send_ollama_request
-from openai_client import send_request as send_openai_request
+from main import send_request as send_ollama_request
 
 
 def _recording_tracer() -> tuple[MagicMock, MagicMock]:
@@ -30,20 +28,10 @@ def _recording_tracer() -> tuple[MagicMock, MagicMock]:
     return tracer, span
 
 
-def _provider_config(provider: str) -> Config:
-    """Create provider configuration for telemetry mapping tests."""
-
-    provider_options: dict[str, Any] = {}
-
-    if provider == "ollama":
-        provider_options = {
-            "endpoint": "http://localhost:11434",
-            "context_window_size": 16384,
-        }
+def _provider_config() -> Config:
+    """Create an Ollama configuration for telemetry mapping tests."""
 
     return Config(
-        provider=provider,
-        allowed_providers=frozenset({"ollama", "openai", "anthropic"}),
         model="requested-model",
         prompt_path="prompt.txt",
         chat_directory="chats",
@@ -51,7 +39,8 @@ def _provider_config(provider: str) -> Config:
         request_timeout=120,
         keep_alive=-1,
         max_output_tokens=1024,
-        provider_options=provider_options,
+        endpoint="http://localhost:11434",
+        context_window_size=16384,
     )
 
 
@@ -96,8 +85,8 @@ def test_interrupted_turn_is_recorded_as_error() -> None:
     )
 
 
-@patch("ollama_client.record_gen_ai_response")
-@patch("ollama_client.urllib.request.urlopen")
+@patch("main.record_gen_ai_response")
+@patch("main.urllib.request.urlopen")
 def test_ollama_maps_response_telemetry_before_truncation(
     urlopen: MagicMock,
     record_response: MagicMock,
@@ -118,10 +107,10 @@ def test_ollama_maps_response_telemetry_before_truncation(
     response.__exit__.return_value = False
     urlopen.return_value = response
 
-    config = _provider_config("ollama")
+    config = _provider_config()
 
     with pytest.raises(ValueError, match="Response truncated"):
-        send_ollama_request(config, None, "system", [])
+        send_ollama_request(config, "system", [])
 
     record_response.assert_called_once_with(
         provider="ollama",
@@ -132,78 +121,6 @@ def test_ollama_maps_response_telemetry_before_truncation(
         finish_reason="length",
         truncated=True,
         truncation_reason="length",
-    )
-
-
-@patch("openai_client.record_gen_ai_response")
-def test_openai_maps_response_telemetry_before_truncation(
-    record_response: MagicMock,
-) -> None:
-    """Verify OpenAI response fields are normalized before raising."""
-
-    response = SimpleNamespace(
-        id="response-openai",
-        model="returned-model",
-        usage=SimpleNamespace(
-            prompt_tokens=100,
-            completion_tokens=25,
-        ),
-        choices=[SimpleNamespace(finish_reason="length")],
-    )
-    client = MagicMock()
-    client.chat.completions.create.return_value = response
-
-    config = _provider_config("openai")
-
-    with pytest.raises(ValueError, match="max_output_tokens"):
-        send_openai_request(config, client, "system", [])
-
-    record_response.assert_called_once_with(
-        provider="openai",
-        request_model="requested-model",
-        input_tokens=100,
-        output_tokens=25,
-        response_model="returned-model",
-        response_id="response-openai",
-        finish_reason="length",
-        truncated=True,
-        truncation_reason="max_output_tokens",
-    )
-
-
-@patch("anthropic_client.record_gen_ai_response")
-def test_anthropic_maps_response_telemetry_before_truncation(
-    record_response: MagicMock,
-) -> None:
-    """Verify Anthropic response fields are normalized before raising."""
-
-    response = SimpleNamespace(
-        id="response-anthropic",
-        model="returned-model",
-        usage=SimpleNamespace(
-            input_tokens=120,
-            output_tokens=30,
-        ),
-        stop_reason="max_tokens",
-    )
-    client = MagicMock()
-    client.messages.create.return_value = response
-
-    config = _provider_config("anthropic")
-
-    with pytest.raises(ValueError, match="max_output_tokens"):
-        send_anthropic_request(config, client, "system", [])
-
-    record_response.assert_called_once_with(
-        provider="anthropic",
-        request_model="requested-model",
-        input_tokens=120,
-        output_tokens=30,
-        response_model="returned-model",
-        response_id="response-anthropic",
-        finish_reason="max_tokens",
-        truncated=True,
-        truncation_reason="max_output_tokens",
     )
 
 

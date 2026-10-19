@@ -13,3 +13,14 @@ config.json
 .env
 .env.*
 *.env
+
+# Dev-only tooling and docs, not needed at runtime
+tests
+docs
+Makefile
+ruff.toml
+requirements-dev.txt
+README.md
+Dockerfile
+.dockerignore
+.github

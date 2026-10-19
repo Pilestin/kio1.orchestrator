@@ -3,15 +3,15 @@
 VENV        := .venv
 PYTHON      := $(VENV)/bin/python
 PIP         := $(VENV)/bin/pip
-SOURCES     := *.py kio10/ tests/
+SOURCES     := *.py tests/
 
 # ── Bootstrap ───────────────────────────────────────────────────────────────
 
 .PHONY: install
-install: ## Create venv and install all dependencies
+install: ## Create venv and install all dependencies (runtime + dev)
 	python -m venv $(VENV)
 	$(PIP) install --upgrade pip
-	$(PIP) install -r requirements.txt
+	$(PIP) install -r requirements-dev.txt
 
 # ── Formatting ───────────────────────────────────────────────────────────────
 

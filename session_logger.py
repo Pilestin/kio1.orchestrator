@@ -56,9 +56,6 @@ def init_logger(log_directory: str, session_id: str) -> logging.Logger:
     logger.addHandler(file_handler)
     logger.addHandler(stream_handler)
 
-    for noisy_logger in ("httpx", "httpcore", "openai", "anthropic"):
-        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
-
     return logger
 
 

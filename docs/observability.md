@@ -50,24 +50,24 @@ The orchestrator produces the following spans:
 
 | Span | Description |
 |------|-------------|
-| `kio1.startup` | Prompt, provider, model, and session initialization |
-| `kio1.provider.preload` | Ollama preload or hosted-provider model validation |
+| `kio1.startup` | Prompt, model, and session initialization |
+| `kio1.provider.preload` | Ollama model preload |
 | `kio1.turn` | Complete processing time for one user turn |
-| `chat <model>` | Model-provider request and response |
+| `chat <model>` | Ollama request and response |
 | `kio1.response.format` | Response parsing and workflow extraction |
 
 The spans form parent-child relationships. For example, a `kio1.turn` span contains the model request and response-formatting spans.
 
 Trace attributes include:
 
-- Provider and model
+- Model
 - Session ID
 - Turn number
 - Request duration
 - Maximum output tokens
 - Temperature
 - Response model
-- Response ID, when supplied by the provider
+- Response ID, when supplied by Ollama
 - Finish reason
 - Input and output token counts
 - Workflow ID

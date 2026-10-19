@@ -1,6 +1,4 @@
 {
-    "provider": "ollama",
-    "allowed_providers": ["ollama", "openai", "anthropic"],
     "model": "ministral-3:8b",
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
@@ -8,6 +6,8 @@
     "request_timeout": 120,
     "keep_alive": -1,
     "max_output_tokens": 4096,
+    "endpoint": "http://localhost:11434",
+    "context_window_size": 16384,
     "telemetry": {
         "enabled": true,
         "service_name": "kio1-orchestrator",
@@ -17,18 +17,5 @@
         "trace_sample_ratio": 1.0,                      
         "kio_id": "kio1",
         "deployment_environment": "local"
-    },
-    "provider_options": {
-        "endpoint": "http://localhost:11434",
-        "context_window_size": 16384
-    },
-    "dispatch": {
-        "enabled": true,
-        "poll_interval_seconds": 2,
-        "step_timeout_seconds": 600,
-        "max_parallel_steps": 4,
-        "agents": {
-            "KIO10": "http://127.0.0.1:8010"
-        }
     }
 }

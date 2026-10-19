@@ -1,21 +1,13 @@
 # KIO1: Orchestrator
 
-A terminal application that turns software-development requests into structured JSON workflow plans.
-
-KIO1 supports multiple model providers:
-
-- Ollama
-- OpenAI
-- Anthropic
-
-Providers are loaded dynamically from `<provider>_client.py`, keeping the main application and configuration loader provider-neutral.
+A terminal application that sends a user's query to a local Ollama model and prints the model's structured JSON response.
 
 ## Requirements
 
 - Python 3.10 or newer
-- An Ollama installation, OpenAI API key, or Anthropic API key
+- An Ollama installation
 - Access to the model configured in `config.json`
-- Docker with Docker Compose (optional, for local trace and metric storage)
+- Docker (optional, for containerized runs)
 
 ## Installation
 
@@ -36,7 +28,7 @@ Further information about the project is available in the docs folder
 
 ## Configuration
 
-The active provider and model are selected in `config.json`. API keys are read from environment variables, never from `config.json` itself. See [Configuration](docs/configuration.md) for the full field reference and per-provider setup.
+The model and Ollama endpoint are selected in `config.json`. See [Configuration](docs/configuration.md) for the full field reference.
 
 ## Usage
 
@@ -48,18 +40,34 @@ See [Usage Guide](docs/usage.md) for example sessions and sample requests.
 
 ### In Docker
 
-The orchestrator also ships a `Dockerfile`. It reaches host services (Ollama, the KIO10 service) via `host.docker.internal`, so mount your `config.json` at runtime and override the two endpoints with env vars — the same `config.json` then works both on the host and in the container:
+The orchestrator also ships a `Dockerfile`. It reaches Ollama on the host via `host.docker.internal`, so mount your `config.json` at runtime and override the endpoint with an env var — the same `config.json` then works both on the host and in the container. `config.json` is mounted (not baked into the image) so credentials such as `otlp_bearer_token` stay out of image layers, and `KIO1_OLLAMA_ENDPOINT` overrides the file's endpoint at runtime, so there is no second config file to drift. Ollama must be running on the host first.
+
+#### Build the container
+
+Rebuild the image whenever `Dockerfile`, `requirements.txt`, or the application source changes:
 
 ```bash
 docker build -t kio1 .
-docker run -it --add-host=host.docker.internal:host-gateway \
+```
+
+#### Launch the container
+
+Use this to start the already-built image — no rebuild required:
+
+```bash
+docker run --rm -it --add-host=host.docker.internal:host-gateway \
   -v "$PWD/config.json:/app/config.json" \
+  -v "$PWD/chats:/app/chats" \
+  -v "$PWD/logs:/app/logs" \
   -e KIO1_OLLAMA_ENDPOINT=http://host.docker.internal:11434 \
-  -e KIO1_KIO10_ADDRESS=http://host.docker.internal:8010 \
   kio1
 ```
 
-`config.json` is mounted (not baked into the image) so credentials such as `otlp_bearer_token` stay out of image layers. `KIO1_OLLAMA_ENDPOINT` and `KIO1_KIO10_ADDRESS` override the file's endpoints at runtime, so there is no second config file to drift. Ollama and the KIO10 service must be running on the host first (with KIO10 published on `:8010`).
+`docker run` always creates a new container rather than reusing one, so without `--rm` every launch leaves a stopped container behind (visible in `docker ps -a`). `--rm` deletes the container as soon as it exits; mounting `chats/` and `logs/` keeps session history and logs on the host regardless, so nothing is lost. To clear out containers created before this flag was added:
+
+```bash
+docker container prune
+```
 
 ## Observability
 
@@ -81,19 +89,10 @@ pytest -q
 
 See [Development Guide](docs/development.md) for the full test, lint, and format workflow.
 
-## KIO Agents
-
-KIO1 sends plan steps to the KIO agents listed below. Only agents with an agreed message contract are integrated; steps addressed to any other agent are reported as skipped. See [Dispatch](docs/dispatch.md) for the message flow.
-
-| Agent | Responsibility | Repository | Integration |
-|-------|----------------|------------|-------------|
-| KIO10 | TinyML and energy-efficiency analysis for resource-constrained devices (IoT, Edge AI, embedded systems) | [ai4sweng/AI4SWENG-KIO10](https://github.com/ai4sweng/AI4SWENG-KIO10) | Contract implemented in `kio10/`; exercised against the in-memory stub until the agent's HTTP endpoint is deployed |
-
 ## Documentation
 
 - [Architecture](docs/architecture.md) — System overview, components, and data flow
 - [Configuration](docs/configuration.md) — All config.json settings explained
-- [Dispatch](docs/dispatch.md) — Sending plan steps to KIO agents, dependencies, KIO10 contract, stub agent
 - [Usage Guide](docs/usage.md) — Interactive session examples and workflows
 - [API Reference](docs/api-reference.md) — Module and function documentation
 - [Chat History Format](docs/chat-history.md) — JSONL session file specification

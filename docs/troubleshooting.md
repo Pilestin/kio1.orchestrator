@@ -1,25 +1,11 @@
 # Troubleshooting
 
-## Provider module not found
-
-If the configuration contains:
-
-```json
-"provider": "example"
-```
-
-the project must contain:
-
-```text
-example_client.py
-```
-
 ## Ollama endpoint missing
 
-Ollama requires:
+`config.json` requires:
 
 ```json
-"provider_options": {
+{
     "endpoint": "http://localhost:11434",
     "context_window_size": 16384
 }
@@ -39,33 +25,17 @@ Then confirm availability:
 ollama list
 ```
 
-## OpenAI authentication error
-
-Confirm the key is set:
-
-```bash
-python3 -c 'import os; print("set" if os.getenv("OPENAI_API_KEY") else "missing")'
-```
-
-## Anthropic authentication error
-
-Confirm the key is set:
-
-```bash
-python3 -c 'import os; print("set" if os.getenv("ANTHROPIC_API_KEY") else "missing")'
-```
-
 ## Model not found
 
-Confirm that the configured model ID exists and is available to the selected provider account.
+Confirm that the configured model ID exists and has been pulled with `ollama pull <model-name>`.
 
 ## Invalid JSON response
 
-The system prompt asks providers to return JSON only. The formatter also removes optional Markdown JSON fences before parsing provider output.
+The system prompt asks the model to return JSON only. The formatter also removes optional Markdown JSON fences before parsing the model's output.
 
 ## Response truncated
 
-A request failing with `Response truncated before completion` reached either `max_output_tokens` or `provider_options.context_window_size`. Since each turn re-sends the whole transcript, long conversations eventually consume the available context.
+A request failing with `Response truncated before completion` reached either `max_output_tokens` or `context_window_size`. Since each turn re-sends the whole transcript, long conversations eventually consume the available context.
 
 Increase `max_output_tokens` if the output cap was reached. Otherwise, raise `context_window_size` or start a new session. The error reports both limits and the actual token counts.
 
@@ -73,42 +43,50 @@ Increase `max_output_tokens` if the output cap was reached. Otherwise, raise `co
 
 Each run writes `logs/log_<session_id>.log`, where `session_id` is `<YYYYMMDD>_<HHMMSS>_<8-char-uuid>`. The same id names that session's `chats/chat_<session_id>.jsonl`, so the transcript and the log can be read side by side.
 
+Every stage of the pipeline logs its own `duration_ms`, so a single turn's time budget (history load, model request, response formatting, history persistence) can be broken down line by line, in addition to the turn and session totals.
+
 Each line is UTC ISO 8601 with milliseconds, then the session id, level, module, and message:
 
 ```
 2026-07-24T09:19:43.465Z 20260724_101943_ff849b40 INFO main Session started: session_id=20260724_101943_ff849b40
-2026-07-24T09:19:43.466Z 20260724_101943_ff849b40 INFO config_loader Config loaded: provider=ollama model=ministral-3:8b prompt_path=prompts/kio1_system_prompt_ver1.txt
-2026-07-24T09:19:43.712Z 20260724_101943_ff849b40 INFO ollama_client Model preloaded: model=ministral-3:8b duration_ms=199
+2026-07-24T09:19:43.466Z 20260724_101943_ff849b40 INFO config_loader Config loaded: model=ministral-3:8b prompt_path=prompts/kio1_system_prompt_ver1.txt endpoint=http://localhost:11434 duration_ms=1
+2026-07-24T09:19:43.470Z 20260724_101943_ff849b40 INFO prompt_loader Prompt loaded: path=prompts/kio1_system_prompt_ver1.txt duration_ms=0 chars=2184
+2026-07-24T09:19:43.712Z 20260724_101943_ff849b40 INFO main Model preloaded: model=ministral-3:8b duration_ms=199
 2026-07-24T09:19:56.220Z 20260724_101943_ff849b40 INFO main Turn started: turn=1
-2026-07-24T09:21:15.523Z 20260724_101943_ff849b40 INFO ollama_client Response received: model=ministral-3:8b duration_ms=79303 input_tokens=2280 output_tokens=550
-2026-07-24T09:21:20.108Z 20260724_101943_ff849b40 INFO main Session ended: turns=1
+2026-07-24T09:19:56.221Z 20260724_101943_ff849b40 DEBUG main History loaded: turn=1 duration_ms=1 message_count=1
+2026-07-24T09:21:15.523Z 20260724_101943_ff849b40 INFO main Response received: model=ministral-3:8b duration_ms=79303 input_tokens=2280 output_tokens=550 tokens_per_second=6.9
+2026-07-24T09:21:15.531Z 20260724_101943_ff849b40 DEBUG main Response formatted: turn=1 duration_ms=1
+2026-07-24T09:21:15.534Z 20260724_101943_ff849b40 DEBUG main History persisted: turn=1 duration_ms=2
+2026-07-24T09:21:15.535Z 20260724_101943_ff849b40 INFO main Turn completed: turn=1 duration_ms=79305
+2026-07-24T09:21:20.108Z 20260724_101943_ff849b40 INFO main Session ended: turns=1 duration_ms=83686
 ```
 
-Timestamps are UTC, matching the `created_at` values inside provider responses. The console shows only `ERROR`; everything else lives in the file.
+Timestamps are UTC, matching the `created_at` values inside Ollama's responses. The console shows only `ERROR`; everything else lives in the file.
 
 | Level | Contents |
 |-------|----------|
-| `DEBUG` | Full request payloads and model responses, including message text |
-| `INFO` | Session and turn markers, config, provider loaded, model preloaded/verified, per-request duration and token counts |
+| `DEBUG` | Full request payloads and model responses (including message text), and per-stage durations: history load, response formatting, history persistence |
+| `INFO` | Session and turn markers (with total durations), config and prompt load duration, model preload duration, per-request duration, token counts and throughput |
 | `WARNING` | Recoverable issues, such as the formatter falling back to `ast.literal_eval` |
-| `ERROR` | Startup failures and failed requests, with tracebacks |
+| `ERROR` | Startup failures and failed requests (with `duration_ms` up to the point of failure), with tracebacks |
 
 Useful greps:
 
 ```bash
 LOG=logs/$(ls -t logs/ | head -1)
 
-grep "Response received:" $LOG   # duration and tokens per turn
+grep "Response received:" $LOG   # duration, tokens and throughput per turn
+grep "Turn completed:\|Turn failed:" $LOG  # total time spent per turn
 grep -c "Turn started:" $LOG     # turns attempted this session
-tail -1 $LOG                     # "Session ended: turns=N" if it exited cleanly
+tail -1 $LOG                     # "Session ended: turns=N duration_ms=N" if it exited cleanly
 grep ERROR logs/*.log            # failures across all sessions
 ```
 
 A log containing `Startup failed` with no `Session ended` line never reached the prompt. A log with neither was killed mid-session.
 
-`input_tokens` grows every turn because the whole transcript is re-sent, while `output_tokens` stays roughly flat — the two diverging shows the cost of replaying conversation history.
+`input_tokens` grows every turn because the whole transcript is re-sent, while `output_tokens` stays roughly flat — the two diverging shows the cost of replaying conversation history. `tokens_per_second` (output tokens divided by request duration) is the clearest single number for comparing model/hardware throughput across turns and machines.
 
-Compare `Model preloaded:` against `Response received:` durations to separate startup cost from request cost. With `keep_alive: -1` the model load is paid once at startup rather than per request.
+Compare `Model preloaded:` against `Response received:` durations to separate startup cost from request cost. With `keep_alive: -1` the model load is paid once at startup rather than per request. The gap between a `Turn completed:` duration and its `Response received:` duration is time spent on history I/O and formatting rather than the model itself — enable `DEBUG` logging (it is already always written to the log file) and compare the `History loaded:`, `Response formatted:` and `History persisted:` lines to see where that gap goes.
 
 ## Observability
 

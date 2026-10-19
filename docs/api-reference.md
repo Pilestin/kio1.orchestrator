@@ -5,20 +5,15 @@ config_loader --> Config (dataclass)
                --> load_config()
                --> TelemetryConfig (dataclass)
 
-provider_client --> ProviderModule (Protocol)
-                --> load_provider()
-
 prompt_loader --> load_prompt()
 
 session_logger --> generate_session_id()
                 --> init_logger()
                 --> measure_duration()
 
-ollama_client / openai_client / anthropic_client
-                --> create_client(config)
-                --> preload(config, client)
-                --> send_request(config, client, system_prompt, messages)
-                --> extract_content(response)
+main          --> preload_model(config)
+              --> send_request(config, system_prompt, messages)
+              --> extract_content(response)
 
 chat_history  --> create_chat_file(chat_directory, system_prompt, session_id)
               --> append_user_message()
@@ -31,21 +26,6 @@ telemetry      --> init_telemetry() / shutdown_telemetry()
                --> record_gen_ai_response()
                --> record_session_started() / record_session_completed()
                --> record_format_fallback() / record_workflow_plan()
-
-workflow_plan --> Step, WorkflowPlan (dataclasses)
-              --> parse_plan(data)
-
-kio10.transport --> KIO10Transport (Protocol), TransportError
-                --> build_request(workflow_id, step, data)
-                --> run_job(transport, request, poll_interval)
-                --> HttpKIO10
-
-kio10.stub    --> StubKIO10
-
-kio10.dispatcher --> StepResult, DispatchReport (dataclasses)
-                 --> create_transport(address, timeout)
-                 --> run_workflow(plan, settings, transports=None)
-                 --> format_report(), write_report(), dispatch_plan(plan, ...)
 ```
 
 ## `config_loader`
@@ -54,18 +34,16 @@ kio10.dispatcher --> StepResult, DispatchReport (dataclasses)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `provider` | `str` | Provider module name |
-| `allowed_providers` | `frozenset[str]` | Providers permitted to load |
-| `model` | `str` | Model identifier |
+| `model` | `str` | Ollama model identifier |
 | `prompt_path` | `str` | Path to system prompt file |
 | `chat_directory` | `str` | Chat history directory |
 | `temperature` | `float` | Sampling temperature |
 | `request_timeout` | `float` | HTTP timeout in seconds |
 | `keep_alive` | `int` | Ollama residency control (`-1` keeps loaded) |
 | `max_output_tokens` | `int` | Maximum generated output tokens |
+| `endpoint` | `str` | Ollama base URL |
+| `context_window_size` | `int` | Ollama context window in tokens; must be larger than `max_output_tokens` |
 | `telemetry` | `TelemetryConfig` | OpenTelemetry export configuration |
-| `provider_options` | `dict[str, Any]` | Provider-specific configuration |
-| `dispatch` | `DispatchSettings` | Dispatch settings: `enabled`, `poll_interval_seconds`, `step_timeout_seconds`, `max_parallel_steps`, `agents` (see [Dispatch](dispatch.md)) |
 
 ### `TelemetryConfig` (dataclass)
 
@@ -79,23 +57,15 @@ kio10.dispatcher --> StepResult, DispatchReport (dataclasses)
 
 ### `load_config(config_path="config.json") -> Config`
 
-Loads a `Config` from a JSON file. Validates provider selection, provider options, generation limits, and optional telemetry settings.
+Loads a `Config` from a JSON file. Validates the Ollama endpoint, context window, generation limits, and optional telemetry settings. Logs the load duration alongside the loaded model, prompt path, and endpoint.
 
-Raises `FileNotFoundError` if the file does not exist. Raises `KeyError` if a required field is missing. Raises `ValueError` when a provider, provider option, generation limit, or telemetry setting is invalid.
-
-## `provider_client`
-
-### `load_provider(provider_name, allowed_providers) -> ProviderModule`
-
-Dynamically imports `<provider_name>_client.py` and validates it implements `create_client`, `preload`, `send_request`, and `extract_content`.
-
-Raises `ValueError` if `provider_name` is not in `allowed_providers` or is not a valid identifier. Raises `TypeError` if the imported module is missing a required function.
+Raises `FileNotFoundError` if the file does not exist. Raises `KeyError` if a required field is missing. Raises `ValueError` when the endpoint, context window, generation limit, or telemetry setting is invalid.
 
 ## `prompt_loader`
 
 ### `load_prompt(prompt_path) -> str`
 
-Reads and returns the stripped text content of a prompt file.
+Reads and returns the stripped text content of a prompt file. Logs the load duration and character count.
 
 Raises `FileNotFoundError` if the file does not exist.
 
@@ -107,7 +77,7 @@ Returns a `<YYYYMMDD>_<HHMMSS>_<8-char-uuid>` id, generated once per run and sha
 
 ### `init_logger(log_directory, session_id) -> logging.Logger`
 
-Records are formatted as UTC ISO 8601 with milliseconds, followed by the session id, level, module, and message. Creates `log_directory` if absent, clears any pre-existing root handlers so repeated calls do not duplicate output, and raises `httpx`, `httpcore`, `openai`, and `anthropic` to `WARNING` to keep third-party request logging out of the session file.
+Records are formatted as UTC ISO 8601 with milliseconds, followed by the session id, level, module, and message. Creates `log_directory` if absent and clears any pre-existing root handlers so repeated calls do not duplicate output.
 
 | Handler | Destination | Level |
 |---------|-------------|-------|
@@ -120,32 +90,28 @@ Context manager measuring wall-clock time with `time.perf_counter()`. Yields a c
 
 ```python
 with measure_duration() as elapsed:
-    response = client.messages.create(**request_kwargs)
+    response_data = json.loads(response.read().decode("utf-8"))
 
 logger.info("Response received: duration_ms=%d", elapsed())
 ```
 
-## Provider modules (`ollama_client`, `openai_client`, `anthropic_client`)
+## `main`
 
-Each provider module implements the same four functions:
+### `preload_model(config) -> None`
 
-### `create_client(config) -> Any`
+Loads the configured model into Ollama's memory using the configured context window and `keep_alive`. Logs its duration separately from request timing.
 
-Creates and returns the provider's SDK client (`None` for Ollama, which uses direct HTTP requests).
+### `send_request(config, system_prompt, messages) -> dict[str, Any]`
 
-### `preload(config, client) -> None`
-
-Performs provider-specific startup work. Ollama loads the model into memory with the configured context window; OpenAI and Anthropic verify the configured model exists via `client.models.retrieve(config.model)`. Each preload operation logs its duration separately from request timing.
-
-### `send_request(config, client, system_prompt, messages) -> Any`
-
-Sends a chat request to the provider and returns the raw response. Raises `ValueError` when the provider reports that generation stopped at a configured token limit.
-
+Sends a chat request to the Ollama `/api/chat` endpoint and returns the parsed JSON response. Logs request duration, input/output token counts, and output tokens per second (`n/a` when Ollama omits `eval_count`). Raises `ValueError` when Ollama reports that generation stopped at a configured token limit.
 
 ### `extract_content(response) -> str`
 
-Extracts the assistant's text content from a provider response.
+Extracts the assistant's text content from an Ollama response.
 
+### `main() -> None`
+
+Runs the interactive REPL. Each turn logs, at `DEBUG`, the duration of loading prior history, formatting the response, and persisting the turn to the chat file, and at `INFO`/`ERROR`, the turn's total duration (`Turn completed`/`Turn failed`). The session's total duration is logged on exit (`Session ended: turns=N duration_ms=N`).
 
 ## `chat_history`
 
@@ -172,7 +138,7 @@ Returns all messages from the chat file, excluding the system prompt.
 
 ### `format_json(raw_json) -> str`
 
-Parses and pretty-prints a JSON string with 2-space indentation. Falls back to `ast.literal_eval` for single-quoted Python dict output from the model. When telemetry is enabled, the function records response-formatting duration, fallback parsing, workflow execution mode, and workflow step count without recording response content.
+Parses and pretty-prints a JSON string with 2-space indentation. Falls back to `ast.literal_eval` for single-quoted Python dict output from the model. When telemetry is enabled, the function records response-formatting duration, fallback parsing, and (when the parsed response carries `workflow_id`/`execution_mode`/`steps`) workflow execution mode and step count, without recording response content.
 
 ## `telemetry`
 
@@ -194,7 +160,7 @@ Traces one complete user turn and records turn count, duration, status, provider
 
 ### `trace_provider_preload(*, provider, model) -> Iterator[Span]`
 
-Traces provider preload or model-validation work and records its count, duration, and status.
+Traces model preload work and records its count, duration, and status.
 
 ### `trace_gen_ai_request(...) -> Iterator[Span]`
 
@@ -202,7 +168,7 @@ Creates a generative-AI client span and records request duration, provider, mode
 
 ### `record_gen_ai_response(...) -> None`
 
-Records normalized provider-response metadata, including response model, response ID, finish reason, input tokens, output tokens, and truncation status. Response content is never recorded.
+Records normalized response metadata, including response model, response ID, finish reason, input tokens, output tokens, and truncation status. Response content is never recorded.
 
 ### `record_session_started(*, provider, model) -> None`
 
@@ -218,53 +184,5 @@ Records use of the Python-literal response-format fallback and adds a formatting
 
 ### `record_workflow_plan(*, workflow_id, execution_mode, step_count) -> None`
 
-Records successfully parsed workflow-plan count, execution mode, step count, and bounded workflow ID metadata.
-Parses and pretty-prints a JSON string with 2-space indentation. Falls back to `ast.literal_eval` for single-quoted Python dict output from the model.
+Records the shape of a response that happens to carry `workflow_id`/`execution_mode`/`steps`: count, execution mode, step count, and bounded workflow ID metadata.
 
-## `workflow_plan`
-
-### `Step` / `WorkflowPlan` (dataclasses)
-
-`Step` carries `step_id`, `agent_id`, `capability`, `task` and `depends_on` (tuple of step ids). `WorkflowPlan` carries `workflow_id`, `execution_mode`, `steps` and `explanation`.
-
-### `parse_plan(data) -> WorkflowPlan`
-
-Validates a raw plan dict. Derives `depends_on` from `execution_mode` when no step declares it. Raises `ValueError` on missing fields or wrong types, `workflow_id` / `step_id` / `agent_id` outside `[A-Za-z0-9._-]` (they end up in file names and `shm://` uris), blank `capability` or `task`, unknown `execution_mode`, duplicate step ids, unknown dependencies or cycles.
-
-## `kio10.transport`
-
-### `build_request(workflow_id, step, data) -> dict`
-
-Builds the KIO1 → KIO10 request message from the integration document.
-
-### `run_job(transport, request, poll_interval) -> dict`
-
-Submits the request, checks the acknowledgement, then polls `get_job` until the status is `success`, `needs_clarification` or `failure`. Raises `TransportError` when a reply violates the contract: wrong `schema_version`, a different `workflow_id` / `step_id`, a poll reply for a different `job_id`, an acknowledgement whose `job_id` is missing or not a plain identifier, an unknown status, or a malformed `artifacts`, `clarification` or `failure_class`.
-
-### `HttpKIO10(base_url, timeout, httpx_transport=None)`
-
-Transport over `POST /jobs` and `GET /jobs/{job_id}`. One `httpx2.AsyncClient` is opened lazily and reused for every request; the transport is bound to the event loop that opened it and refuses requests from another loop. `aclose()` releases the client and the transport refuses further requests. Connection errors, HTTP error statuses and non-JSON bodies become `TransportError`.
-
-## `kio10.stub`
-
-### `StubKIO10(polls_before_done=1)`
-
-In-memory KIO10. `submit` is idempotent per `(workflow_id, step_id)`; `get_job` returns the acknowledgement for `polls_before_done` polls, then a final reply chosen by the `[stub:fail]` / `[stub:clarify]` markers in the task.
-
-## `kio10.dispatcher`
-
-### `create_transport(address, timeout) -> KIO10Transport`
-
-Returns `HttpKIO10` for `http://`/`https://` addresses and `StubKIO10` for `stub://`.
-
-### `run_workflow(plan, settings, transports=None) -> DispatchReport`
-
-Coroutine. Runs every step as an `asyncio` task; a step awaits its dependencies, is skipped when its agent is not in `transports`/`settings.agents` or a dependency did not succeed, and otherwise submits and polls with `settings.step_timeout_seconds` as the limit. At most `settings.max_parallel_steps` steps are at their agents at once. Transports created from `settings.agents` are closed when the workflow finishes; transports passed in `transports` stay open and belong to the caller.
-
-### `format_report(report) -> str`, `write_report(report, log_directory, session_id) -> Path`
-
-Terminal table and JSON file `dispatch_<session_id>_<workflow_id>.json`.
-
-### `dispatch_plan(plan, settings, log_directory, session_id) -> str`
-
-Convenience entry point used by `main.py`: run a parsed `WorkflowPlan`, store the report, and return the terminal summary.

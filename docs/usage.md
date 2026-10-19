@@ -10,21 +10,21 @@ python main.py
 On startup, the orchestrator:
 1. Loads configuration from `config.json`
 2. Reads the system prompt
-3. Initializes the configured provider (e.g. preloads the model for Ollama using configured `keep_alive`)
+3. Preloads the configured model into Ollama using the configured `keep_alive`
 4. Creates a new chat session file
 5. Presents the interactive prompt
 
 ## Interactive Session
 
 ```
-Loading ollama model ministral-3:8b...
+Loading Ollama model ministral-3:8b...
 KIO1 Orchestrator (type 'exit' to quit)
 ----------------------------------------
 
 >
 ```
 
-Type your request and press Enter. The orchestrator will return a JSON workflow plan.
+Type your request and press Enter. The orchestrator sends it to Ollama and prints the model's JSON reply — that is the end of the pipeline; the prompt immediately returns for another query.
 
 ## Example Queries
 
@@ -79,21 +79,9 @@ Response:
   ],
   "explanation": "Full lifecycle for a user management API with security review."
 }
-
-Plan check: OK, 6 steps, sequential
 ```
 
-The `Plan check` line is printed after every plan. It reports whether the plan
-can be executed: every step has valid fields, dependencies reference known
-steps and form no cycle. A plan that fails the check is still printed and saved
-to the chat history, but it is not dispatched:
-
-```
-Plan check: FAILED, Step 's3' depends on unknown step 's9'
-```
-
-With `dispatch.enabled` set in `config.json`, a per-step dispatch report follows
-the check. See [Dispatch](dispatch.md).
+The JSON is printed exactly as the model returned it (pretty-printed) and appended to the chat history — nothing is validated or dispatched after this point.
 
 ### Bug fix request
 
@@ -123,3 +111,4 @@ Type `exit` or press `Ctrl+C` to quit.
 ## Chat History Files
 
 Each session produces a JSONL file in `chats/`. See [Chat History Format](chat-history.md) for details.
+

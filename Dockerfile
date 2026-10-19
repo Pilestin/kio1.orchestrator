@@ -1,14 +1,16 @@
-# KIO1 orchestrator — interactive terminal app (LLM planner + KIO dispatcher).
+# KIO1 orchestrator — interactive terminal app (LLM query/response over Ollama).
 # Build:  docker build -t kio1 .
 #
 # config.json is NOT baked into the image (it carries credentials); mount it
-# at runtime. The orchestrator reaches host services via host.docker.internal,
-# so override the two endpoints with env vars — one config.json serves both
-# host and container:
-#   docker run -it --add-host=host.docker.internal:host-gateway \
+# at runtime. The orchestrator reaches the host's Ollama install via
+# host.docker.internal, so override the endpoint with an env var — one
+# config.json serves both host and container. --rm avoids piling up stopped
+# containers on every launch; mount chats/ and logs/ so that is safe:
+#   docker run --rm -it --add-host=host.docker.internal:host-gateway \
 #     -v "$PWD/config.json:/app/config.json" \
+#     -v "$PWD/chats:/app/chats" \
+#     -v "$PWD/logs:/app/logs" \
 #     -e KIO1_OLLAMA_ENDPOINT=http://host.docker.internal:11434 \
-#     -e KIO1_KIO10_ADDRESS=http://host.docker.internal:8010 \
 #     kio1
 FROM python:3.12-slim
 

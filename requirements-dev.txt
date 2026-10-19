@@ -1,0 +1,14 @@
+# Runtime dependencies
+-r requirements.txt
+
+# Testing
+pytest>=7.0
+pytest-cov>=4.0
+
+# Code formatting
+black>=24.0
+isort>=5.13
+
+# Linting & static analysis
+ruff>=0.4
+mypy>=1.10

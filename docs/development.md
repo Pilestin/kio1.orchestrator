@@ -26,18 +26,16 @@ ollama pull ministral-3:8b
 ## Project Structure
 
 ```
-main.py              - Entry point (REPL loop)
+main.py              - Entry point (REPL loop, Ollama request/response handling)
 config_loader.py     - Configuration loading
 prompt_loader.py     - System prompt file reader
-provider_client.py   - Dynamic provider loader and interface
-openai_client.py     - OpenAI Chat Completions API provider
-anthropic_client.py  - Anthropic Messages API provider
-ollama_client.py     - Ollama HTTP client
 chat_history.py      - JSONL conversation persistence
 formatter.py         - JSON pretty-printing
 session_logger.py    - Per-session log setup and duration measurement
 telemetry.py         - OpenTelemetry tracing and metrics
 config.json          - Application settings
+requirements.txt     - Runtime dependencies (installed in the Docker image)
+requirements-dev.txt - Adds testing/formatting/linting tools on top
 observability/       - Collector, Tempo, and Prometheus configuration
 prompts/             - System prompt files
 chats/               - Session history (auto-created, gitignored)
@@ -59,7 +57,7 @@ Or directly:
 pytest tests/ -v
 ```
 
-Tests use mocks for provider APIs and telemetry exporters, along with temporary directories for file I/O. No running model provider or observability service is required for unit testing.
+Tests use mocks for the Ollama HTTP API and telemetry exporters, along with temporary directories for file I/O. No running Ollama install or observability service is required for unit testing.
 
 ## Adding a New Module
 
@@ -98,9 +96,9 @@ Run `make help` to see all targets.
 
 ## Dependencies
 
-The project intentionally minimizes external dependencies:
+`requirements.txt` lists only runtime dependencies — it is what the Docker image installs. `requirements-dev.txt` adds testing, formatting, and linting tools on top via `-r requirements.txt`; `make install` uses it so local development gets everything.
 
-- **Runtime providers**: `openai >= 1.66.0`, `anthropic >= 0.18.1`; Ollama uses `urllib.request` from the standard library.
+- **Runtime**: Ollama requests use `urllib.request` from the standard library — no HTTP client dependency.
 - **Runtime observability**: `opentelemetry-api >= 1.44.0`, `opentelemetry-sdk >= 1.44.0`, `opentelemetry-exporter-otlp-proto-http >= 1.44.0`, all constrained below version `2.0.0`.
 - **Testing**: `pytest >= 7.0`, `pytest-cov >= 4.0`.
 - **Formatting**: `black >= 24.0`, `isort >= 5.13`.
