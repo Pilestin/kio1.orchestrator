@@ -8,7 +8,7 @@
   --accent: #2563eb;
   --user-bubble: #2563eb;
   --user-bubble-text: #ffffff;
-  --assistant-bubble: #ffffff;
+  --assistant-bubble: #e6f4ea;
   --error-bubble: #fdecea;
   --error-text: #b3261e;
 
@@ -53,6 +53,11 @@ body {
 .app-header h1 {
   font-size: 1.1rem;
   margin: 0;
+}
+
+.app-logo {
+  height: 2rem;
+  display: block;
 }
 
 .upload-button {

@@ -58,6 +58,9 @@ Use this to start the already-built image — no rebuild required. Create the mo
 
 ```bash
 mkdir -p chats logs assets
+```
+
+```bash
 docker run --rm -p 5000:5000 --add-host=host.docker.internal:host-gateway \
   -v "$PWD/config.json:/app/config.json" \
   -v "$PWD/chats:/app/chats" \

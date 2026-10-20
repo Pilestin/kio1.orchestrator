@@ -226,9 +226,7 @@ class TestUploadRoute:
         assert filename.startswith(f"{subdirectory}/")
         assert (tmp_path / "assets" / filename).exists()
 
-    def test_unknown_category_falls_back_to_files(
-        self, client: FlaskClient
-    ) -> None:
+    def test_unknown_category_falls_back_to_files(self, client: FlaskClient) -> None:
         """Verify an unrecognized category falls back to the default subfolder."""
         response = client.post(
             "/api/upload",
