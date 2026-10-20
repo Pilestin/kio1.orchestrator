@@ -12,19 +12,28 @@ On startup, the orchestrator:
 2. Reads the system prompt
 3. Preloads the configured model into Ollama using the configured `keep_alive`
 4. Creates a new chat session file
-5. Presents the interactive prompt
+5. Starts the web UI
 
-## Interactive Session
+## Using the Web UI
 
 ```
 Loading Ollama model ministral-3:8b...
-KIO1 Orchestrator (type 'exit' to quit)
-----------------------------------------
-
->
+KIO1 Orchestrator web UI: http://127.0.0.1:5000
 ```
 
-Type your request and press Enter. The orchestrator sends it to Ollama and prints the model's JSON reply — that is the end of the pipeline; the prompt immediately returns for another query.
+Open that address in a browser. Type a request in the message box at the bottom and press Enter (or click Send); the orchestrator sends it to Ollama and renders the model's reply as a message bubble — that is the end of the pipeline; the input box is immediately ready for another query.
+
+Workflow-plan responses (the `workflow_id`/`execution_mode`/`steps`/`explanation` shape the system prompt produces) are rendered as numbered step cards with the agent and capability for each step, rather than raw JSON; a "View raw JSON" toggle underneath the cards still shows the syntax-highlighted original. Any other JSON shape the model returns falls back to the syntax-highlighted JSON view directly.
+
+Override the bind address with the `KIO1_WEB_HOST` and `KIO1_WEB_PORT` environment variables, for example to expose the UI on all interfaces:
+
+```bash
+KIO1_WEB_HOST=0.0.0.0 KIO1_WEB_PORT=8080 python main.py
+```
+
+## Uploading Files
+
+Use the "Upload file" control in the header to upload a dataset, model checkpoint, or other file. Uploaded files are saved under `assets/` with a sanitized, collision-resistant filename; the UI reports the stored name once the upload completes. The `assets/` directory is not tracked by git or baked into the Docker image.
 
 ## Example Queries
 
@@ -81,7 +90,7 @@ Response:
 }
 ```
 
-The JSON is printed exactly as the model returned it (pretty-printed) and appended to the chat history — nothing is validated or dispatched after this point.
+The JSON is rendered exactly as the model returned it (pretty-printed, syntax-highlighted) and appended to the chat history — nothing is validated or dispatched after this point.
 
 ### Bug fix request
 
@@ -106,7 +115,7 @@ The orchestrator maintains conversation history within a session. Follow-up quer
 
 ## Exiting
 
-Type `exit` or press `Ctrl+C` to quit.
+Close the browser tab, or stop the server with `Ctrl+C` in the terminal running `main.py`.
 
 ## Chat History Files
 

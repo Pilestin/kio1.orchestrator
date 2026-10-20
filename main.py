@@ -1,8 +1,9 @@
 import json
 import logging
+import os
 import sys
 import urllib.request
-from formatter import format_json
+from pathlib import Path
 from typing import Any
 
 from chat_history import (
@@ -177,8 +178,60 @@ def extract_content(response: dict[str, Any]) -> str:
     return response["message"]["content"].strip()
 
 
+def run_turn(
+    config: Config,
+    system_prompt: str,
+    chat_file: Path,
+    session_id: str,
+    turn: int,
+    query: str,
+) -> str:
+    """Run one chat turn: send `query` to Ollama and persist the exchange.
+
+    Args:
+        config: Application configuration.
+        system_prompt: The system prompt text.
+        chat_file: Path to the session's chat history file.
+        session_id: Shared session id used for tracing.
+        turn: 1-based turn number, used for tracing.
+        query: The user's query text.
+
+    Returns:
+        The raw assistant message content (not yet formatted).
+    """
+    with trace_turn(
+        session_id=session_id,
+        turn_number=turn,
+        provider=PROVIDER_NAME,
+        model=config.model,
+    ):
+        messages = load_messages(chat_file)
+        messages.append({"role": "user", "content": query})
+
+        with trace_gen_ai_request(
+            provider=PROVIDER_NAME,
+            model=config.model,
+            session_id=session_id,
+            turn_number=turn,
+            message_count=len(messages) + 1,
+            max_output_tokens=config.max_output_tokens,
+            temperature=config.temperature,
+        ):
+            response = send_request(
+                config=config,
+                system_prompt=system_prompt,
+                messages=messages,
+            )
+        content = extract_content(response)
+
+        append_user_message(chat_file, query)
+        append_assistant_message(chat_file, content)
+
+    return content
+
+
 def main() -> None:
-    """Run the orchestrator terminal application."""
+    """Load configuration, preload the model, and serve the web UI."""
     try:
         session_id = generate_session_id()
         init_logger("logs", session_id)
@@ -220,103 +273,31 @@ def main() -> None:
         shutdown_telemetry()
         sys.exit(1)
 
-    print("KIO1 Orchestrator (type 'exit' to quit)")
-    print("-" * 40)
+    # Imported lazily: webapp.py imports run_turn/PROVIDER_NAME back from this
+    # module, so importing it at module load time would be circular.
+    from webapp import create_app
 
-    turn = 0
+    app = create_app(
+        config=config,
+        system_prompt=system_prompt,
+        chat_file=chat_file,
+        session_id=session_id,
+    )
+
+    host = os.environ.get("KIO1_WEB_HOST", "127.0.0.1")
+    port = int(os.environ.get("KIO1_WEB_PORT", "5000"))
+
+    print(f"KIO1 Orchestrator web UI: http://{host}:{port}")
+
     session_success = False
-
     with measure_duration() as session_elapsed:
         try:
-            while True:
-                try:
-                    query = input("\n> ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    print("\nGoodbye.")
-                    break
-
-                if not query:
-                    continue
-
-                if query.lower() == "exit":
-                    print("Goodbye.")
-                    break
-
-                turn += 1
-                logger.info("Turn started: turn=%d", turn)
-
-                try:
-                    content = ""
-
-                    with (
-                        measure_duration() as turn_elapsed,
-                        trace_turn(
-                            session_id=session_id,
-                            turn_number=turn,
-                            provider=PROVIDER_NAME,
-                            model=config.model,
-                        ),
-                    ):
-                        with measure_duration() as history_elapsed:
-                            messages = load_messages(chat_file)
-                            messages.append({"role": "user", "content": query})
-                        logger.debug(
-                            "History loaded: turn=%d duration_ms=%d message_count=%d",
-                            turn,
-                            history_elapsed(),
-                            len(messages),
-                        )
-
-                        with trace_gen_ai_request(
-                            provider=PROVIDER_NAME,
-                            model=config.model,
-                            session_id=session_id,
-                            turn_number=turn,
-                            message_count=len(messages) + 1,
-                            max_output_tokens=config.max_output_tokens,
-                            temperature=config.temperature,
-                        ):
-                            response = send_request(
-                                config=config,
-                                system_prompt=system_prompt,
-                                messages=messages,
-                            )
-                        content = extract_content(response)
-
-                        with measure_duration() as format_elapsed:
-                            formatted = format_json(content)
-                        logger.debug(
-                            "Response formatted: turn=%d duration_ms=%d",
-                            turn,
-                            format_elapsed(),
-                        )
-
-                        with measure_duration() as persist_elapsed:
-                            append_user_message(chat_file, query)
-                            append_assistant_message(chat_file, content)
-                        logger.debug(
-                            "History persisted: turn=%d duration_ms=%d",
-                            turn,
-                            persist_elapsed(),
-                        )
-
-                        print(f"\n{formatted}")
-
-                    logger.info(
-                        "Turn completed: turn=%d duration_ms=%d",
-                        turn,
-                        turn_elapsed(),
-                    )
-
-                except Exception as e:
-                    logger.exception(
-                        "Turn failed: turn=%d duration_ms=%d",
-                        turn,
-                        turn_elapsed(),
-                    )
-                    print(f"\nError: {e}", file=sys.stderr)
-                    if content:
-                        print(f"Raw response: {content!r}", file=sys.stderr)
+            # threaded=True: Werkzeug's dev server otherwise handles one
+            # request at a time, so a file upload would stall behind an
+            # in-flight (potentially slow) Ollama chat request.
+            app.run(
+                host=host, port=port, debug=False, use_reloader=False, threaded=True
+            )
             session_success = True
         finally:
             record_session_completed(
@@ -325,8 +306,7 @@ def main() -> None:
                 success=session_success,
             )
             logger.info(
-                "Session ended: turns=%d duration_ms=%d",
-                turn,
+                "Session ended: duration_ms=%d",
                 session_elapsed(),
             )
             shutdown_telemetry()

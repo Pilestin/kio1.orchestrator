@@ -8,6 +8,7 @@ __pycache__
 .idea
 chats
 logs
+assets
 tasks
 config.json
 .env

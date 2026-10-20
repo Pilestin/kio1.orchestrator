@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KIO1 Orchestrator</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>KIO1 Orchestrator</h1>
+      <label class="upload-button">
+        Upload file
+        <input id="file-input" type="file">
+      </label>
+    </header>
+
+    <p id="upload-status" class="upload-status" role="status"></p>
+
+    <main id="messages" class="messages" aria-live="polite"></main>
+
+    <form id="chat-form" class="chat-form">
+      <textarea id="query-input" placeholder="Ask Ai4SwEng..." rows="1" required></textarea>
+      <button type="submit">Send</button>
+    </form>
+  </div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

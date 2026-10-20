@@ -1,6 +1,6 @@
 # KIO1: Orchestrator
 
-A terminal application that sends a user's query to a local Ollama model and prints the model's structured JSON response.
+A browser-based chat UI that sends a user's query to a local Ollama model and renders the model's structured JSON response, messenger-style. Datasets, model checkpoints, or other files can be uploaded from the UI and are saved under `assets/` (not committed to version control).
 
 ## Requirements
 
@@ -36,6 +36,8 @@ The model and Ollama endpoint are selected in `config.json`. See [Configuration]
 python3 main.py
 ```
 
+This preloads the configured model and starts the web UI at `http://127.0.0.1:5000` (override with the `KIO1_WEB_HOST`/`KIO1_WEB_PORT` env vars). Open that address in a browser to chat and upload files.
+
 See [Usage Guide](docs/usage.md) for example sessions and sample requests.
 
 ### In Docker
@@ -52,21 +54,28 @@ docker build -t kio1 .
 
 #### Launch the container
 
-Use this to start the already-built image — no rebuild required:
+Use this to start the already-built image — no rebuild required. Create the mounted host directories first if they do not already exist; otherwise Docker creates them as `root`, and the container's non-root user will not be able to write to them (this bites `assets/` in particular, since it is only created on first upload):
 
 ```bash
-docker run --rm -it --add-host=host.docker.internal:host-gateway \
+mkdir -p chats logs assets
+docker run --rm -p 5000:5000 --add-host=host.docker.internal:host-gateway \
   -v "$PWD/config.json:/app/config.json" \
   -v "$PWD/chats:/app/chats" \
   -v "$PWD/logs:/app/logs" \
+  -v "$PWD/assets:/app/assets" \
   -e KIO1_OLLAMA_ENDPOINT=http://host.docker.internal:11434 \
   kio1
 ```
 
-`docker run` always creates a new container rather than reusing one, so without `--rm` every launch leaves a stopped container behind (visible in `docker ps -a`). `--rm` deletes the container as soon as it exits; mounting `chats/` and `logs/` keeps session history and logs on the host regardless, so nothing is lost. To clear out containers created before this flag was added:
+Open `http://localhost:5000` once the container is running. `docker run` always creates a new container rather than reusing one, so without `--rm` every launch leaves a stopped container behind (visible in `docker ps -a`). `--rm` deletes the container as soon as it exits; mounting `chats/`, `logs/`, and `assets/` keeps session history, logs, and uploaded files on the host regardless, so nothing is lost. To clear out containers created before this flag was added:
 
 ```bash
 docker container prune
+```
+
+Stop Container:
+```bash
+docker stop <CONTAINER ID>
 ```
 
 ## Observability

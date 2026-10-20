@@ -78,15 +78,15 @@ LOG=logs/$(ls -t logs/ | head -1)
 grep "Response received:" $LOG   # duration, tokens and throughput per turn
 grep "Turn completed:\|Turn failed:" $LOG  # total time spent per turn
 grep -c "Turn started:" $LOG     # turns attempted this session
-tail -1 $LOG                     # "Session ended: turns=N duration_ms=N" if it exited cleanly
+tail -1 $LOG                     # "Session ended: duration_ms=N" if the server shut down cleanly
 grep ERROR logs/*.log            # failures across all sessions
 ```
 
-A log containing `Startup failed` with no `Session ended` line never reached the prompt. A log with neither was killed mid-session.
+A log containing `Startup failed` with no further entries never reached the web server. A log with neither `Startup failed` nor `Session ended` was killed mid-session.
 
 `input_tokens` grows every turn because the whole transcript is re-sent, while `output_tokens` stays roughly flat — the two diverging shows the cost of replaying conversation history. `tokens_per_second` (output tokens divided by request duration) is the clearest single number for comparing model/hardware throughput across turns and machines.
 
-Compare `Model preloaded:` against `Response received:` durations to separate startup cost from request cost. With `keep_alive: -1` the model load is paid once at startup rather than per request. The gap between a `Turn completed:` duration and its `Response received:` duration is time spent on history I/O and formatting rather than the model itself — enable `DEBUG` logging (it is already always written to the log file) and compare the `History loaded:`, `Response formatted:` and `History persisted:` lines to see where that gap goes.
+Compare `Model preloaded:` against `Response received:` durations to separate startup cost from request cost. With `keep_alive: -1` the model load is paid once at startup rather than per request.
 
 ## Observability
 
@@ -226,7 +226,7 @@ curl -f http://127.0.0.1:13133/
 curl -f http://127.0.0.1:3200/ready
 ```
 
-Run at least one KIO1 request and type `exit` so pending telemetry is flushed.
+Run at least one KIO1 request and stop the server with `Ctrl+C` so pending telemetry is flushed.
 
 Search again:
 

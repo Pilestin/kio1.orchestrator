@@ -26,13 +26,15 @@ ollama pull ministral-3:8b
 ## Project Structure
 
 ```
-main.py              - Entry point (REPL loop, Ollama request/response handling)
+main.py              - Entry point (startup, run_turn() turn logic, Ollama request/response handling)
+webapp.py            - Flask web UI (chat and file-upload routes)
 config_loader.py     - Configuration loading
 prompt_loader.py     - System prompt file reader
 chat_history.py      - JSONL conversation persistence
 formatter.py         - JSON pretty-printing
 session_logger.py    - Per-session log setup and duration measurement
 telemetry.py         - OpenTelemetry tracing and metrics
+templates/, static/  - Chat UI markup, styling, and client-side rendering
 config.json          - Application settings
 requirements.txt     - Runtime dependencies (installed in the Docker image)
 requirements-dev.txt - Adds testing/formatting/linting tools on top

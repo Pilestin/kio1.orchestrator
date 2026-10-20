@@ -1,30 +1,14 @@
-"""End-to-end tests: `main()` with a scripted Ollama response and scripted input."""
+"""End-to-end tests: `main()` startup — config load, preload, and web server launch."""
 
 import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import main as main_module
-
-SAMPLE_PLAN: dict[str, Any] = {
-    "workflow_id": "wf-e2e01",
-    "execution_mode": "mixed",
-    "steps": [
-        {"step_id": "s1", "agent_id": "KIO10", "capability": "tinyml", "task": "a"},
-        {
-            "step_id": "s2",
-            "agent_id": "KIO12",
-            "capability": "cybersecurity_validation",
-            "task": "b",
-        },
-    ],
-    "explanation": "e2e",
-}
 
 
 @pytest.fixture(autouse=True)
@@ -90,165 +74,107 @@ def write_config(tmp_path: Path) -> None:
     )
 
 
-def run_main(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    inputs: list[str],
-) -> None:
-    """Run `main()` once in a scratch directory with scripted input.
+class TestMainStartup:
+    """Tests driving `main()` up to (but not including) the blocking web server."""
 
-    Args:
-        tmp_path: Scratch directory used as the working directory.
-        monkeypatch: Fixture for redirecting input and cwd.
-        inputs: Queries typed at the `>` prompt, in order.
-
-    Returns:
-        None.
-    """
-    write_config(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    queries = iter(inputs)
-    monkeypatch.setattr("builtins.input", lambda _prompt="": next(queries))
-
-    main_module.main()
-
-
-class TestMainEndToEnd:
-    """End-to-end tests driving `main()` with a mocked Ollama endpoint."""
-
+    @patch("flask.Flask.run")
     @patch("main.urllib.request.urlopen")
-    def test_prints_formatted_json_response(
+    def test_preloads_model_and_starts_web_server(
         self,
         mock_urlopen: MagicMock,
+        mock_run: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """Verify the model's JSON reply is printed pretty-printed and unchanged."""
-        mock_urlopen.return_value = _mock_ollama_response(json.dumps(SAMPLE_PLAN))
+        """Verify the model is preloaded and the Flask app is started."""
+        mock_urlopen.return_value = _mock_ollama_response("")
+        write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
 
-        run_main(tmp_path, monkeypatch, ["build battery firmware", "exit"])
+        main_module.main()
+
         out = capsys.readouterr().out
+        assert "Loading Ollama model test-model..." in out
+        assert "KIO1 Orchestrator web UI: http://127.0.0.1:5000" in out
+        mock_run.assert_called_once()
+        _, run_kwargs = mock_run.call_args
+        assert run_kwargs["host"] == "127.0.0.1"
+        assert run_kwargs["port"] == 5000
+        assert run_kwargs["debug"] is False
 
-        printed_plan = out[out.index("{") : out.rindex("}") + 1]
-        assert json.loads(printed_plan) == SAMPLE_PLAN
-        assert "Goodbye." in out
-
+    @patch("flask.Flask.run")
     @patch("main.urllib.request.urlopen")
-    def test_chat_history_is_persisted(
+    def test_web_host_and_port_env_overrides(
         self,
         mock_urlopen: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify KIO1_WEB_HOST and KIO1_WEB_PORT override the server bind address."""
+        mock_urlopen.return_value = _mock_ollama_response("")
+        write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("KIO1_WEB_HOST", "0.0.0.0")
+        monkeypatch.setenv("KIO1_WEB_PORT", "8080")
+
+        main_module.main()
+
+        _, run_kwargs = mock_run.call_args
+        assert run_kwargs["host"] == "0.0.0.0"
+        assert run_kwargs["port"] == 8080
+
+    @patch("flask.Flask.run")
+    @patch("main.urllib.request.urlopen")
+    def test_chat_file_is_created_before_server_starts(
+        self,
+        mock_urlopen: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a chat history file with the system prompt exists after startup."""
+        mock_urlopen.return_value = _mock_ollama_response("")
+        write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        main_module.main()
+
+        chat_file = next((tmp_path / "chats").glob("chat_*.jsonl"))
+        first_line = json.loads(chat_file.read_text().splitlines()[0])
+        assert first_line == {"role": "system", "content": "You are KIO1."}
+
+    def test_startup_failure_reports_error_and_exits(
+        self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """Verify the system/user/assistant turn is appended to the chat file."""
-        mock_urlopen.return_value = _mock_ollama_response(json.dumps(SAMPLE_PLAN))
+        """Verify a missing config.json is reported and exits with status 1."""
+        monkeypatch.chdir(tmp_path)
 
-        run_main(tmp_path, monkeypatch, ["build battery firmware", "exit"])
+        with pytest.raises(SystemExit) as exc_info:
+            main_module.main()
 
-        chat_lines = (
-            next((tmp_path / "chats").glob("chat_*.jsonl")).read_text().splitlines()
-        )
-        roles = [json.loads(line)["role"] for line in chat_lines]
-        assert roles == ["system", "user", "assistant"]
-        assert json.loads(chat_lines[1])["content"] == "build battery firmware"
-        assert json.loads(json.loads(chat_lines[2])["content"]) == SAMPLE_PLAN
+        assert exc_info.value.code == 1
+        assert "Error: failed to start orchestrator" in capsys.readouterr().err
 
+    @patch("flask.Flask.run")
     @patch("main.urllib.request.urlopen")
-    def test_continues_accepting_queries_after_response(
+    def test_session_ended_is_logged_after_server_stops(
         self,
         mock_urlopen: MagicMock,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Verify the REPL loops back for another query after printing a response."""
-        mock_urlopen.return_value = _mock_ollama_response(json.dumps(SAMPLE_PLAN))
-
-        run_main(tmp_path, monkeypatch, ["first query", "second query", "exit"])
-        out = capsys.readouterr().out
-
-        assert out.count(json.dumps(SAMPLE_PLAN, indent=2)) == 2
-        chat_lines = (
-            next((tmp_path / "chats").glob("chat_*.jsonl")).read_text().splitlines()
-        )
-        assert [json.loads(line)["role"] for line in chat_lines] == [
-            "system",
-            "user",
-            "assistant",
-            "user",
-            "assistant",
-        ]
-
-    @patch("main.urllib.request.urlopen")
-    def test_invalid_json_response_reports_error_and_continues(
-        self,
-        mock_urlopen: MagicMock,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Verify a non-JSON reply is reported as an error without crashing the loop."""
-        mock_urlopen.return_value = _mock_ollama_response("not valid json")
-
-        run_main(tmp_path, monkeypatch, ["build battery firmware", "exit"])
-        captured = capsys.readouterr()
-
-        assert "Error:" in captured.err
-        assert "Goodbye." in captured.out
-
-    @patch("main.urllib.request.urlopen")
-    def test_blank_query_is_ignored(
-        self,
-        mock_urlopen: MagicMock,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Verify a blank line does not count as a turn and does not call Ollama."""
-        mock_urlopen.return_value = _mock_ollama_response(json.dumps(SAMPLE_PLAN))
-
-        run_main(tmp_path, monkeypatch, ["   ", "exit"])
-
-        # Only the preload call should have reached `urlopen`.
-        assert mock_urlopen.call_count == 1
-
-    @patch("main.urllib.request.urlopen")
-    def test_turn_completed_is_logged_with_duration(
-        self,
-        mock_urlopen: MagicMock,
+        mock_run: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Verify a successful turn logs its total and per-stage durations.
+        """Verify session end is logged once the (mocked) server returns."""
+        mock_urlopen.return_value = _mock_ollama_response("")
+        write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
 
-        `init_logger()` replaces the root logger's handlers (including
-        pytest's `caplog` handler), so the session log file written to disk
-        is read directly instead of relying on `caplog`.
-        """
-        mock_urlopen.return_value = _mock_ollama_response(json.dumps(SAMPLE_PLAN))
-
-        run_main(tmp_path, monkeypatch, ["build battery firmware", "exit"])
+        main_module.main()
 
         log_text = next((tmp_path / "logs").glob("log_*.log")).read_text()
-        assert "Turn completed: turn=1 duration_ms=" in log_text
-        assert "History loaded: turn=1 duration_ms=" in log_text
-        assert "Response formatted: turn=1 duration_ms=" in log_text
-        assert "History persisted: turn=1 duration_ms=" in log_text
-        assert "Session ended: turns=1 duration_ms=" in log_text
-
-    @patch("main.urllib.request.urlopen")
-    def test_turn_failed_is_logged_with_duration(
-        self,
-        mock_urlopen: MagicMock,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Verify a failed turn logs its duration alongside the traceback."""
-        mock_urlopen.return_value = _mock_ollama_response("not valid json")
-
-        run_main(tmp_path, monkeypatch, ["build battery firmware", "exit"])
-
-        assert "Turn failed: turn=1 duration_ms=" in capsys.readouterr().err
+        assert "Session ended: duration_ms=" in log_text

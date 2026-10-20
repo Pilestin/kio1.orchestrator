@@ -14,6 +14,9 @@ session_logger --> generate_session_id()
 main          --> preload_model(config)
               --> send_request(config, system_prompt, messages)
               --> extract_content(response)
+              --> run_turn(config, system_prompt, chat_file, session_id, turn, query)
+
+webapp        --> create_app(config, system_prompt, chat_file, session_id)
 
 chat_history  --> create_chat_file(chat_directory, system_prompt, session_id)
               --> append_user_message()
@@ -109,9 +112,27 @@ Sends a chat request to the Ollama `/api/chat` endpoint and returns the parsed J
 
 Extracts the assistant's text content from an Ollama response.
 
+### `run_turn(config, system_prompt, chat_file, session_id, turn, query) -> str`
+
+Runs one chat turn: loads prior messages, sends the conversation plus `query` to Ollama inside a turn trace, and appends the user/assistant exchange to the chat file. Returns the raw (unformatted) assistant content; used by `webapp.create_app`'s `/api/chat` route.
+
 ### `main() -> None`
 
-Runs the interactive REPL. Each turn logs, at `DEBUG`, the duration of loading prior history, formatting the response, and persisting the turn to the chat file, and at `INFO`/`ERROR`, the turn's total duration (`Turn completed`/`Turn failed`). The session's total duration is logged on exit (`Session ended: turns=N duration_ms=N`).
+Loads configuration, preloads the model, creates the session's chat file, then builds and starts the Flask app from `webapp.create_app`. Binds to `KIO1_WEB_HOST`/`KIO1_WEB_PORT` (default `127.0.0.1:5000`). The session's total duration is logged on shutdown (`Session ended: duration_ms=N`).
+
+## `webapp`
+
+### `create_app(config, system_prompt, chat_file, session_id) -> Flask`
+
+Builds the Flask application serving the chat UI. Routes:
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/` | GET | Serves the chat UI page |
+| `/api/chat` | POST | Accepts `{"query": str}`, runs one turn via `main.run_turn`, and returns `{"formatted": str}` on success, `{"raw": str, "error": str}` when the model's reply isn't valid JSON, or `{"error": str}` with a 4xx/5xx status on a bad request or upstream failure |
+| `/api/upload` | POST | Accepts a multipart `file` field, sanitizes the filename with `werkzeug.utils.secure_filename`, prefixes it with a short id to avoid collisions, and saves it under `assets/`. Returns `{"filename": str}` |
+
+Turns are serialized with a lock so chat-file writes and turn numbering stay consistent across concurrent requests; the web UI serves one operator at a time, mirroring the single-session REPL it replaces.
 
 ## `chat_history`
 
