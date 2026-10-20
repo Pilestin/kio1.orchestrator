@@ -1,7 +1,7 @@
 """Flask web UI: a messenger-style chat backed by the Ollama orchestrator.
 
 Replaces the terminal REPL in `main.py` with a browser UI. The UI also
-accepts dataset/checkpoint/file uploads, saved under `assets/`.
+accepts model/dataset/file uploads, saved under `assets/<category>/`.
 """
 
 import logging
@@ -24,6 +24,16 @@ ASSETS_DIRECTORY = Path("assets")
 # Dataset/checkpoint uploads can be large; this bounds worst-case disk and
 # memory usage from a single upload rather than leaving it unbounded.
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
+# Maps the UI's upload category to its assets/ subfolder. Looked up through
+# this fixed mapping (never the raw request value) so a crafted "category"
+# field cannot be used to traverse outside assets/.
+UPLOAD_SUBDIRECTORIES = {
+    "model": "models",
+    "dataset": "datasets",
+    "file": "files",
+}
+DEFAULT_UPLOAD_CATEGORY = "file"
 
 
 class _ChatSession:
@@ -126,13 +136,19 @@ def create_app(
         if not safe_name:
             return jsonify({"error": "Invalid file name."}), 400
 
+        category = request.form.get("category", DEFAULT_UPLOAD_CATEGORY)
+        subdirectory = UPLOAD_SUBDIRECTORIES.get(
+            category, UPLOAD_SUBDIRECTORIES[DEFAULT_UPLOAD_CATEGORY]
+        )
+
         # Prefixed with a short id so re-uploading a same-named file never
         # silently overwrites a previous one.
         stored_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
-        destination = ASSETS_DIRECTORY / stored_name
+        relative_path = f"{subdirectory}/{stored_name}"
+        destination = ASSETS_DIRECTORY / relative_path
 
         try:
-            ASSETS_DIRECTORY.mkdir(parents=True, exist_ok=True)
+            destination.parent.mkdir(parents=True, exist_ok=True)
             uploaded_file.save(destination)
         except OSError as error:
             logger.exception("File upload failed: name=%s", safe_name)
@@ -148,7 +164,12 @@ def create_app(
                 500,
             )
 
-        logger.info("File uploaded: name=%s path=%s", safe_name, destination)
-        return jsonify({"filename": stored_name})
+        logger.info(
+            "File uploaded: name=%s category=%s path=%s",
+            safe_name,
+            category,
+            destination,
+        )
+        return jsonify({"filename": relative_path})
 
     return app

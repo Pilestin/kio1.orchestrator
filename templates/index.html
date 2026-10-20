@@ -10,15 +10,26 @@
   <div class="app">
     <header class="app-header">
       <h1>KIO1 Orchestrator</h1>
-      <label class="upload-button">
-        Upload file
-        <input id="file-input" type="file">
-      </label>
     </header>
+
+    <main id="messages" class="messages" aria-live="polite"></main>
 
     <p id="upload-status" class="upload-status" role="status"></p>
 
-    <main id="messages" class="messages" aria-live="polite"></main>
+    <div class="upload-bar">
+      <label class="upload-button">
+        Model
+        <input id="file-input-model" class="upload-input" type="file" data-category="model">
+      </label>
+      <label class="upload-button">
+        Dataset
+        <input id="file-input-dataset" class="upload-input" type="file" data-category="dataset">
+      </label>
+      <label class="upload-button">
+        File
+        <input id="file-input-file" class="upload-input" type="file" data-category="file">
+      </label>
+    </div>
 
     <form id="chat-form" class="chat-form">
       <textarea id="query-input" placeholder="Ask Ai4SwEng..." rows="1" required></textarea>

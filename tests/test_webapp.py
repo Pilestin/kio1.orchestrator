@@ -190,7 +190,7 @@ class TestUploadRoute:
     def test_saves_file_to_assets_directory(
         self, client: FlaskClient, tmp_path: Path
     ) -> None:
-        """Verify an uploaded file is written under the assets directory."""
+        """Verify an uploaded file with no category defaults to assets/files/."""
         response = client.post(
             "/api/upload",
             data={"file": (BytesIO(b"weights-bytes"), "model.ckpt")},
@@ -199,9 +199,48 @@ class TestUploadRoute:
 
         assert response.status_code == 200
         filename = response.get_json()["filename"]
+        assert filename.startswith("files/")
         saved_path = tmp_path / "assets" / filename
         assert saved_path.exists()
         assert saved_path.read_bytes() == b"weights-bytes"
+
+    @pytest.mark.parametrize(
+        ("category", "subdirectory"),
+        [("model", "models"), ("dataset", "datasets"), ("file", "files")],
+    )
+    def test_saves_file_under_category_subdirectory(
+        self, client: FlaskClient, tmp_path: Path, category: str, subdirectory: str
+    ) -> None:
+        """Verify each upload category is saved under its own assets/ subfolder."""
+        response = client.post(
+            "/api/upload",
+            data={
+                "file": (BytesIO(b"bytes"), "thing.bin"),
+                "category": category,
+            },
+            content_type="multipart/form-data",
+        )
+
+        assert response.status_code == 200
+        filename = response.get_json()["filename"]
+        assert filename.startswith(f"{subdirectory}/")
+        assert (tmp_path / "assets" / filename).exists()
+
+    def test_unknown_category_falls_back_to_files(
+        self, client: FlaskClient
+    ) -> None:
+        """Verify an unrecognized category falls back to the default subfolder."""
+        response = client.post(
+            "/api/upload",
+            data={
+                "file": (BytesIO(b"bytes"), "thing.bin"),
+                "category": "not-a-real-category",
+            },
+            content_type="multipart/form-data",
+        )
+
+        assert response.status_code == 200
+        assert response.get_json()["filename"].startswith("files/")
 
     def test_sanitizes_path_traversal_filename(
         self, client: FlaskClient, tmp_path: Path
@@ -216,7 +255,7 @@ class TestUploadRoute:
         assert response.status_code == 200
         filename = response.get_json()["filename"]
         saved_path = tmp_path / "assets" / filename
-        assert saved_path.resolve().parent == (tmp_path / "assets").resolve()
+        assert saved_path.resolve().parent == (tmp_path / "assets" / "files").resolve()
 
     def test_rejects_missing_file(self, client: FlaskClient) -> None:
         """Verify a request with no file part is rejected."""

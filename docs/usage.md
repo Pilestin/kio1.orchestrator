@@ -33,7 +33,7 @@ KIO1_WEB_HOST=0.0.0.0 KIO1_WEB_PORT=8080 python main.py
 
 ## Uploading Files
 
-Use the "Upload file" control in the header to upload a dataset, model checkpoint, or other file. Uploaded files are saved under `assets/` with a sanitized, collision-resistant filename; the UI reports the stored name once the upload completes. The `assets/` directory is not tracked by git or baked into the Docker image.
+Use the Model, Dataset, or File buttons next to the message box to upload a model checkpoint, dataset, or other file. Each button saves into its own subfolder (`assets/models/`, `assets/datasets/`, `assets/files/`) with a sanitized, collision-resistant filename; the UI reports the stored path once the upload completes. The `assets/` directory is not tracked by git or baked into the Docker image.
 
 ## Example Queries
 

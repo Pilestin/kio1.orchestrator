@@ -76,13 +76,19 @@ body {
 .upload-status {
   min-height: 1.4rem;
   margin: 0;
-  padding: 0.25rem 1.25rem;
+  padding: 0.25rem 1.25rem 0;
   font-size: 0.8rem;
   color: var(--muted);
 }
 
 .upload-status.error {
   color: var(--error-text);
+}
+
+.upload-bar {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0 1.25rem;
 }
 
 .messages {
@@ -256,8 +262,8 @@ body {
 
 .plan-explanation {
   margin: 0;
-  padding-top: 0.5rem;
-  border-top: 1px dashed var(--border);
+  padding-bottom: 0.5rem;
+  border-bottom: 1px dashed var(--border);
   font-size: 0.85rem;
   font-style: italic;
   color: var(--muted);

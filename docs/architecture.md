@@ -2,7 +2,7 @@
 
 ## Overview
 
-KIO1 Orchestrator is a browser-based chat UI that sends natural-language user requests to a local Ollama model and renders the model's structured JSON reply, messenger-style. Datasets, checkpoints, or other files can be uploaded from the UI and are stored under `assets/`. Optional OpenTelemetry instrumentation exports privacy-safe traces and metrics.
+KIO1 Orchestrator is a browser-based chat UI that sends natural-language user requests to a local Ollama model and renders the model's structured JSON reply, messenger-style. Models, datasets, or other files can be uploaded from the UI via dedicated buttons and are stored under `assets/<category>/`. Optional OpenTelemetry instrumentation exports privacy-safe traces and metrics.
 
 ## System Diagram
 
@@ -43,7 +43,7 @@ graph TD
 | `formatter.py` | Pretty-prints JSON responses for display in the UI |
 | `telemetry.py` | Initializes OpenTelemetry, creates spans and metrics, records metadata, and flushes exporters |
 | `templates/`, `static/` | Chat UI markup, styling, and client-side JSON rendering |
-| `assets/` | Uploaded datasets/checkpoints/files (git-ignored, not committed) |
+| `assets/` | Uploaded models/datasets/files, split into `models/`, `datasets/`, `files/` subfolders (git-ignored, not committed) |
 | `observability/` | Defines the persistent Collector, Tempo, and Prometheus services |
 
 ## Data Flow
@@ -55,7 +55,7 @@ graph TD
 5. The Flask app is started and serves the chat UI at `http://<KIO1_WEB_HOST>:<KIO1_WEB_PORT>` (defaults `127.0.0.1:5000`).
 6. For each user request, `POST /api/chat` loads the prior messages, adds the new query, and sends the full conversation to Ollama inside a turn trace (`main.run_turn`).
 7. The response is formatted as JSON and returned to the browser, which renders it as a syntax-highlighted message bubble; the user and assistant messages are appended to the chat file.
-8. Uploaded files sent to `POST /api/upload` are saved under `assets/` with a sanitized, collision-resistant filename.
+8. Uploaded files sent to `POST /api/upload` are saved under `assets/<category>/` (`models/`, `datasets/`, or `files/`, chosen from a fixed mapping of the request's `category` field) with a sanitized, collision-resistant filename.
 9. Throughout startup and each turn, telemetry records privacy-safe request metadata, token usage, durations, traces, and metrics without prompt or response content.
 10. On shutdown, the session-completed metric is recorded and pending telemetry is flushed.
 

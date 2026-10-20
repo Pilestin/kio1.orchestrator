@@ -4,7 +4,7 @@
   const messagesEl = document.getElementById("messages");
   const formEl = document.getElementById("chat-form");
   const inputEl = document.getElementById("query-input");
-  const fileInputEl = document.getElementById("file-input");
+  const fileInputEls = document.querySelectorAll(".upload-input");
   const uploadStatusEl = document.getElementById("upload-status");
 
   function escapeHtml(value) {
@@ -78,12 +78,12 @@
 
     return `
       <div class="plan-card">
+        ${explanation}
         <div class="plan-header">
           <span class="plan-id">${escapeHtml(plan.workflow_id)}</span>
           <span class="plan-mode">${escapeHtml(plan.execution_mode)}</span>
         </div>
         <ol class="plan-steps">${stepsHtml}</ol>
-        ${explanation}
         <details class="plan-raw">
           <summary>View raw JSON</summary>
           <pre>${highlightJson(rawJson)}</pre>
@@ -194,12 +194,10 @@
     }
   });
 
-  fileInputEl.addEventListener("change", async () => {
-    const file = fileInputEl.files[0];
-    if (!file) return;
-
+  async function uploadFile(file, category, fileInputEl) {
     const body = new FormData();
     body.append("file", file);
+    body.append("category", category);
 
     setUploadStatus(`Uploading ${file.name}...`, false);
 
@@ -227,5 +225,13 @@
     } finally {
       fileInputEl.value = "";
     }
+  }
+
+  fileInputEls.forEach((fileInputEl) => {
+    fileInputEl.addEventListener("change", () => {
+      const file = fileInputEl.files[0];
+      if (!file) return;
+      uploadFile(file, fileInputEl.dataset.category, fileInputEl);
+    });
   });
 })();
