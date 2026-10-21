@@ -1,4 +1,7 @@
+import inspect
 import logging
+import os
+from collections.abc import Callable
 from importlib import import_module
 from types import ModuleType
 from typing import Any, Protocol, cast
@@ -6,6 +9,26 @@ from typing import Any, Protocol, cast
 from core.config_loader import Config
 
 logger = logging.getLogger(__name__)
+
+# Receives a fragment of model output as it is written, and which channel it
+# belongs to: `content` for the answer, `thinking` for a reasoning model's
+# thinking. A provider that can stream accepts one as `on_token`.
+TokenCallback = Callable[[str, str], None]
+
+
+def supports_streaming(provider: Any) -> bool:
+    """Report whether a provider's `send_request` accepts `on_token`.
+
+    Streaming is optional: a provider that cannot stream still plans, and the
+    live view simply shows the plan when it arrives instead of as it is
+    written.
+    """
+    try:
+        parameters = inspect.signature(provider.send_request).parameters
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+    return "on_token" in parameters
 
 
 class ProviderModule(Protocol):
@@ -32,6 +55,40 @@ class ProviderModule(Protocol):
     def extract_content(self, response: Any) -> str:
         """Extract assistant text from a provider response."""
         ...
+
+
+def describe_provider(provider_name: str) -> dict[str, Any]:
+    """Return what the console needs to offer a provider.
+
+    Args:
+        provider_name: A provider module name, such as `openrouter`.
+
+    Returns:
+        Its name, display name, the environment variable holding its key
+        (None when it needs none), whether that key is set, and whether it
+        can list its own models. `available` is False, with the reason, when
+        the module cannot be imported.
+    """
+    try:
+        module = import_module(f"providers.{provider_name}_client")
+    except Exception as error:  # noqa: BLE001 - reported to the console
+        return {
+            "name": provider_name,
+            "label": provider_name,
+            "available": False,
+            "error": f"{type(error).__name__}: {error}",
+        }
+
+    key_env = getattr(module, "API_KEY_ENV", None)
+
+    return {
+        "name": provider_name,
+        "label": getattr(module, "DISPLAY_NAME", provider_name),
+        "available": True,
+        "key_env": key_env,
+        "key_set": bool(key_env and os.environ.get(key_env, "").strip()),
+        "lists_models": callable(getattr(module, "list_models", None)),
+    }
 
 
 def load_provider(

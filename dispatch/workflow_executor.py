@@ -1,4 +1,5 @@
 import contextvars
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -6,6 +7,7 @@ from time import perf_counter
 from typing import Any
 
 from core.config_loader import DispatchConfig
+from core.run_events import emit
 from core.telemetry import (
     record_step_result,
     trace_step_dispatch,
@@ -609,7 +611,26 @@ def _dispatch_step(
             if agent.agent_id == message.agent_id
             else replace(message, agent_id=agent.agent_id, endpoint=agent.endpoint)
         )
+        emit(
+            "step_started",
+            step_id=message.step_id,
+            agent_id=agent.agent_id,
+            target_kind=agent.kind,
+            capability=message.capability,
+            task=message.task,
+            attempt=index + 1,
+        )
         result = _attempt_step(addressed, agent, transport, timeout=timeout)
+        emit(
+            "step_finished",
+            step_id=message.step_id,
+            agent_id=agent.agent_id,
+            status=result.status,
+            duration_ms=result.duration_ms,
+            error=result.error,
+            output=_preview(result.output),
+            attempt=index + 1,
+        )
         attempts.append(
             StepAttempt(
                 agent_id=agent.agent_id,
@@ -642,6 +663,26 @@ def _dispatch_step(
     assert result is not None  # candidates is non-empty
 
     return replace(result, attempts=tuple(attempts))
+
+
+_PREVIEW_CHARS = 2000
+
+
+def _preview(output: dict[str, Any] | None) -> str | None:
+    """Return a step's output as bounded text for the live view.
+
+    The full output is recorded with the step; the live view only needs
+    enough to see what came back while the run continues.
+    """
+    if output is None:
+        return None
+
+    text = json.dumps(output, ensure_ascii=False, indent=2, default=str)
+
+    if len(text) <= _PREVIEW_CHARS:
+        return text
+
+    return f"{text[:_PREVIEW_CHARS]}\n… [{len(text)} chars]"
 
 
 def _attempt_step(

@@ -11,7 +11,7 @@ agents, and the console's edits, and git ignores it.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `provider` | string | Provider module name: `ollama`, `openai`, or `anthropic` |
+| `provider` | string | Provider module name: `ollama`, `openrouter`, `openai`, or `anthropic`. Can be switched on the console's Settings tab |
 | `allowed_providers` | array of strings | Providers permitted to load; `provider` must be one of these |
 | `model` | string | Model identifier used by the selected provider |
 | `prompt_path` | string | Path to the system prompt file (relative to project root) |
@@ -92,6 +92,40 @@ To use a different Ollama model:
    ```json
    "model": "<model-name>"
    ```
+
+## API keys and `.env`
+
+Keys are read from the environment, and from a `.env` file at the project
+root, which git ignores; `.env.example` lists the names. A variable already
+set in the environment wins over the file. The console's Settings tab writes
+a key there for you after checking that it works, so the steps below are only
+needed when configuring by hand.
+
+## OpenRouter
+
+One key, several hundred models from many vendors. Create a key at
+<https://openrouter.ai/keys>, then either pick **OpenRouter** on the
+console's Settings tab and paste it, or put it in `.env`:
+
+```bash
+OPENROUTER_API_KEY=sk-or-...
+```
+
+```json
+{
+    "provider": "openrouter",
+    "model": "anthropic/claude-sonnet-4.5",
+    "provider_options": {"json_mode": true}
+}
+```
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `provider_options.json_mode` | `true` | Ask the API to constrain the answer to JSON. Turn off for a model that rejects the option; the system prompt already demands JSON |
+| `provider_options.openrouter_endpoint` | `https://openrouter.ai/api/v1` | API base URL. Separate from `endpoint`, which is Ollama's and stays in the file after a switch |
+
+The model list is fetched from OpenRouter without a key, so it can be browsed
+before one is set. Answers are streamed into the console's live view.
 
 ## OpenAI
 

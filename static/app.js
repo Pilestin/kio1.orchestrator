@@ -13,6 +13,7 @@ const state = {
   editing: null,      // the agent id being edited, or null when adding
   writable: true,
   settings: null,     // the last /settings payload, or null before it loads
+  settingsDirty: false, // the settings form has unsaved changes
 };
 
 const NEW_ENTRY = `{
@@ -475,6 +476,7 @@ $("runs-body").addEventListener("click", function (event) {
   state.selected = row.getAttribute("data-session");
   loadRuns();
   loadDetail();
+  followRun(state.selected);
 });
 
 async function loadDetail() {
@@ -539,6 +541,203 @@ async function loadDetail() {
   }
 }
 
+// ── live view ───────────────────────────────────────────────────────────────
+//
+// A run takes a minute or more with a local model. The stream at
+// /workflow/<id>/events says what it is doing meanwhile: the model's answer as
+// it is written, each step as it starts and ends, and KIO1's own log lines.
+
+const LIVE_KINDS = [
+  "status", "planning_started", "model_output", "model_answer", "plan",
+  "step_started", "step_finished", "log", "finished",
+];
+
+const live = { source: null, session: null, started: 0, streamed: false, timer: null };
+
+function liveLine(html, className, isLog) {
+  const list = $("live-log");
+  const item = document.createElement("li");
+  const seconds = live.started ? ((Date.now() - live.started) / 1000).toFixed(1) + "s" : "";
+  if (isLog) item.className = "is-log";
+  item.innerHTML = '<span class="at">' + esc(seconds) + "</span>"
+    + '<span class="what' + (className ? " " + className : "") + '">' + html + "</span>";
+
+  // Follow the bottom only if the reader is already there.
+  const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 30;
+  list.appendChild(item);
+  if (atBottom) list.scrollTop = list.scrollHeight;
+}
+
+function appendText(id, text) {
+  const pre = $(id);
+  const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
+  pre.textContent += text;
+  if (atBottom) pre.scrollTop = pre.scrollHeight;
+}
+
+function setLiveState(kind, label, phase) {
+  $("live-state").className = "chip " + kind;
+  $("live-state").textContent = label;
+  if (phase !== undefined) $("live-phase").textContent = phase;
+}
+
+function onLiveEvent(event) {
+  let data;
+  try { data = JSON.parse(event.data); } catch { return; }
+  if (!live.started) live.started = data.time * 1000;
+
+  switch (data.kind) {
+    case "status":
+      if (data.status === "running") setLiveState("warn", "running", "starting");
+      if (data.status === "pending") setLiveState("warn", "pending", "queued");
+      if (data.status === "completed") {
+        setLiveState("ok", "completed", "");
+        liveLine("Run completed.", "ok");
+      }
+      if (data.status === "failed") {
+        setLiveState("bad", "failed", "");
+        liveLine("Run failed" + (data.error ? ": " + esc(data.error) : "."), "bad");
+      }
+      break;
+
+    case "planning_started":
+      live.streamed = data.streaming;
+      setLiveState("warn", "planning", data.provider + " · " + data.model);
+      startReadingTimer(data.time * 1000);
+      liveLine("Planning with <strong>" + esc(data.provider + "/" + data.model) + "</strong> — "
+        + esc((data.targets || []).length) + " targets in the catalog, prompt "
+        + esc(data.prompt_chars) + " chars"
+        + (data.streaming ? "" : ". This provider does not stream; the plan appears when it is complete."));
+      break;
+
+    case "model_output":
+      stopReadingTimer("writing the plan");
+      if (data.channel === "thinking") {
+        $("live-thinking-box").classList.remove("hidden");
+        appendText("live-thinking", data.text);
+      } else {
+        appendText("live-model", data.text);
+      }
+      break;
+
+    case "model_answer":
+      stopReadingTimer("");
+      if (!live.streamed) $("live-model").textContent = data.text;
+      liveLine("Model answered (" + esc(data.text.length) + " chars).");
+      break;
+
+    case "plan":
+      setLiveState("warn", "running", "dispatching " + data.steps.length + " step(s)");
+      liveLine("Plan <span class=\"mono\">" + esc(data.workflow_id) + "</span> ("
+        + esc(data.execution_mode) + ")" + (data.explanation ? ": " + esc(data.explanation) : ""));
+      data.steps.forEach(function (step) {
+        const after = step.depends_on && step.depends_on.length
+          ? " · after " + esc(step.depends_on.join(", ")) : "";
+        const args = step.arguments && Object.keys(step.arguments).length
+          ? " · <span class=\"mono\">" + esc(JSON.stringify(step.arguments)) + "</span>" : "";
+        liveLine("&nbsp;&nbsp;" + esc(step.step_id) + " → <strong>" + esc(step.agent_id)
+          + "</strong>." + esc(step.capability) + after + args
+          + '<div class="quiet">' + esc(step.task) + "</div>");
+      });
+      break;
+
+    case "step_started":
+      liveLine("▶ " + esc(data.step_id) + " → <strong>" + esc(data.agent_id) + "</strong> ("
+        + esc(data.target_kind) + ", " + esc(data.capability) + ")"
+        + (data.attempt > 1 ? " · attempt " + esc(data.attempt) : ""));
+      break;
+
+    case "step_finished": {
+      const ok = data.status === "ok";
+      const output = data.output
+        ? "<details><summary class=\"small\">output</summary><pre class=\"output\">"
+          + esc(data.output) + "</pre></details>" : "";
+      liveLine((ok ? "✓ " : "✗ ") + esc(data.step_id) + " " + esc(data.agent_id) + " · "
+        + esc(data.status) + " · " + esc(data.duration_ms) + " ms"
+        + (data.error ? '<div class="bad">' + esc(data.error) + "</div>" : "") + output,
+        ok ? "ok" : "bad");
+      break;
+    }
+
+    case "log":
+      liveLine(esc(data.level) + " " + esc(data.logger) + ": " + esc(data.message),
+        data.level === "ERROR" ? "bad" : data.level === "WARNING" ? "warn" : "quiet", true);
+      break;
+
+    case "finished":
+      stopFollowing();
+      loadRuns();
+      loadDetail();
+      break;
+  }
+}
+
+/** Count the seconds before the model's first word.
+ *
+ * A local model reads the whole prompt before it writes anything — on a CPU
+ * that is 30 to 60 silent seconds, which looks exactly like a hang. Saying
+ * what it is doing, with a clock, is the difference. */
+function startReadingTimer(since) {
+  stopReadingTimer();
+
+  live.timer = setInterval(function () {
+    const seconds = Math.round((Date.now() - since) / 1000);
+    $("live-phase").textContent = "the model is reading the prompt · " + seconds + "s"
+      + (seconds > 20 ? " (normal on a computer without a GPU)" : "");
+  }, 1000);
+}
+
+function stopReadingTimer(phase) {
+  if (live.timer) clearInterval(live.timer);
+  live.timer = null;
+  if (phase !== undefined) $("live-phase").textContent = phase;
+}
+
+function stopFollowing() {
+  stopReadingTimer();
+  if (live.source) live.source.close();
+  live.source = null;
+}
+
+/** Show the live stream of a run, replaying what it has done so far. */
+function followRun(sessionId) {
+  if (live.session === sessionId && live.source) return;
+
+  stopFollowing();
+  live.session = sessionId;
+  live.started = 0;
+  live.streamed = false;
+  $("live-model").textContent = "";
+  $("live-thinking").textContent = "";
+  $("live-thinking-box").classList.add("hidden");
+  $("live-log").innerHTML = "";
+  $("live").classList.remove("hidden");
+  setLiveState("idle", "live", "");
+
+  const source = new EventSource("/workflow/" + encodeURIComponent(sessionId) + "/events");
+  let heard = false;
+
+  LIVE_KINDS.forEach(function (kind) {
+    source.addEventListener(kind, function (event) { heard = true; onLiveEvent(event); });
+  });
+
+  // The server closes a stream that has nothing to say, and EventSource would
+  // reconnect forever. A stream that ended without a word is a run this
+  // process has no live record of: one from before a restart.
+  source.addEventListener("error", function () {
+    if (!heard) {
+      stopFollowing();
+      $("live").classList.add("hidden");
+    }
+  });
+
+  live.source = source;
+}
+
+$("live-logs").addEventListener("change", function () {
+  $("live-log").classList.toggle("no-logs", !$("live-logs").checked);
+});
+
 $("run").addEventListener("click", async function () {
   const button = $("run");
   const result = $("run-result");
@@ -560,9 +759,10 @@ $("run").addEventListener("click", async function () {
       body: JSON.stringify({ request: request }),
     });
     state.selected = data.session_id;
-    result.textContent = "Accepted.";
+    result.textContent = "Accepted — follow it below.";
     loadRuns();
     loadDetail();
+    followRun(data.session_id);
   } catch (error) {
     result.className = "small reason";
     result.textContent = error.message;
@@ -596,26 +796,81 @@ $("to-help").addEventListener("click", function (event) {
  * A provider that cannot be asked returns nothing, and the note says so
  * rather than leaving an empty list that reads as "there are no models".
  */
-function renderModels(settings) {
-  const select = $("settings-model");
-  const options = settings.models.length ? settings.models : [settings.model];
-
-  setRows(select, options.map(function (name) {
-    return '<option value="' + esc(name) + '">' + esc(name) + "</option>";
+/** Fill the model suggestions. A datalist rather than a select: OpenRouter
+ * offers hundreds of models, and typing part of a name filters them, while a
+ * provider that cannot list its models still accepts any name typed. */
+function renderModelList(models, error) {
+  setRows($("settings-model-list"), (models || []).map(function (name) {
+    return '<option value="' + esc(name) + '"></option>';
   }).join(""));
 
-  select.value = settings.model;
-  $("settings-model-note").textContent = settings.models_error
-    || (settings.models.length > 1
-      ? settings.models.length + " installed"
-      : "");
+  $("settings-model-note").textContent = error
+    || (models && models.length > 1 ? models.length + " available · type to search" : "");
 }
+
+function providerInfo(name) {
+  const list = (state.settings && state.settings.providers) || [];
+  return list.find(function (item) { return item.name === name; }) || null;
+}
+
+/** Show or hide the key field, and say what the chosen provider needs. */
+function renderProviderNeeds(name) {
+  const info = providerInfo(name);
+  const field = $("settings-key-field");
+  const note = $("settings-provider-note");
+
+  if (!info || !info.key_env) {
+    field.classList.add("hidden");
+    note.textContent = info && !info.available ? info.error : "Runs on this computer; no key needed.";
+    return;
+  }
+
+  field.classList.remove("hidden");
+  $("settings-key-label").textContent = "API key (" + info.key_env + ")";
+  $("settings-key").placeholder = info.key_set ? "already set — paste to replace" : "paste the key here";
+  note.textContent = info.key_set ? "Key found." : "Needs a key before it can plan.";
+}
+
+function renderProviders(settings) {
+  const select = $("settings-provider-select");
+
+  setRows(select, (settings.providers || []).map(function (info) {
+    const suffix = info.key_env && !info.key_set ? " — key needed" : "";
+    return '<option value="' + esc(info.name) + '"' + (info.available ? "" : " disabled") + ">"
+      + esc(info.label + suffix) + "</option>";
+  }).join(""));
+
+  select.value = settings.provider;
+  renderProviderNeeds(settings.provider);
+}
+
+function renderModels(settings) {
+  renderProviders(settings);
+  $("settings-model").value = settings.model;
+  renderModelList(settings.models, settings.models_error);
+}
+
+$("settings-provider-select").addEventListener("change", async function () {
+  const name = $("settings-provider-select").value;
+  const current = state.settings && state.settings.provider === name;
+
+  renderProviderNeeds(name);
+  $("settings-model").value = current ? state.settings.model : "";
+  $("settings-model-note").textContent = "Asking " + name + " which models it has…";
+
+  try {
+    const data = await api("/settings/models?provider=" + encodeURIComponent(name));
+    renderModelList(data.models, data.models_error);
+  } catch (error) {
+    renderModelList([], error.message);
+  }
+});
 
 /** Show which model and workspace the next run will use, on the Run page. */
 function renderPlannerSummary(settings) {
   const chip = $("planner-chip");
   chip.className = "chip idle";
-  chip.textContent = settings.model;
+  chip.textContent = settings.provider + " · " + settings.model;
 
   const workspace = settings.workspace;
   $("run-workspace").textContent = workspace.path
@@ -640,7 +895,7 @@ async function loadSettings(options) {
     // Only repaint the form when the reader is not in the middle of it: this
     // runs on the refresh timer, and overwriting a half-typed path would be
     // the console fighting whoever is using it.
-    if (state.tab === "settings" && !formIsFocused()) {
+    if (state.tab === "settings" && !formIsFocused() && !state.settingsDirty) {
       renderModels(settings);
       $("settings-temperature").value = settings.temperature;
       $("settings-timeout").value = settings.request_timeout;
@@ -683,6 +938,7 @@ async function saveSettings() {
   const result = $("settings-result");
 
   const previousModel = state.settings ? state.settings.model : "";
+  const key = $("settings-key").value.trim();
 
   button.disabled = true;
   result.textContent = "Saving…";
@@ -691,7 +947,9 @@ async function saveSettings() {
     const settings = await api("/settings", {
       method: "PUT",
       body: JSON.stringify({
-        model: $("settings-model").value,
+        provider: $("settings-provider-select").value,
+        api_key: key || null,
+        model: $("settings-model").value.trim(),
         temperature: Number($("settings-temperature").value),
         request_timeout: Number($("settings-timeout").value),
         workspace_path: $("settings-workspace-path").value,
@@ -700,6 +958,9 @@ async function saveSettings() {
     });
 
     state.settings = settings;
+    state.settingsDirty = false;
+    $("settings-key").value = "";
+    renderModels(settings);
     renderPlannerSummary(settings);
     result.textContent = "Saved to " + settings.config_path
       + " · in force from the next run";
@@ -720,7 +981,15 @@ $("settings-save").addEventListener("click", saveSettings);
 $("settings-reload").addEventListener("click", function () {
   $("settings-result").textContent = "";
   document.activeElement.blur();
+  state.settingsDirty = false;
   loadSettings({});
+});
+
+// Once something is changed, the refresh timer stops repainting the form
+// until it is saved or discarded. Checking focus alone was not enough: pick a
+// provider, click anywhere else, and the next refresh put the old one back.
+["input", "change"].forEach(function (type) {
+  $("view-settings").addEventListener(type, function () { state.settingsDirty = true; });
 });
 
 // ── shell ───────────────────────────────────────────────────────────────────

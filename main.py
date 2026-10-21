@@ -9,6 +9,7 @@ from core.chat_history import (
     load_messages,
 )
 from core.config_loader import load_config
+from core.dotenv import load_dotenv
 from core.formatter import format_json, parse_response
 from core.prompt_loader import fill_catalog, load_prompt
 from core.session_logger import (
@@ -44,6 +45,7 @@ def main() -> None:
         init_logger("logs", session_id)
         logger.info("Session started: session_id=%s", session_id)
 
+        load_dotenv()
         config = load_config()
         init_telemetry(config.telemetry, llm=config.model)
 

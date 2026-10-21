@@ -17,3 +17,6 @@ config.json
 
 # Local state written by KIO1: session history and the administration token.
 data/
+.env
+# Secrets: API keys and tokens. See .env.example.
+.env

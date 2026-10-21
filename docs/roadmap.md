@@ -57,7 +57,9 @@ Doğrulama: `.venv` olmadan `start.py` sıfırdan kurdu ve başlattı; "41.01, 2
 
 ### Adım 2 — İlk açılış sihirbazı  `M`
 
-- [ ] **1. Model sağlayıcı**: "Bilgisayarımda çalışsın (Ollama)" / "OpenAI" / "Anthropic" / **"OpenRouter"** (tek anahtarla yüzlerce model; yeni `providers/openrouter_client.py`, OpenAI uyumlu API). Kullanıcı modeli arayüzden kendisi seçer: sağlayıcının model listesi aranabilir bir seçicide gösterilir. Ollama seçilirse kurulu olup olmadığı ve çalışıp çalışmadığı denetlenir, kurulu modeller listelenir, donanıma göre model önerilir (RAM/GPU tespiti) ve konsoldan `ollama pull` ilerleme çubuğuyla yapılır. Bulut seçilirse API anahtarı istenir ve bir test çağrısı yapılır.
+- [x] **Sağlayıcı ve model seçimi (Ayarlar sekmesi)** — 2026-10-22: Ollama / OpenRouter / OpenAI / Anthropic arasında yeniden başlatmadan geçiş; aranabilir model listesi (OpenRouter'ın 468 modeli anahtarsız listeleniyor); API anahtarı önce denenip yalnızca çalışırsa git dışındaki `.env`'e yazılıyor. `.env` artık okunuyor ve git dışında.
+- [x] **Canlı izleme** — 2026-10-22: çalışan bir session'da modelin yazdığı plan token token, adımlar başladı/bitti (çıktı önizlemesiyle) ve KIO1'in o çalışmaya ait log satırları SSE ile konsolda (`GET /workflow/{id}/events`). Yerel modelin prompt okuma süresi sayaçla gösteriliyor. Olaylar şimdilik bellekte (son 50 çalışma); veritabanına yazılması Adım 3–4'te.
+- [ ] **1. Model sağlayıcı (sihirbaz)**: "Bilgisayarımda çalışsın (Ollama)" / "OpenAI" / "Anthropic" / "OpenRouter" ilk açılışta adım adım. Ollama seçilirse kurulu olup olmadığı ve çalışıp çalışmadığı denetlenir, kurulu modeller listelenir, donanıma göre model önerilir (RAM/GPU tespiti) ve konsoldan `ollama pull` ilerleme çubuğuyla yapılır. Bulut seçilirse API anahtarı istenir ve bir test çağrısı yapılır.
 - [ ] **2. Çalışma klasörü**: KIO1'in üzerinde çalışacağı proje klasörü seçilir.
 - [ ] **3. Hazır agent paketleri**: "Dosya okuma/yazma (MCP filesystem)", "Git geçmişi", "Kod üretici", "Test çalıştırıcı", "Web'den sayfa getir" kutularla seçilir.
 - [ ] **4. Deneme**: örnek bir istekle uçtan uca çalıştırma ve "Hazırsınız" ekranı.
@@ -84,7 +86,7 @@ KIO1'in "orkestratör" olarak asıl değeri burada.
 - [ ] **Değerlendirme turu**: her seviye ya da tüm plan bittikten sonra LLM sonuçları okur ve `done`, `retry_step`, `replan` ya da `ask_user` kararı verir. Tur sayısı, süre ve token bütçeleri vardır.
 - [ ] **Son cevap**: adım çıktılarından kullanıcıya sade, kaynak gösteren bir cevap sentezlenir (hangi bilgi hangi agent'tan geldi).
 - [ ] **İnsan onayı gereken adımlar**: dosya yazan, komut çalıştıran ya da dağıtım yapan adımlar onay bekler (agent ya da capability bazında ayarlanır).
-- [ ] **Olay akışı**: her olay (plan, adım başladı/bitti, değerlendirme, soru) tek bir olay veriyolundan SSE ile konsola akar ve veritabanına yazılır.
+- [ ] **Olay akışı**: her olay (plan, adım başladı/bitti, değerlendirme, soru) tek bir olay veriyolundan SSE ile konsola akar ve veritabanına yazılır. *(Veriyolu ve SSE hazır; kalan: değerlendirme/soru olayları ve kalıcılık.)*
 - [ ] **İptal**: çalışan bir istek durdurulabilir; MCP ve HTTP çağrılarına iptal iletilir.
 - [ ] **Rol bazlı model seçimi**: planlama, değerlendirme ve son cevap için ayrı model seçilebilir (ör. planlama için yerel model, değerlendirme için bulut model).
 

@@ -123,6 +123,28 @@
     <section class="panel hidden" id="detail-panel">
       <h2>Steps<span class="spacer"></span><span id="detail-id" class="muted small mono"></span></h2>
       <div id="detail-note" class="notice hidden"></div>
+      <div id="live" class="live hidden">
+        <div class="live-head">
+          <span id="live-state" class="chip idle">live</span>
+          <span id="live-phase" class="small muted"></span>
+          <span class="spacer"></span>
+          <label class="small muted"><input type="checkbox" id="live-logs" checked> log lines</label>
+        </div>
+        <div class="live-grid">
+          <div class="live-col">
+            <h3>What the model is writing</h3>
+            <details id="live-thinking-box" class="hidden">
+              <summary class="small muted">thinking</summary>
+              <pre id="live-thinking" class="output live-text muted"></pre>
+            </details>
+            <pre id="live-model" class="output live-text"></pre>
+          </div>
+          <div class="live-col">
+            <h3>Activity</h3>
+            <ol id="live-log" class="live-log"></ol>
+          </div>
+        </div>
+      </div>
       <div class="scroll">
         <table>
           <thead>
@@ -163,8 +185,26 @@
 
         <div class="grid-2">
           <label class="field">
+            Provider
+            <select id="settings-provider-select"></select>
+            <span class="hint" id="settings-provider-note"></span>
+          </label>
+
+          <label class="field" id="settings-key-field">
+            <span id="settings-key-label">API key</span>
+            <input type="password" id="settings-key" autocomplete="off" spellcheck="false"
+                   placeholder="paste the key here">
+            <span class="hint">Saved to <code>.env</code> beside
+              <code>config.json</code>, which git ignores. Leave empty to keep
+              the key already set.</span>
+          </label>
+
+          <label class="field">
             Model
-            <select id="settings-model"></select>
+            <input type="text" id="settings-model" list="settings-model-list"
+                   class="mono" spellcheck="false" autocomplete="off"
+                   placeholder="type to search">
+            <datalist id="settings-model-list"></datalist>
             <span class="hint" id="settings-model-note"></span>
           </label>
 
@@ -186,7 +226,7 @@
         </div>
 
         <div class="row">
-          <span class="muted small">Provider</span>
+          <span class="muted small">In use</span>
           <span id="settings-provider" class="tag"></span>
           <span class="muted small">System prompt</span>
           <span id="settings-prompt" class="tag"></span>

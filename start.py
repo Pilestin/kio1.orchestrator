@@ -33,6 +33,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from core.dotenv import load_dotenv
+
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
 REQUIREMENTS = ROOT / "requirements.txt"
@@ -244,6 +246,9 @@ def main() -> None:
 
     os.chdir(ROOT)
     ensure_python()
+    # Before the token is decided, so a KIO1_REGISTRY_TOKEN in .env is the
+    # one used rather than a generated one.
+    load_dotenv(ROOT / ".env")
     python = ensure_environment(arguments.skip_install)
     config = ensure_config()
     token = ensure_token()

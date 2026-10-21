@@ -1,13 +1,19 @@
 import json
 import logging
+import time
 import urllib.request
 from typing import Any
 
 from core.config_loader import Config
 from core.session_logger import measure_duration
 from core.telemetry import record_gen_ai_response
+from providers.provider_client import TokenCallback
 
 logger = logging.getLogger(__name__)
+
+# How the console names this provider, and the variable holding its key.
+DISPLAY_NAME = "Ollama — models on this computer"
+API_KEY_ENV = None
 
 
 def create_client(config: Config) -> None:
@@ -60,6 +66,7 @@ def send_request(
     client: Any,
     system_prompt: str,
     messages: list[dict[str, str]],
+    on_token: TokenCallback | None = None,
 ) -> dict[str, Any]:
     """Send a chat completion request to the Ollama API.
 
@@ -68,12 +75,18 @@ def send_request(
         client: Not used for Ollama, included for interface consistency.
         system_prompt: The system prompt text.
         messages: List of message dicts with `role` and `content` keys.
+        on_token: Called with each fragment of the answer as it is written,
+            and with `channel="thinking"` for a reasoning model's thinking.
+            Omitted waits for the whole answer, as before streaming existed.
 
     Returns:
-        The parsed JSON response from the model as a dictionary.
+        The parsed JSON response from the model as a dictionary, the same
+        shape whether or not it was streamed.
 
     Raises:
         ValueError: If the response was truncated by the context window or output limit.
+        TimeoutError: If a streamed answer took longer than `request_timeout`
+            in total.
     """
     endpoint = _get_endpoint(config)
     context_window_size = _get_context_window_size(config)
@@ -85,7 +98,7 @@ def send_request(
             {"role": "system", "content": system_prompt},
             *messages,
         ],
-        "stream": False,
+        "stream": on_token is not None,
         "format": "json",
         "think": _get_think(config),
         "keep_alive": config.keep_alive,
@@ -107,7 +120,12 @@ def send_request(
 
     with measure_duration() as elapsed:
         with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
-            response_data = json.loads(response.read().decode("utf-8"))
+            if on_token is None:
+                response_data = json.loads(response.read().decode("utf-8"))
+            else:
+                response_data = _read_stream(
+                    response, on_token, time.monotonic() + config.request_timeout
+                )
 
     finish_reason = response_data.get("done_reason")
     input_tokens = response_data.get("prompt_eval_count")
@@ -146,6 +164,62 @@ def send_request(
         )
 
     return response_data
+
+
+def _read_stream(
+    response: Any, on_token: TokenCallback, deadline: float
+) -> dict[str, Any]:
+    """Read a streamed answer, relaying it, and return it as one response.
+
+    Ollama streams one JSON object per line: fragments of the message, then a
+    final object carrying `done`, the token counts, and why it stopped.
+
+    Args:
+        response: The open HTTP response.
+        on_token: Receives each fragment.
+        deadline: `time.monotonic()` value by which the answer must be done.
+            The socket timeout alone only bounds the gap between fragments,
+            and a model that keeps writing would otherwise never time out.
+
+    Returns:
+        The final object with the whole message in it — exactly what a
+        request with streaming off returns.
+
+    Raises:
+        ValueError: If Ollama reports an error mid-stream.
+        TimeoutError: If the deadline passes before the answer is complete.
+    """
+    parts: list[str] = []
+    final: dict[str, Any] = {}
+
+    for line in response:
+        if not line.strip():
+            continue
+
+        chunk = json.loads(line.decode("utf-8"))
+
+        if "error" in chunk:
+            raise ValueError(f"Ollama reported an error: {chunk['error']}")
+
+        message = chunk.get("message") or {}
+        thinking = message.get("thinking")
+        content = message.get("content")
+
+        if thinking:
+            on_token(thinking, "thinking")
+
+        if content:
+            parts.append(content)
+            on_token(content, "content")
+
+        if chunk.get("done"):
+            final = chunk
+            break
+
+        if time.monotonic() > deadline:
+            raise TimeoutError("The model did not finish within request_timeout")
+
+    return {**final, "message": {"role": "assistant", "content": "".join(parts)}}
 
 
 def extract_content(response: dict[str, Any]) -> str:

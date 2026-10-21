@@ -11,6 +11,9 @@ from core.telemetry import record_gen_ai_response
 
 logger = logging.getLogger(__name__)
 
+DISPLAY_NAME = "Anthropic (Claude)"
+API_KEY_ENV = "ANTHROPIC_API_KEY"
+
 # Models that reject a custom `temperature` (400 if sent with a non-default value).
 # Omitting the parameter entirely is always safe — the API falls back to its own default.
 _NO_CUSTOM_TEMPERATURE = {
@@ -31,7 +34,7 @@ def create_client(config: Config) -> Anthropic:
     Returns:
         An Anthropic client.
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = os.getenv(API_KEY_ENV)
     if not api_key or not api_key.strip():
         raise ValueError(
             "ANTHROPIC_API_KEY environment variable is required when using the Anthropic provider"

@@ -5,11 +5,12 @@ one is how you drive KIO1 from a terminal, the other is how you drive
 it from a browser or another program, and neither is buried.
 """
 
+import json
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from hmac import compare_digest
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -30,7 +31,9 @@ from core.config_writer import (
     save_settings,
     writing_enabled,
 )
+from core.dotenv import load_dotenv, save_dotenv_value
 from core.prompt_loader import load_prompt
+from core.run_events import RunEvent, RunEventBus, install_log_relay
 from core.service_telemetry import TraceContextMiddleware
 from core.session_client import NullSessionClient, SessionClient, SessionClientError
 from core.telemetry import init_telemetry, shutdown_telemetry, trace_provider_preload
@@ -47,7 +50,7 @@ from dispatch.directory import (
 )
 from dispatch.discovery import DiscoveryError, ManifestSource, entries_from_manifest
 from dispatch.scoreboard import Scoreboard
-from providers.provider_client import load_provider
+from providers.provider_client import describe_provider, load_provider
 from services.session_manager.storage import (
     DATABASE_URL_ENV,
     DEFAULT_DATABASE_URL,
@@ -121,6 +124,7 @@ class _State:
     session_client: SessionClient | NullSessionClient | EmbeddedSessionClient
     directory: AgentDirectory
     scoreboard: Scoreboard
+    events: RunEventBus = field(default_factory=RunEventBus)
 
 
 _state: _State | None = None
@@ -132,6 +136,8 @@ def _build_state() -> _State:
     Returns:
         The service state.
     """
+    # API keys from .env, before anything reads them. The environment wins.
+    load_dotenv()
     config = load_config()
     init_telemetry(config.telemetry, llm=config.model)
 
@@ -149,6 +155,7 @@ def _build_state() -> _State:
     # One scoreboard for the process, so history accumulates across
     # requests instead of resetting with every workflow.
     scoreboard = Scoreboard(config.dispatch.selection)
+    events = RunEventBus()
 
     provider = load_provider(config.provider, config.allowed_providers)
     provider_client = provider.create_client(config)
@@ -193,10 +200,12 @@ def _build_state() -> _State:
             recorder=session_client,
             directory=directory,
             scoreboard=scoreboard,
+            events=events,
         ),
         session_client=session_client,
         directory=directory,
         scoreboard=scoreboard,
+        events=events,
     )
 
 
@@ -205,12 +214,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Prepare the provider and telemetry on startup, flush them on shutdown."""
     global _state
 
+    remove_log_relay = install_log_relay()
     _state = _build_state()
 
     try:
         yield
     finally:
         state, _state = _state, None
+        remove_log_relay()
 
         if state is not None:
             state.directory.stop()
@@ -333,6 +344,7 @@ def run_workflow(
             detail="Session Manager is unavailable, so the request was not accepted",
         ) from error
 
+    state.events.publish(str(session_id), "status", status="pending")
     background_tasks.add_task(state.runner.run, session_id, body.request)
 
     logger.info("Workflow accepted: session_id=%s", session_id)
@@ -397,6 +409,76 @@ def get_workflow(
         ) from error
 
     return JSONResponse(content=detail)
+
+
+# How long one wait for new events lasts before a keep-alive is sent. Short
+# enough that a proxy does not close an idle stream, long enough to be cheap.
+_EVENT_WAIT_SECONDS = 15.0
+
+
+def _sse(event: RunEvent) -> str:
+    """Format one event as a Server-Sent Events frame."""
+    payload = json.dumps(event.to_dict(), ensure_ascii=False, default=str)
+    return f"id: {event.id}\nevent: {event.kind}\ndata: {payload}\n\n"
+
+
+@app.get("/workflow/{session_id}/events")
+def workflow_events(
+    session_id: UUID,
+    request: Request,
+    after: int = 0,
+    state: _State = Depends(get_state),
+) -> StreamingResponse:
+    """Stream what a run is doing while it does it.
+
+    Server-Sent Events: the plan as the model writes it, each step as it
+    starts and finishes, and KIO1's own log lines for the run. The stream
+    ends after the run's `finished` event. A browser's `EventSource`
+    reconnects on its own and resumes from `Last-Event-ID`; any other client
+    passes `after`.
+
+    Only recent runs of this process are held. For an older run, or one
+    started before a restart, the stream is empty and ends at once — its
+    record is at `/workflow/{session_id}`.
+
+    Args:
+        session_id: The run to follow.
+        request: Read for `Last-Event-ID`.
+        after: Resume after this event id.
+        state: The event bus.
+
+    Returns:
+        A `text/event-stream` response.
+    """
+    run_id = str(session_id)
+    resume = request.headers.get("Last-Event-ID", "")
+    cursor = int(resume) if resume.isdigit() else after
+
+    def stream() -> Iterator[str]:
+        last = cursor
+        # A run nobody has heard of is not one to wait on.
+        if not state.events.read(run_id) and not state.events.is_finished(run_id):
+            yield ": no live events for this run\n\n"
+            return
+
+        while True:
+            events = state.events.wait(run_id, last, timeout=_EVENT_WAIT_SECONDS)
+
+            for event in events:
+                last = event.id
+                yield _sse(event)
+
+            if state.events.is_finished(run_id) and not state.events.read(run_id, last):
+                return
+
+            if not events:
+                yield ": keep-alive\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _require_registry_token(request: Request) -> None:
@@ -514,11 +596,45 @@ class SettingsRequest(BaseModel):
     absent is left as it is.
     """
 
+    provider: str | None = None
+    api_key: str | None = Field(default=None, max_length=512)
     model: str | None = None
     temperature: float | None = None
     request_timeout: float | None = None
     workspace_path: str | None = None
     workspace_entry_point: str | None = None
+
+
+def _models_for(provider: Any, config: Config) -> tuple[list[str], str]:
+    """Ask a provider which models it offers.
+
+    Args:
+        provider: The provider module.
+        config: The configuration to ask with, for endpoints.
+
+    Returns:
+        The model names, and why there are none when that is not simply the
+        answer.
+    """
+    lister = getattr(provider, "list_models", None)
+
+    if lister is None:
+        # Not every provider can say. An OpenAI or Anthropic deployment names
+        # its model in the file, and a picker that silently offers nothing
+        # would read as "there are none" rather than "I cannot ask".
+        return [], (
+            f"The {config.provider} provider cannot list its models from here; "
+            "type the name you want."
+        )
+
+    try:
+        return list(lister(config)), ""
+    except Exception as error:  # noqa: BLE001 - shown, not swallowed
+        # Listing is a convenience. A provider that cannot answer must not
+        # take the page down with it, and the reason is reported rather than
+        # hidden: "no models" and "the provider is not running" are different
+        # problems, and an empty list looks like the first.
+        return [], f"Models could not be listed: {error}"
 
 
 def _settings_view(state: _State) -> dict[str, Any]:
@@ -528,33 +644,12 @@ def _settings_view(state: _State) -> dict[str, Any]:
         state: The live service, for the configuration the runner is using.
 
     Returns:
-        What is in force now, the models the provider can offer, and where a
-        change would be saved.
+        What is in force now, the providers and models that can be chosen,
+        and where a change would be saved.
     """
     config = state.runner.config
     workspace = config.dispatch.workspace
-    models: list[str] = []
-    models_error = ""
-
-    lister = getattr(state.runner.provider, "list_models", None)
-
-    if lister is None:
-        # Not every provider can say. An OpenAI or Anthropic deployment names
-        # its model in the file, and a picker that silently offers nothing
-        # would read as "there are none" rather than "I cannot ask".
-        models_error = (
-            f"The {config.provider} provider cannot list its models from here; "
-            "type the name you want."
-        )
-    else:
-        try:
-            models = lister(config)
-        except Exception as error:  # noqa: BLE001 - shown, not swallowed
-            # Listing is a convenience. A provider that cannot answer must not
-            # take the page down with it, and the reason is reported rather
-            # than hidden: "no models" and "the provider is not running" are
-            # different problems, and an empty list looks like the first.
-            models_error = f"Models could not be listed: {error}"
+    models, models_error = _models_for(state.runner.provider, config)
 
     if config.model and config.model not in models:
         # The model in force is always offerable, even when the provider has
@@ -564,6 +659,9 @@ def _settings_view(state: _State) -> dict[str, Any]:
 
     return {
         "provider": config.provider,
+        "providers": [
+            describe_provider(name) for name in sorted(config.allowed_providers)
+        ],
         "model": config.model,
         "models": models,
         "models_error": models_error,
@@ -599,6 +697,125 @@ def get_settings(
     return _settings_view(state)
 
 
+@app.get("/settings/models")
+def get_provider_models(
+    provider: str,
+    request: Request,
+    state: _State = Depends(get_state),
+) -> dict[str, Any]:
+    """List the models of a provider, chosen or not.
+
+    The console asks this when someone picks a different provider, so the
+    model list matches the provider before anything is saved.
+
+    Args:
+        provider: The provider to ask.
+        request: The incoming request, checked for the registry token.
+        state: The live service, for the configuration to ask with.
+
+    Returns:
+        The models, and why there are none when listing failed.
+
+    Raises:
+        HTTPException: 400 for a provider this deployment does not allow.
+    """
+    _require_registry_token(request)
+
+    config = state.runner.config
+
+    try:
+        module = load_provider(provider, config.allowed_providers)
+    except (ValueError, TypeError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    models, reason = _models_for(module, replace(config, provider=provider))
+
+    return {"provider": provider, "models": models, "models_error": reason}
+
+
+def _switch_provider(
+    state: _State, body: SettingsRequest
+) -> tuple[str, Any, Any] | None:
+    """Prepare a change of provider or of its key, without applying it.
+
+    Building the new client first means a missing or wrong key is refused
+    before anything is saved, rather than discovered by the next run.
+
+    Args:
+        state: The live service.
+        body: The requested change.
+
+    Returns:
+        The provider name, its module, and a ready client — or None when
+        neither the provider nor its key is changing.
+
+    Raises:
+        HTTPException: 400 when the provider is not allowed, needs a model,
+            or its client cannot be created.
+    """
+    config = state.runner.config
+    name = (body.provider or config.provider).strip()
+    key = (body.api_key or "").strip()
+
+    if name == config.provider and not key:
+        return None
+
+    try:
+        module = load_provider(name, config.allowed_providers)
+    except (ValueError, TypeError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    model = (body.model or "").strip()
+
+    if name != config.provider and not model:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Choose a {name} model to go with the provider.",
+        )
+
+    declared = getattr(module, "API_KEY_ENV", None)
+    # The variable a new key goes into, or None when no key is being tried.
+    key_env: str | None = declared if key and isinstance(declared, str) else None
+    previous_key = os.environ.get(key_env) if key_env is not None else None
+
+    if key_env is not None:
+        # Tried in this process first; written to .env only once a client
+        # accepts it, so a mistyped key is not left behind for the next start.
+        os.environ[key_env] = key
+
+    try:
+        client = module.create_client(
+            replace(config, provider=name, model=model or config.model)
+        )
+    except Exception as error:
+        if key_env is not None:
+            if previous_key is None:
+                os.environ.pop(key_env, None)
+            else:
+                os.environ[key_env] = previous_key
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{name} cannot be used yet: {error}",
+        ) from error
+
+    if key_env is not None:
+        try:
+            # Into .env, which git ignores, so it survives a restart.
+            save_dotenv_value(key_env, key)
+        except (ValueError, OSError) as error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"The key works but could not be saved: {error}",
+            ) from error
+
+    return name, module, client
+
+
 @app.put("/settings")
 def put_settings(
     body: SettingsRequest,
@@ -630,6 +847,10 @@ def put_settings(
 
     config = state.runner.config
     updates: dict[str, Any] = {}
+    switch = _switch_provider(state, body)
+
+    if switch is not None and switch[0] != config.provider:
+        updates["provider"] = switch[0]
 
     if body.model is not None:
         model = body.model.strip()
@@ -665,19 +886,30 @@ def put_settings(
     if workspace is not None:
         updates["dispatch"] = {"workspace": workspace}
 
+    if updates:
+        try:
+            save_settings(updates)
+        except ConfigWriteError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(error)
+            ) from error
+
+    if switch is not None:
+        # The provider, its model, and its client change together: a run
+        # that read the new provider with the old client would send one
+        # vendor's model name to another.
+        name, module, client = switch
+        state.runner.config.provider = name
+        state.runner.provider = module
+        state.runner.provider_client = client
+        logger.info("Planning provider is now %s", name)
+
     if not updates:
         return _settings_view(state)
 
-    try:
-        save_settings(updates)
-    except ConfigWriteError as error:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(error)
-        ) from error
-
     _apply_settings(state, updates)
 
-    if "model" in updates:
+    if "model" in updates or "provider" in updates:
         # A local model has to be read into memory before it can answer, and
         # that read is charged to whichever request triggers it. Without this
         # the first run after a change pays it and frequently times out, which

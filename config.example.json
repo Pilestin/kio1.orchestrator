@@ -3,7 +3,8 @@
     "allowed_providers": [
         "ollama",
         "openai",
-        "anthropic"
+        "anthropic",
+        "openrouter"
     ],
     "model": "ministral-3:3b",
     "prompt_path": "prompts/kio1_system_prompt_ver2.txt",

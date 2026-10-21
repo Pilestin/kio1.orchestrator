@@ -41,6 +41,27 @@ The header shows which model will write the plan and which workspace the
 agents will be pointed at, because those are the two settings a run goes wrong
 on.
 
+### Watching a run
+
+A run opens a live panel above its steps, fed by
+`GET /workflow/{session_id}/events` (Server-Sent Events):
+
+- **What the model is writing** — the plan, token by token, as the model
+  produces it. A reasoning model's thinking, when it is allowed to think, is
+  in a collapsed section above it.
+- **Activity** — the catalog it was given, the plan once parsed (with each
+  step's target, dependencies, and arguments), every step starting and
+  finishing with its output, and KIO1's own log lines for the run. Untick
+  *log lines* to hide those.
+
+A local model reads the whole prompt before it writes a word; on a computer
+without a GPU that is 30–60 silent seconds. The panel counts them, so a slow
+start is not mistaken for a hang.
+
+Clicking a recent run replays its stream from the start. Only runs of the
+current process are held, the latest 50; a run from before a restart has no
+live record, and its outcome is in the steps table as before.
+
 ## Targets
 
 Everything the [live directory](live-directory.md) knows: each one's kind,
@@ -173,9 +194,16 @@ Three things decide how a run goes that are not targets, and all three used to
 be hand-edits into `config.json`. They are on this tab, they are saved to the
 same file, and they take effect from the next run — nothing restarts.
 
-**Planning model.** Which model writes the plan. For a local provider the list
-is what that installation has pulled; for one that cannot be asked, the name is
-typed and the page says why there is no list.
+**Planning model.** Which provider and which model write the plan. Pick a
+provider — Ollama on this computer, OpenRouter, OpenAI, or Anthropic — and the
+model field offers what it has: type part of a name to filter, which matters
+for OpenRouter's several hundred. For a provider that cannot be asked, the
+name is typed and the page says why there is no list.
+
+A provider that needs a key shows a key field. A pasted key is tried first and
+written to `.env` (which git ignores) only if it works; a wrong one is refused
+on the spot and nothing changes. The switch takes effect from the next run,
+without a restart.
 
 This is the setting worth reaching for first when a run produces a plan that
 is *valid but wrong* — steps in an impossible order, a capability that does not
@@ -230,6 +258,9 @@ All of them are ordinary API endpoints; the console is just one caller.
 | `POST /workflow/run` | Start a run |
 | `GET /workflows?limit=N` | Recent runs, newest first |
 | `GET /workflow/{session_id}` | One run with its steps |
+| `GET /workflow/{session_id}/events` | The run's live stream (Server-Sent Events); resumes from `Last-Event-ID` or `?after=` |
+| `GET /settings`, `PUT /settings` | Provider, model, key, temperature, timeout, workspace |
+| `GET /settings/models?provider=…` | A provider's models, before switching to it |
 
 `GET /workflows` answers with an empty list when session recording is off — a
 console asking what has run wants an empty answer when the answer is nothing,

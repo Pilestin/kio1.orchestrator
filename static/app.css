@@ -599,6 +599,69 @@ details pre {
   word-break: break-word;
 }
 
+/* ── live view of a run ─────────────────────────────────────────────────── */
+
+.live { margin: 0 0 1rem; }
+
+.live-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.9rem;
+}
+
+.live-col h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+pre.live-text { min-height: 6rem; max-height: 20rem; font-size: 0.8rem; }
+pre.live-text:empty::before { content: "—"; color: var(--muted); }
+
+.live-log {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  max-height: 20rem;
+  overflow: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+}
+
+.live-log li {
+  display: grid;
+  grid-template-columns: 3.4rem minmax(0, 1fr);
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.live-log li:last-child { border-bottom: none; }
+.live-log .at { color: var(--muted); font-family: var(--mono); text-align: right; }
+.live-log .what { word-break: break-word; }
+.live-log .ok { color: var(--ok); }
+.live-log .bad { color: var(--bad); }
+.live-log .warn { color: var(--warn); }
+.live-log .quiet { color: var(--muted); font-family: var(--mono); font-size: 0.75rem; }
+.live-log.no-logs li.is-log { display: none; }
+.live-log pre { margin: 0.3rem 0 0; max-height: 12rem; font-size: 0.75rem; }
+
+@media (max-width: 820px) {
+  .live-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ── narrow screens ─────────────────────────────────────────────────────── */
 
 @media (max-width: 820px) {
