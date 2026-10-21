@@ -16,7 +16,10 @@ import logging
 import os
 import re
 import subprocess
+from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
+from urllib.parse import quote
 
 from opentelemetry.propagate import inject
 
@@ -64,6 +67,11 @@ def _lookup(name: str, message: ExecutionMessage) -> Any:
     if name == "data":
         return message.data
 
+    # `{arguments.x}` is shorthand for `{data.arguments.x}`: the arguments a
+    # plan step supplies are what a configured URL or body most often wants.
+    if name == "arguments" or name.startswith("arguments."):
+        name = f"data.{name}"
+
     if not name.startswith("data."):
         return None
 
@@ -77,7 +85,30 @@ def _lookup(name: str, message: ExecutionMessage) -> Any:
     return current
 
 
-def render(value: Any, message: ExecutionMessage) -> Any:
+def render_url(url: str, message: ExecutionMessage) -> str:
+    """Substitute fields into a URL, percent-encoding what is substituted.
+
+    A task such as "Weather in Istanbul" in a query string must arrive as
+    `Weather%20in%20Istanbul`: unencoded, the space makes the request invalid,
+    and an `&` in it would start a parameter nobody configured.
+
+    Args:
+        url: The configured URL.
+        message: The message being dispatched.
+
+    Returns:
+        The URL with placeholders resolved and encoded. A URL that is exactly
+        one placeholder is taken as a whole address and left as it is.
+    """
+    return str(render(url, message, encode=lambda text: quote(text, safe="")))
+
+
+def render(
+    value: Any,
+    message: ExecutionMessage,
+    *,
+    encode: Callable[[str], str] | None = None,
+) -> Any:
     """Substitute execution-message fields into a configured value.
 
     A string that is *exactly* one placeholder is replaced by the raw value,
@@ -87,15 +118,19 @@ def render(value: Any, message: ExecutionMessage) -> Any:
     Args:
         value: A configured string, list, or object.
         message: The message being dispatched.
+        encode: Applied to text substituted inside a longer string, such as
+            URL encoding. Omitted inserts it unchanged.
 
     Returns:
         The value with placeholders resolved. Lists and objects are walked.
     """
     if isinstance(value, dict):
-        return {key: render(item, message) for key, item in value.items()}
+        return {
+            key: render(item, message, encode=encode) for key, item in value.items()
+        }
 
     if isinstance(value, list):
-        return [render(item, message) for item in value]
+        return [render(item, message, encode=encode) for item in value]
 
     if not isinstance(value, str):
         return value
@@ -111,10 +146,13 @@ def render(value: Any, message: ExecutionMessage) -> Any:
         if resolved is None:
             return match.group(0)
 
-        if isinstance(resolved, str):
-            return resolved
+        text = (
+            resolved
+            if isinstance(resolved, str)
+            else json.dumps(resolved, ensure_ascii=False)
+        )
 
-        return json.dumps(resolved, ensure_ascii=False)
+        return encode(text) if encode is not None else text
 
     return _PLACEHOLDER.sub(substitute, value)
 
@@ -239,7 +277,8 @@ class HttpToolTransport:
                 f"{agent.agent_id} is not configured as an HTTP tool."
             )
 
-        url = render(spec.url, message)
+        message = self._with_arguments(message, spec)
+        url = render_url(spec.url, message)
         headers = {
             name: expand_environment(
                 str(render(value, message)),
@@ -298,6 +337,49 @@ class HttpToolTransport:
             ) from error
 
         return protocol_reply(message, status="ok", output=self._output(text, spec))
+
+    @staticmethod
+    def _with_arguments(
+        message: ExecutionMessage, spec: HttpToolSpec
+    ) -> ExecutionMessage:
+        """Settle the arguments an API declares before anything is rendered.
+
+        The rules are the MCP ones, for the same reasons: arguments the plan
+        supplied are used, a lone string argument takes the task text, and a
+        required argument nothing supplies fails the step by name — calling
+        the API with `{arguments.latitude}` left in its URL would only produce
+        an error from the far side that says less.
+
+        Args:
+            message: The message being dispatched.
+            spec: The API's configuration.
+
+        Returns:
+            The message, with the settled arguments in `data` when the API
+            declares any.
+
+        Raises:
+            AgentTransportError: If a required argument is missing.
+        """
+        tool = spec.arguments_tool(message.capability)
+
+        if tool is None:
+            return message
+
+        # Imported here: the MCP transport imports this module for `render`.
+        from dispatch.mcp_transport import ARGUMENTS_KEY, arguments_for
+
+        arguments = arguments_for(message, tool)
+        missing = [name for name in tool.required if name not in arguments]
+
+        if missing:
+            raise AgentTransportError(
+                f"{message.agent_id} needs argument(s) {', '.join(missing)} "
+                f"({tool.summarize_arguments()}), and the step did not supply "
+                "them."
+            )
+
+        return replace(message, data={**message.data, ARGUMENTS_KEY: arguments})
 
     @staticmethod
     def _output(text: str, spec: HttpToolSpec) -> dict[str, Any]:

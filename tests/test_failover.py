@@ -393,7 +393,7 @@ def test_a_malformed_failover_block_is_rejected() -> None:
 
 
 def test_the_repository_config_turns_failover_on() -> None:
-    failover = load_config("config.json").dispatch.failover
+    failover = load_config("config.example.json").dispatch.failover
 
     assert failover.enabled is True
     assert failover.max_attempts == 2

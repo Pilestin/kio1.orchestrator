@@ -21,7 +21,11 @@ COMPOSE     := docker compose -f deploy/compose.yaml
 install: ## Create venv and install all dependencies
 	python -m venv $(VENV)
 	$(PIP) install --upgrade pip
-	$(PIP) install -r requirements.txt
+	$(PIP) install -r requirements-dev.txt
+
+.PHONY: start
+start: ## Set everything up if needed and open the console (same as start.py)
+	python start.py
 
 # ── Formatting ───────────────────────────────────────────────────────────────
 
@@ -51,8 +55,13 @@ check: lint typecheck ## Run all static checks (lint + typecheck)
 # ── Services ─────────────────────────────────────────────────────────────────
 
 .PHONY: services
-services: ## Start PostgreSQL, the Session Manager, and the Workflow API
+services: config.json ## Start PostgreSQL, the Session Manager, and the Workflow API
 	$(COMPOSE) up -d --build
+
+# Personal and untracked: created once from the shipped example.
+config.json:
+	python -c "import shutil; shutil.copyfile('config.example.json', 'config.json')"
+
 
 .PHONY: services-down
 services-down: ## Stop the service stack, keeping the database volume

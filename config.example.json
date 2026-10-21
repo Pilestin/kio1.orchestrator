@@ -9,7 +9,7 @@
     "prompt_path": "prompts/kio1_system_prompt_ver2.txt",
     "chat_directory": "chats",
     "temperature": 0.2,
-    "request_timeout": 60.0,
+    "request_timeout": 300.0,
     "keep_alive": -1,
     "max_output_tokens": 4096,
     "telemetry": {
@@ -27,7 +27,7 @@
         "request_timeout": 60,
         "max_parallel_steps": 4,
         "workspace": {
-            "path": "E:/Kodlar/AI4SWeng/Trace/py-test-codes-for-focustracer/codes",
+            "path": "",
             "entry_point": ""
         },
         "health": {
@@ -66,7 +66,7 @@
         },
         "agents": {
             "KIO2": {
-                "endpoint": "http://localhost:8102",
+                "endpoint": "http://127.0.0.1:8102",
                 "path": "/execute",
                 "description": "Bug localization, diagnosis, dynamic slicing, execution replay, and trace comparison. Does NOT generate fixes.",
                 "capabilities": [
@@ -203,47 +203,23 @@
                     "repository_history"
                 ]
             },
-            "Deneme": {
-                "type": "cli",
-                "description": "Which python version is running on the machine.",
-                "command": [
-                    "python",
-                    "--version"
-                ],
-                "cwd": "",
-                "capabilities": [
-                    "python_version_check"
-                ]
-            },
-            "OllamaQwenHttp": {
-                "type": "http",
-                "description": "Sends prompt directly to the Ollama REST API for local qwen3.5:4b inference.",
-                "url": "http://127.0.0.1:11434/api/generate",
-                "method": "POST",
-                "headers": {
-                    "Content-Type": "application/json"
-                },
-                "body": {
-                    "model": "qwen3.5:4b",
-                    "prompt": "{task}",
-                    "stream": false
-                },
-                "result_path": [
-                    "response"
-                ],
-                "health_url": "http://localhost:11434/",
-                "capabilities": [
-                    "llm_inference",
-                    "text_generation"
-                ]
-            },
             "WeatherForecast": {
                 "type": "http",
-                "description": "Belirtilen enlem ve boylam için anlık sıcaklık ve hava durumu bilgisini getirir.",
-                "url": "https://api.open-meteo.com/v1/forecast?latitude={data.latitude}&longitude={data.longitude}&current_weather=true",
+                "description": "Current temperature and weather at a latitude and longitude, from the free Open-Meteo API.",
+                "url": "https://api.open-meteo.com/v1/forecast?latitude={arguments.latitude}&longitude={arguments.longitude}&current_weather=true",
                 "method": "GET",
-                "headers": {},
-                "body": {},
+                "arguments": {
+                    "latitude": {
+                        "type": "number",
+                        "required": true,
+                        "description": "Latitude in decimal degrees"
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "required": true,
+                        "description": "Longitude in decimal degrees"
+                    }
+                },
                 "result_path": [
                     "current_weather"
                 ],
@@ -256,6 +232,7 @@
     },
     "provider_options": {
         "endpoint": "http://127.0.0.1:11434",
-        "context_window_size": 16384
+        "context_window_size": 16384,
+        "think": false
     }
 }

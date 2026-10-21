@@ -87,6 +87,7 @@ def send_request(
         ],
         "stream": False,
         "format": "json",
+        "think": _get_think(config),
         "keep_alive": config.keep_alive,
         "options": {
             "temperature": config.temperature,
@@ -177,6 +178,31 @@ def _get_endpoint(config: Config) -> str:
         raise ValueError("Ollama requires provider_options.endpoint")
 
     return endpoint.rstrip("/")
+
+
+def _get_think(config: Config) -> bool:
+    """Read whether a reasoning model may think before it answers.
+
+    Off unless asked for. A plan is a JSON object the prompt already spells
+    out, and on a machine without a GPU a reasoning model's thinking costs
+    minutes per request while adding little to a plan. Models that do not
+    think accept the flag and ignore it.
+
+    Args:
+        config: Application configuration containing provider options.
+
+    Returns:
+        The configured `provider_options.think`, False when absent.
+
+    Raises:
+        ValueError: If the value is not a boolean.
+    """
+    think = config.provider_options.get("think", False)
+
+    if type(think) is not bool:
+        raise ValueError("Ollama provider_options.think must be true or false")
+
+    return think
 
 
 def _get_context_window_size(config: Config) -> int:

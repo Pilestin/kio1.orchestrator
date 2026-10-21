@@ -17,10 +17,23 @@ Providers are loaded dynamically from `<provider>_client.py`, keeping the main a
 - Access to the model configured in `config.json`
 - Docker with Docker Compose (optional, for local trace and metric storage)
 
-## Installation
+## Quick start
+
+Double-click **`start.cmd`** (Windows), or run:
 
 ```bash
-make install
+./start.sh          # or: python start.py
+```
+
+That installs what is needed into `.venv`, creates `config.json`, starts
+Ollama if it is installed, and opens the console in your browser. No Docker
+and no database server are needed: history is kept in `data/kio1.db`.
+See [Usage](docs/usage.md#the-quickest-start).
+
+## Installation by hand
+
+```bash
+make install            # runtime plus test and lint tools
 source .venv/bin/activate
 ```
 
@@ -29,14 +42,16 @@ Or manually:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt     # or requirements.txt for runtime only
 ```
 
-Further information about the project is available in the docs folder
+Further information about the project is available in the docs folder. The
+plan for what comes next is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Configuration
 
-The active provider and model are selected in `config.json`. API keys are read from environment variables, never from `config.json` itself. See [Configuration](docs/configuration.md) for the full field reference and per-provider setup.
+The active provider and model are selected in `config.json`, which is created
+from `config.example.json` on first run and is not tracked by git. API keys are read from environment variables, never from `config.json` itself. See [Configuration](docs/configuration.md) for the full field reference and per-provider setup.
 
 ## Usage
 

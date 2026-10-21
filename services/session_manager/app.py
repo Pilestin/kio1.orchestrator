@@ -1,8 +1,7 @@
 import logging
 import os
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
-from typing import Any
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -21,30 +20,27 @@ from services.session_manager.models import (
     Step,
     UpdateSessionRequest,
 )
-from services.session_manager.repository import (
-    InMemorySessionRepository,
-    PostgresSessionRepository,
-    SessionRepository,
-)
+from services.session_manager.repository import SessionRepository
+from services.session_manager.storage import DATABASE_URL_ENV, open_repository
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL_ENV = "KIO1_DATABASE_URL"
 
 _repository: SessionRepository | None = None
-_pool: Any = None
+_close: Callable[[], None] | None = None
 
 
-def _build_repository() -> tuple[SessionRepository, Any]:
+def _build_repository() -> tuple[SessionRepository, Callable[[], None]]:
     """Create the repository the service will use.
 
     Returns:
-        The repository and the connection pool backing it, if any. Without
+        The repository and a function releasing it. Without
         `KIO1_DATABASE_URL` the service falls back to in-memory storage so it
-        can be run locally without Postgres; that storage is lost on restart.
+        can be run locally without a database; that storage is lost on
+        restart. `sqlite:///path` keeps history in a file with no server.
 
     Raises:
-        RuntimeError: If a database URL is set but psycopg is not installed.
+        RuntimeError: If a PostgreSQL URL is set but psycopg is not installed.
     """
     database_url = os.environ.get(DATABASE_URL_ENV, "").strip()
 
@@ -54,40 +50,25 @@ def _build_repository() -> tuple[SessionRepository, Any]:
             "survive a restart.",
             DATABASE_URL_ENV,
         )
-        return InMemorySessionRepository(), None
 
-    try:
-        from psycopg_pool import ConnectionPool
-    except ImportError as error:  # pragma: no cover - depends on environment
-        raise RuntimeError(
-            f"{DATABASE_URL_ENV} is set but psycopg is not installed. "
-            "Install psycopg[binary,pool] or unset the variable."
-        ) from error
-
-    pool = ConnectionPool(database_url, min_size=1, max_size=8, open=True)
-    repository = PostgresSessionRepository(pool)
-    repository.apply_schema()
-
-    logger.info("Session Manager connected to PostgreSQL")
-
-    return repository, pool
+    return open_repository(database_url)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Open storage and tracing on startup, close both on shutdown."""
-    global _pool
+    global _close
     global _repository
 
     _start_tracing()
-    _repository, _pool = _build_repository()
+    _repository, _close = _build_repository()
 
     try:
         yield
     finally:
-        if _pool is not None:
-            _pool.close()
-            _pool = None
+        if _close is not None:
+            _close()
+            _close = None
 
         _repository = None
         shutdown_service_tracing()

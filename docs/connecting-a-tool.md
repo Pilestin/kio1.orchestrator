@@ -44,6 +44,38 @@ existed needs changing.
 | `headers` | Optional. Values may contain placeholders and `${ENV_VAR}` references. |
 | `body` | Optional JSON body, with placeholders substituted. **Omit it** and KIO1 sends the standard execution message — the right default for an API that already speaks the protocol. Not sent for `GET` or `DELETE`. |
 | `result_path` | Optional keys to follow into the response. `["report"]` on `{"report": {...}, "meta": {...}}` keeps only the report. |
+| `arguments` | Optional. The named values the API takes, used as `{arguments.name}`. See below. |
+
+### An API that takes values, not sentences
+
+A weather service wants a latitude and a longitude. Say so, and the planner
+is shown exactly that and fills them in from the user's request:
+
+```json
+"WeatherForecast": {
+    "type": "http",
+    "description": "Current weather at a latitude and longitude.",
+    "url": "https://api.open-meteo.com/v1/forecast?latitude={arguments.latitude}&longitude={arguments.longitude}&current_weather=true",
+    "method": "GET",
+    "arguments": {
+        "latitude":  {"type": "number", "required": true, "description": "Decimal degrees"},
+        "longitude": {"type": "number", "required": true, "description": "Decimal degrees"}
+    },
+    "result_path": ["current_weather"],
+    "capabilities": ["weather_check"]
+}
+```
+
+The catalog then reads
+`capabilities: weather_check · arguments: latitude (number, required), longitude (number, required)`,
+the same form an [MCP tool](mcp.md) is shown in, and a plan step carries
+`"arguments": {"latitude": 41.01, "longitude": 28.97}`.
+
+- `type` is one of `string`, `number`, `integer`, `boolean`, `array`, `object`; `string` when omitted.
+- A required argument the step does not supply fails the step **by name**, before anything is sent.
+- An API with exactly one required string argument gets the step's `task` as that argument when the plan gives none — a search query, for instance.
+- A full JSON Schema (`{"type": "object", "properties": …, "required": […]}`) is accepted as it is, so one copied from an OpenAPI document needs no rewriting.
+- Values substituted into `url` are URL-encoded; in `headers` and `body` they are inserted as they are.
 
 **How the response is read.** A `2xx` with a JSON object becomes the step's
 output as-is. A JSON value that is not an object, or a plain-text body, is
@@ -105,6 +137,7 @@ Anything in `url`, `headers`, `body`, `command`, and `env` can carry these:
 | `{capability}` | The capability the step asked for |
 | `{workflow_id}`, `{step_id}`, `{agent_id}` | Step identity |
 | `{data}` | The whole structured input object |
+| `{arguments.name}` | A named argument the plan supplied; short for `{data.arguments.name}` |
 | `{data.repository.path}` | The code under analysis, from `dispatch.workspace` |
 | `{data.upstream.s1}` | What step `s1` returned |
 

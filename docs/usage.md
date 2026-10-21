@@ -9,7 +9,28 @@ in a browser, and then to pointing it at your own work.
 
 ---
 
-## Before you start
+## The quickest start
+
+Double-click **`start.cmd`** on Windows, or run `./start.sh` (or
+`python start.py`) anywhere else. On its first run it:
+
+1. creates `.venv` and installs the runtime requirements,
+2. creates `config.json` from `config.example.json`,
+3. generates an administration token in `data/registry-token`,
+4. starts Ollama if it is installed but not running, and names the
+   `ollama pull` command if the configured model is missing,
+5. starts KIO1 on the first free port from 8000 and opens the console with
+   the token already filled in.
+
+Later runs skip whatever is already done. History is kept in
+`data/kio1.db` (SQLite), so nothing else — no Docker, no database server —
+is needed. Options: `--port`, `--host`, `--no-browser`, `--skip-install`.
+
+On a machine without a GPU a local model takes 30–90 seconds to plan; that is
+the model, not a hang. See `request_timeout` in
+[Configuration](configuration.md).
+
+## Before you start, by hand
 
 ```bash
 python -m venv .venv
@@ -17,8 +38,9 @@ python -m venv .venv
 .venv/bin/pip install -r requirements.txt          # macOS, Linux
 ```
 
-Nothing else is required for the walkthrough below. A model, PostgreSQL, and
-an OpenTelemetry collector are all optional and all noted where they matter.
+`requirements-dev.txt` adds the test and lint tools. Nothing else is required
+for the walkthrough below. A model, PostgreSQL, and an OpenTelemetry collector
+are all optional and all noted where they matter.
 
 > There is a `Makefile` with shortcuts for all of this — `make install`,
 > `make services`, `make test`. It is a convenience for people who have `make`,

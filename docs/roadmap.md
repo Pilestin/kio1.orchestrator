@@ -39,23 +39,25 @@ görev başına model seçimi gerekli.
 Her adım kendi içinde tamamlanır, testleri geçer ve kullanılabilir bir sonuç bırakır.
 Boyut: **S** ≈ yarım gün, **M** ≈ 1–2 gün, **L** ≈ 3+ gün.
 
-### Adım 1 — Kolay başlangıç ve temel düzeltmeler  `M`
+### Adım 1 — Kolay başlangıç ve temel düzeltmeler  `M`  ✅ tamamlandı (2026-10-22)
 
 Amaç: "indir, çalıştır, tarayıcı açılsın".
 
-- [ ] **Tek komutla başlatma**: `start.cmd` (Windows) ve `start.sh` (macOS/Linux) şunları yapar: Python'u kontrol eder, `.venv`'i kurar ya da günceller, bağımlılıkları yükler, KIO1'i başlatır ve tarayıcıyı açar. `python -m kio1` de aynı işi yapar.
-- [ ] **Docker'sız varsayılan**: Session Manager'ın SQLite modu, gömülü (aynı süreçte) çalışır. PostgreSQL ve Docker isteğe bağlı "sunucu modu" olarak kalır.
-- [ ] **Kişisel yapılandırmayı ayırmak**: `config.example.json` depoda kalır. Gerçek `config.json` ilk açılışta oluşturulur ve `.gitignore`'a eklenir; kişisel yollar ve test agent'ları depoya girmez. API anahtarları `.env` dosyasında tutulur.
-- [ ] **Agent `enabled` alanı**: katalog yalnızca *etkin ve erişilebilir* hedefleri gösterir; konsolda aç/kapa düğmesi.
-- [ ] **`http` argüman şeması**: `"arguments": {"latitude": {"type": "number", "required": true}}`; katalogda gösterilir, `{arguments.latitude}` yer tutucusu çözülür.
-- [ ] **Ollama ayarları**: `think: false` varsayılan; planlama için ayrı `planning_timeout`; sistem prompt'u değişmediği sürece önbellekte kalsın diye katalog sırası sabit tutulur.
-- [ ] **Güvenli varsayılanlar**: `compose.yaml`'daki `KIO1_REGISTRY_TOKEN: admin` kaldırılır; token ilk açılışta rastgele üretilir ve konsolda bir kez gösterilir.
+- [x] **Tek komutla başlatma**: `start.cmd` (Windows) ve `start.sh` (macOS/Linux) şunları yapar: Python'u kontrol eder, `.venv`'i kurar ya da günceller, bağımlılıkları yükler, KIO1'i başlatır ve tarayıcıyı açar. `python start.py` de aynı işi yapar.
+- [x] **Docker'sız varsayılan**: Session Manager'ın SQLite modu, gömülü (aynı süreçte) çalışır. PostgreSQL ve Docker isteğe bağlı "sunucu modu" olarak kalır.
+- [x] **Kişisel yapılandırmayı ayırmak**: `config.example.json` depoda kalır. Gerçek `config.json` ilk açılışta oluşturulur ve `.gitignore`'a eklenir; kişisel yollar ve test agent'ları depoya girmez. API anahtarları `.env` dosyasında tutulur.
+- [x] **Agent `enabled` alanı**: katalog yalnızca *etkin ve erişilebilir* hedefleri gösterir; konsolda aç/kapa düğmesi.
+- [x] **`http` argüman şeması**: `"arguments": {"latitude": {"type": "number", "required": true}}`; katalogda gösterilir, `{arguments.latitude}` yer tutucusu çözülür.
+- [x] **Ollama ayarları**: `think: false` varsayılan; planlama zaman aşımı (`request_timeout`) örnekte 300 sn; sistem prompt'u değişmediği sürece önbellekte kalsın diye katalog sırası sabit tutulur.
+- [x] **Güvenli varsayılanlar**: `compose.yaml`'daki `KIO1_REGISTRY_TOKEN: admin` kaldırılır; token ilk açılışta rastgele üretilir ve konsolda bir kez gösterilir.
 
 Kabul: Temiz bir Windows makinede `start.cmd` çift tıklanınca konsol açılır, Docker gerekmez.
 
+Doğrulama: `.venv` olmadan `start.py` sıfırdan kurdu ve başlattı; "41.01, 28.97'de hava nasıl?" isteğinde model `WeatherForecast` argümanlarını kendisi doldurdu, Open-Meteo'dan gerçek veri geldi ve sonuç `data/kio1.db`'ye kaydedildi (toplam ~96 sn, çoğu CPU'da planlama). URL'e giren değerlerin kodlanmaması hatası da bu adımda düzeltildi.
+
 ### Adım 2 — İlk açılış sihirbazı  `M`
 
-- [ ] **1. Model sağlayıcı**: "Bilgisayarımda çalışsın (Ollama)" / "OpenAI" / "Anthropic". Ollama seçilirse kurulu olup olmadığı ve çalışıp çalışmadığı denetlenir, kurulu modeller listelenir, donanıma göre model önerilir (RAM/GPU tespiti) ve konsoldan `ollama pull` ilerleme çubuğuyla yapılır. Bulut seçilirse API anahtarı istenir ve bir test çağrısı yapılır.
+- [ ] **1. Model sağlayıcı**: "Bilgisayarımda çalışsın (Ollama)" / "OpenAI" / "Anthropic" / **"OpenRouter"** (tek anahtarla yüzlerce model; yeni `providers/openrouter_client.py`, OpenAI uyumlu API). Kullanıcı modeli arayüzden kendisi seçer: sağlayıcının model listesi aranabilir bir seçicide gösterilir. Ollama seçilirse kurulu olup olmadığı ve çalışıp çalışmadığı denetlenir, kurulu modeller listelenir, donanıma göre model önerilir (RAM/GPU tespiti) ve konsoldan `ollama pull` ilerleme çubuğuyla yapılır. Bulut seçilirse API anahtarı istenir ve bir test çağrısı yapılır.
 - [ ] **2. Çalışma klasörü**: KIO1'in üzerinde çalışacağı proje klasörü seçilir.
 - [ ] **3. Hazır agent paketleri**: "Dosya okuma/yazma (MCP filesystem)", "Git geçmişi", "Kod üretici", "Test çalıştırıcı", "Web'den sayfa getir" kutularla seçilir.
 - [ ] **4. Deneme**: örnek bir istekle uçtan uca çalıştırma ve "Hazırsınız" ekranı.

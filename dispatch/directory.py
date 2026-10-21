@@ -117,7 +117,7 @@ class AgentRecord:
     @property
     def usable(self) -> bool:
         """Report whether this target should be offered to the planner."""
-        return self.status != STATUS_UNREACHABLE
+        return self.endpoint.enabled and self.status != STATUS_UNREACHABLE
 
     def to_summary(self) -> dict[str, Any]:
         """Return a JSON-safe view for the registry API and the console."""
@@ -126,6 +126,7 @@ class AgentRecord:
             "kind": self.endpoint.kind,
             "origin": self.origin,
             "status": self.status,
+            "enabled": self.endpoint.enabled,
             "description": self.endpoint.description,
             "capabilities": sorted(self.endpoint.capabilities),
             "endpoint": self.endpoint.endpoint,
@@ -456,6 +457,9 @@ class AgentDirectory:
             The stored record.
         """
         status, failures, detail = STATUS_UNCHECKED, 0, ""
+        # A disabled target is not contacted: switching off an MCP server
+        # should not start it just to record that it is off.
+        probe = probe and endpoint.enabled
 
         if probe:
             outcome = probe_target(endpoint, self._health, self._mcp_pool)
@@ -638,7 +642,9 @@ class AgentDirectory:
         if not self._health.enabled:
             return
 
-        targets = [record.endpoint for record in self.records()]
+        targets = [
+            record.endpoint for record in self.records() if record.endpoint.enabled
+        ]
 
         if not targets:
             return

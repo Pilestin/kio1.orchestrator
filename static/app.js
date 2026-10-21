@@ -62,6 +62,20 @@ function token() {
   try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
 }
 
+/** Take a token handed over in the address, then remove it from there.
+ *
+ * The launcher opens the console at `/#token=…` so nobody has to copy a
+ * secret out of a terminal. The fragment never reaches the server, and it is
+ * cleared at once so it is not left in the address bar or a bookmark.
+ */
+(function adoptTokenFromAddress() {
+  const match = /(?:^|&)token=([^&]+)/.exec(window.location.hash.slice(1));
+  if (!match) return;
+
+  try { sessionStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1])); } catch { /* private mode */ }
+  history.replaceState(null, "", window.location.pathname + window.location.search);
+})();
+
 async function api(path, options) {
   const settings = Object.assign({ headers: {} }, options || {});
   if (token()) settings.headers["Authorization"] = "Bearer " + token();
@@ -92,7 +106,7 @@ function statusChip(value) {
   const kind = {
     ok: "ok", ready: "ok", completed: "ok",
     running: "warn", pending: "warn",
-    unchecked: "idle", skipped: "idle", not_run: "idle",
+    unchecked: "idle", skipped: "idle", not_run: "idle", disabled: "idle",
     error: "bad", failed: "bad", unreachable: "bad",
   }[value] || "idle";
 
@@ -124,12 +138,15 @@ function targetRow(agent) {
     + "</td>"
     + '<td class="small mono">' + esc(agent.kind) + "</td>"
     + '<td class="small mono">' + esc(agent.origin) + "</td>"
-    + "<td>" + statusChip(agent.status)
-      + (agent.last_error ? '<div class="reason">' + esc(agent.last_error) + "</div>" : "")
+    + "<td>" + (agent.enabled === false ? statusChip("disabled") : statusChip(agent.status))
+      + (agent.enabled !== false && agent.last_error
+        ? '<div class="reason">' + esc(agent.last_error) + "</div>" : "")
     + "</td>"
     + '<td><div class="caps">' + caps + "</div></td>"
     + "<td>" + renderHistory(agent.history) + "</td>"
     + '<td class="actions">'
+      + '<button class="action quiet" data-toggle="' + id + '">'
+        + (agent.enabled === false ? "Enable" : "Disable") + "</button>"
       + '<button class="action quiet" data-edit="' + id + '">Edit</button>'
       + '<button class="action danger" data-remove="' + id + '">Remove</button>'
     + "</td></tr>";
@@ -275,12 +292,43 @@ async function saveEntry() {
   }
 }
 
+/** Switch a target on or off, keeping everything else about it.
+ *
+ * A disabled target stays in the list with its definition and history, but
+ * the planner is not shown it and it is not probed — so turning one off to
+ * see how plans change is undone with one click rather than retyped.
+ */
+async function toggleEnabled(agentId) {
+  const agent = lastAgents.find(function (item) { return item.agent_id === agentId; });
+
+  if (!agent || !agent.source || !Object.keys(agent.source).length) {
+    window.alert(agentId + " has no saved definition to change; edit it instead.");
+    return;
+  }
+
+  const entry = Object.assign({}, agent.source, { enabled: agent.enabled === false });
+
+  try {
+    await api("/registry/agents/" + encodeURIComponent(agentId), {
+      method: "PUT",
+      body: JSON.stringify({ entry: entry, persist: state.writable }),
+    });
+  } catch (error) {
+    window.alert(error.message);
+  }
+
+  loadTargets();
+}
+
 document.addEventListener("click", async function (event) {
   const target = event.target;
   if (!target.getAttribute) return;
 
   const editId = target.getAttribute("data-edit");
   if (editId) { startEditing(editId); return; }
+
+  const toggleId = target.getAttribute("data-toggle");
+  if (toggleId) { toggleEnabled(toggleId); return; }
 
   const removeId = target.getAttribute("data-remove");
   if (!removeId) return;

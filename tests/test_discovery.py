@@ -430,4 +430,4 @@ def test_a_malformed_discovery_block_is_rejected() -> None:
 
 def test_the_repository_config_loads_with_discovery_absent() -> None:
     # Discovery is opt-in; the shipped configuration lists agents by hand.
-    assert load_config("config.json").dispatch.discovery.sources == ()
+    assert load_config("config.example.json").dispatch.discovery.sources == ()

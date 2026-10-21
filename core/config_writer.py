@@ -59,6 +59,34 @@ def config_path() -> Path:
     return Path(os.environ.get(CONFIG_PATH_ENV, "config.json"))
 
 
+# What a first run starts from. The repository ships this rather than
+# `config.json` itself, because the real file fills up with one person's
+# workspace path, their agents, and their console edits, none of which
+# belong in anyone else's checkout.
+EXAMPLE_CONFIG = Path(__file__).resolve().parent.parent / "config.example.json"
+
+
+def ensure_config(path: Path) -> bool:
+    """Create the configuration file from the shipped example when it is missing.
+
+    Args:
+        path: Where the configuration is expected.
+
+    Returns:
+        True when a file was created, False when one was already there or
+        there was no example to start from — in which case reading it fails
+        with the ordinary missing-file error, naming the path.
+    """
+    if path.exists() or not EXAMPLE_CONFIG.is_file():
+        return False
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(EXAMPLE_CONFIG, path)
+    logger.info("Created %s from %s", path, EXAMPLE_CONFIG.name)
+
+    return True
+
+
 def writing_enabled() -> bool:
     """Report whether saving to the configuration file is allowed.
 

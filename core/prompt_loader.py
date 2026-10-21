@@ -6,6 +6,7 @@ from dispatch.agent_registry import (
     KIND_MCP,
     AgentEndpoint,
     AgentRegistry,
+    HttpToolSpec,
     McpToolSpec,
 )
 
@@ -81,6 +82,27 @@ def _describe_mcp_tools(entry: AgentEndpoint) -> list[str]:
     return lines
 
 
+def _describe_http_arguments(entry: AgentEndpoint) -> str:
+    """Return the arguments suffix for an HTTP API's capability line.
+
+    Args:
+        entry: The registry entry to describe.
+
+    Returns:
+        ` · arguments: ...` in the same form an MCP tool's line uses, so the
+        planner reads one convention. Empty for anything that declares none.
+    """
+    spec = entry.tool
+
+    if entry.kind != KIND_HTTP or not isinstance(spec, HttpToolSpec):
+        return ""
+
+    tool = spec.arguments_tool("")
+    summary = tool.summarize_arguments() if tool is not None else ""
+
+    return f" · arguments: {summary}" if summary else ""
+
+
 def render_catalog(registry: AgentRegistry) -> str:
     """Render the registered targets as the catalog the planner reads.
 
@@ -125,7 +147,9 @@ def render_catalog(registry: AgentRegistry) -> str:
 
         if entry.capabilities:
             capabilities = ", ".join(f"`{name}`" for name in sorted(entry.capabilities))
-            lines.append(f"  - capabilities: {capabilities}")
+            lines.append(
+                f"  - capabilities: {capabilities}{_describe_http_arguments(entry)}"
+            )
 
     return "\n".join(lines)
 

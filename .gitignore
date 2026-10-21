@@ -11,3 +11,9 @@ logs/
 
 # Written by the console when it saves registry changes.
 config.json.bak
+
+# Personal configuration, created from config.example.json on first run.
+config.json
+
+# Local state written by KIO1: session history and the administration token.
+data/

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from core.config_writer import CONFIG_PATH_ENV
+from core.config_writer import CONFIG_PATH_ENV, EXAMPLE_CONFIG
 
 REPOSITORY_CONFIG = Path("config.json")
 
@@ -32,10 +32,10 @@ def sandboxed_config(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]
     """
     sandbox = tmp_path_factory.mktemp("config") / "config.json"
 
-    if REPOSITORY_CONFIG.exists():
-        shutil.copy2(REPOSITORY_CONFIG, sandbox)
-    else:  # pragma: no cover - the repository always ships one
-        sandbox.write_text("{}", encoding="utf-8")
+    # A fresh checkout has only the example: `config.json` is created on
+    # first run and is not tracked.
+    source = REPOSITORY_CONFIG if REPOSITORY_CONFIG.exists() else EXAMPLE_CONFIG
+    shutil.copy2(source, sandbox)
 
     previous = os.environ.get(CONFIG_PATH_ENV)
     os.environ[CONFIG_PATH_ENV] = str(sandbox)

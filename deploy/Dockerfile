@@ -10,7 +10,8 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py app.py config.json ./
+# config.json is created from the example at first start, or mounted.
+COPY main.py app.py config.example.json ./
 COPY core/ ./core/
 COPY providers/ ./providers/
 COPY dispatch/ ./dispatch/

@@ -1,5 +1,6 @@
 import os
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -13,6 +14,7 @@ from services.session_manager.repository import (
     PostgresSessionRepository,
     SessionRepository,
 )
+from services.session_manager.sqlite_repository import SqliteSessionRepository
 
 DATABASE_URL_ENV = "KIO1_TEST_DATABASE_URL"
 
@@ -67,12 +69,13 @@ def postgres_repository() -> Iterator[PostgresSessionRepository | None]:
 
 
 @pytest.fixture(
-    params=["memory", "postgres"],
-    ids=["memory", "postgres"],
+    params=["memory", "sqlite", "postgres"],
+    ids=["memory", "sqlite", "postgres"],
 )
 def repository(
     request: pytest.FixtureRequest,
     postgres_repository: PostgresSessionRepository | None,
+    tmp_path: Path,
 ) -> SessionRepository:
     """Return each repository implementation in turn.
 
@@ -83,6 +86,13 @@ def repository(
     """
     if request.param == "memory":
         return InMemorySessionRepository()
+
+    if request.param == "sqlite":
+        # A real file rather than `:memory:`, so WAL mode and directory
+        # creation are exercised the way a first run exercises them.
+        sqlite = SqliteSessionRepository(tmp_path / "nested" / "kio1.db")
+        request.addfinalizer(sqlite.close)
+        return sqlite
 
     if postgres_repository is None:
         pytest.skip(f"{DATABASE_URL_ENV} is not set")

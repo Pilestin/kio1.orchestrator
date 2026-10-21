@@ -71,7 +71,10 @@ services:
       # agent that lives somewhere else.
       KIO1_PROVIDER_ENDPOINT: http://host.docker.internal:11434
       KIO1_AGENT_HOST: host.docker.internal
-      KIO1_REGISTRY_TOKEN: admin
+      # The console asks for this token. Set it in a .env file beside this one
+      # (KIO1_REGISTRY_TOKEN=...); without it the administration API stays
+      # closed rather than open to anyone who can reach the port.
+      KIO1_REGISTRY_TOKEN: ${KIO1_REGISTRY_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
@@ -83,6 +86,9 @@ services:
       # service serves is where an operator adds and edits agents, and those
       # changes are saved back into dispatch.agents. Set
       # KIO1_CONFIG_WRITABLE=0 below and make it :ro to forbid that.
+      #
+      # The file must exist before `up`: Docker mounts a missing path as an
+      # empty directory. `make services` creates it from config.example.json.
       - ../config.json:/app/config.json
       - ../prompts:/app/prompts:ro
     depends_on:

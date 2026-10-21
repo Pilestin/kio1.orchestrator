@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import urlparse
 
@@ -45,6 +45,11 @@ class HttpToolSpec:
         health_url: URL that answers a liveness check. Empty means this API
             cannot be probed, and KIO1 will not guess a path: an arbitrary
             REST API has no convention it may assume.
+        input_schema: JSON Schema for the named arguments the API takes,
+            referenced as `{arguments.name}` in the URL, headers, or body.
+            Empty for an API that is told what to do in prose alone. It is
+            the same shape an MCP server reports for its tools, so the planner
+            is shown both the same way and fills both in the same way.
     """
 
     url: str
@@ -53,6 +58,23 @@ class HttpToolSpec:
     body: Any = None
     result_path: tuple[str, ...] = ()
     health_url: str = ""
+    input_schema: dict[str, Any] = field(default_factory=dict)
+
+    def arguments_tool(self, capability: str) -> McpTool | None:
+        """Return the declared arguments as a tool description, or None.
+
+        Args:
+            capability: The capability being called, used as the tool name.
+
+        Returns:
+            A tool carrying `input_schema`, so the argument handling written
+            for MCP servers applies unchanged. None when no arguments are
+            declared.
+        """
+        if not self.input_schema:
+            return None
+
+        return McpTool(name=capability, input_schema=self.input_schema)
 
 
 @dataclass(frozen=True)
@@ -145,6 +167,10 @@ class AgentEndpoint:
         tool: The call details for everything that is not a KIO agent. Always
             `None` for a `kio` entry, whose call details are `endpoint` and
             `path`.
+        enabled: Whether the planner may use this target at all. A disabled
+            target stays registered — its definition, history, and place in
+            the console are kept — but it is neither probed nor offered, so
+            switching one off is reversible in a way removing it is not.
     """
 
     agent_id: str
@@ -155,6 +181,7 @@ class AgentEndpoint:
     kind: str = KIND_KIO
     description: str = ""
     tool: HttpToolSpec | CliToolSpec | McpToolSpec | None = None
+    enabled: bool = True
 
     @property
     def url(self) -> str:
@@ -341,6 +368,107 @@ def _read_string_map(
         )
 
     return dict(value)
+
+
+_ARGUMENT_TYPES = frozenset(
+    {"string", "number", "integer", "boolean", "array", "object"}
+)
+
+
+def _read_arguments_schema(agent_id: str, agent_data: dict[str, Any]) -> dict[str, Any]:
+    """Read an entry's declared arguments as a JSON Schema.
+
+    Two spellings are accepted. The short one is what a person writes:
+
+        "arguments": {"latitude": {"type": "number", "required": true}}
+
+    The long one is a JSON Schema object, which is what an OpenAPI document
+    or an MCP server already has and should not need translating by hand:
+
+        "arguments": {"type": "object", "properties": {...}, "required": [...]}
+
+    Args:
+        agent_id: Identifier of the entry, for error messages.
+        agent_data: The raw entry object.
+
+    Returns:
+        A JSON Schema with `properties` and `required`, empty when the entry
+        declares no arguments.
+
+    Raises:
+        ValueError: If the declaration is malformed.
+    """
+    declared = agent_data.get("arguments")
+
+    if declared is None or declared == {}:
+        return {}
+
+    where = f"dispatch.agents.{agent_id}.arguments"
+
+    if not isinstance(declared, dict):
+        raise ValueError(f"{where} must be an object keyed by argument name.")
+
+    if isinstance(declared.get("properties"), dict):
+        required = declared.get("required", [])
+
+        if not isinstance(required, list) or not all(
+            isinstance(name, str) for name in required
+        ):
+            raise ValueError(f"{where}.required must be a list of argument names.")
+
+        return {
+            "type": "object",
+            "properties": dict(declared["properties"]),
+            "required": list(required),
+        }
+
+    properties: dict[str, Any] = {}
+    required_names: list[str] = []
+
+    for name, spec in declared.items():
+        if not isinstance(spec, dict):
+            raise ValueError(
+                f"{where}.{name} must be an object such as "
+                '{"type": "string", "required": true}.'
+            )
+
+        kind = spec.get("type", "string")
+
+        if kind not in _ARGUMENT_TYPES:
+            raise ValueError(
+                f"{where}.{name}.type must be one of {sorted(_ARGUMENT_TYPES)}."
+            )
+
+        if spec.get("required", False) is True:
+            required_names.append(name)
+
+        properties[name] = {
+            key: value for key, value in spec.items() if key != "required"
+        } | {"type": kind}
+
+    return {"type": "object", "properties": properties, "required": required_names}
+
+
+def _read_enabled(agent_id: str, agent_data: dict[str, Any]) -> bool:
+    """Read whether an entry is switched on.
+
+    Args:
+        agent_id: Identifier of the entry, for error messages.
+        agent_data: The raw entry object.
+
+    Returns:
+        The flag, True when absent so every entry written before it existed
+        keeps working.
+
+    Raises:
+        ValueError: If the value is not a boolean.
+    """
+    enabled = agent_data.get("enabled", True)
+
+    if type(enabled) is not bool:
+        raise ValueError(f"dispatch.agents.{agent_id}.enabled must be true or false.")
+
+    return enabled
 
 
 def _read_mcp_entry(
@@ -534,6 +662,7 @@ def _read_tool_entry(
                 body=agent_data.get("body"),
                 result_path=tuple(result_path_data),
                 health_url=health_url.strip(),
+                input_schema=_read_arguments_schema(agent_id, agent_data),
             ),
         )
 
@@ -609,14 +738,18 @@ def load_agent_registry(
             )
 
         capabilities = _read_capabilities(agent_id, agent_data)
+        enabled = _read_enabled(agent_id, agent_data)
 
         if kind != KIND_KIO:
-            agents[agent_id.strip()] = _read_tool_entry(
+            entry = _read_tool_entry(
                 agent_id.strip(),
                 agent_data,
                 kind=kind,
                 description=description.strip(),
                 capabilities=capabilities,
+            )
+            agents[agent_id.strip()] = (
+                entry if enabled else replace(entry, enabled=False)
             )
             continue
 
@@ -673,6 +806,7 @@ def load_agent_registry(
             subject=subject.strip() if isinstance(subject, str) else None,
             kind=KIND_KIO,
             description=description.strip(),
+            enabled=enabled,
         )
 
     if announce:

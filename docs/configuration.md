@@ -2,6 +2,11 @@
 
 All application settings are stored in `config.json` at the project root.
 
+The repository ships `config.example.json`, not `config.json`. The first run —
+`start.py`, `main.py`, or `uvicorn app:app` — copies the example into place,
+and from then on `config.json` is yours: it holds your workspace path, your
+agents, and the console's edits, and git ignores it.
+
 ## Configuration File Reference
 
 | Field | Type | Description |
@@ -12,11 +17,12 @@ All application settings are stored in `config.json` at the project root.
 | `prompt_path` | string | Path to the system prompt file (relative to project root) |
 | `chat_directory` | string | Directory for chat history files |
 | `temperature` | float | Sampling temperature (lower = more deterministic) |
-| `request_timeout` | float | Request timeout in seconds |
+| `request_timeout` | float | How long to wait for the model to produce a plan, in seconds. On a machine without a GPU a small local model takes 30–90 s and a 4B reasoning model several minutes, so the example uses `300` |
 | `keep_alive` | int | Ollama model residency in seconds (`-1` = keep loaded; default: `-1`) |
 | `max_output_tokens` | int | Maximum number of generated output tokens; must be positive (default: `4096`) |
 | `provider_options.endpoint` | string | Ollama base URL (required for Ollama) |
 | `provider_options.context_window_size` | int | Ollama context window in tokens (required for Ollama); must be larger than `max_output_tokens` |
+| `provider_options.think` | boolean | Lets an Ollama reasoning model (such as `qwen3.5`) think before answering. Off by default: thinking costs minutes on a CPU and adds little to a plan. Models that do not reason ignore it |
 | `telemetry` | object | Optional OpenTelemetry configuration; telemetry is disabled when omitted |
 | `telemetry.enabled` | boolean | Enables trace and metric export (default: `false`) |
 | `telemetry.service_name` | string | Non-empty service name attached to exported telemetry (default: `kio1-orchestrator`) |
@@ -35,6 +41,7 @@ All application settings are stored in `config.json` at the project root.
 | `dispatch.discovery` | object | Manifest URLs agents describe themselves through; see [Discovery](discovery.md) |
 | `dispatch.policy` | object | Gates saying what must have passed before a step runs; see [Policy gates](policy-gates.md) |
 | `dispatch.agents` | object | Everything KIO1 can dispatch to, keyed by the id plans use. Each entry has a `type`: `kio` (default, the KIO1-KIO10 protocol), `http` (any REST API), `cli` (a local command), or `mcp` (a Model Context Protocol server, which reports its own tools). See [Workflow Dispatch](workflow-dispatch.md), [Connecting your own module](connecting-a-tool.md), and [Connecting an MCP server](mcp.md) |
+| `dispatch.agents.<id>.enabled` | boolean | Whether the planner may use this target (default: `true`). A disabled target keeps its definition and history and its row in the console, but is neither probed nor offered — the console's **Disable** button sets this |
 | `dispatch.workspace.path` | string | Repository root the agents should analyse, as *they* can see it (default: `""`, not sent) |
 | `dispatch.workspace.entry_point` | string | Runnable script reproducing the behaviour, relative to `workspace.path` (default: `""`, not sent) |
 | `dispatch.nats.servers` | array of strings | NATS server URLs; required when `transport` is `nats` |

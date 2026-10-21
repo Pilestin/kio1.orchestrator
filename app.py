@@ -48,6 +48,12 @@ from dispatch.directory import (
 from dispatch.discovery import DiscoveryError, ManifestSource, entries_from_manifest
 from dispatch.scoreboard import Scoreboard
 from providers.provider_client import load_provider
+from services.session_manager.storage import (
+    DATABASE_URL_ENV,
+    DEFAULT_DATABASE_URL,
+    EmbeddedSessionClient,
+    open_repository,
+)
 from services.workflow_api.runner import WorkflowRunner, build_runner
 
 logger = logging.getLogger(__name__)
@@ -112,7 +118,7 @@ class _State:
     """Everything resolved once at startup and reused per request."""
 
     runner: WorkflowRunner
-    session_client: SessionClient | NullSessionClient
+    session_client: SessionClient | NullSessionClient | EmbeddedSessionClient
     directory: AgentDirectory
     scoreboard: Scoreboard
 
@@ -165,17 +171,18 @@ def _build_state() -> _State:
 
     session_manager_url = os.environ.get(SESSION_MANAGER_URL_ENV, "").strip()
 
-    session_client: SessionClient | NullSessionClient
+    session_client: SessionClient | EmbeddedSessionClient
     if session_manager_url:
         session_client = SessionClient(session_manager_url)
         logger.info("Session Manager at %s", session_manager_url)
     else:
-        session_client = NullSessionClient()
-        logger.warning(
-            "%s is not set; sessions will not be recorded and status lookups "
-            "will fail",
-            SESSION_MANAGER_URL_ENV,
+        # No separate service: history is kept by this process, in SQLite
+        # unless KIO1_DATABASE_URL says otherwise. A first run on one machine
+        # needs neither Docker nor a second program to see what it did.
+        database_url = (
+            os.environ.get(DATABASE_URL_ENV, "").strip() or DEFAULT_DATABASE_URL
         )
+        session_client = EmbeddedSessionClient(*open_repository(database_url))
 
     return _State(
         runner=build_runner(
@@ -208,6 +215,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if state is not None:
             state.directory.stop()
             state.runner.transport.close()
+
+            if isinstance(state.session_client, EmbeddedSessionClient):
+                state.session_client.close()
 
         shutdown_telemetry()
 

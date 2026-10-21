@@ -417,7 +417,7 @@ def test_a_gate_must_name_what_it_guards_and_what_it_requires() -> None:
 
 
 def test_the_repository_config_gates_deployment_on_the_checks() -> None:
-    policy = load_config("config.json").dispatch.policy
+    policy = load_config("config.example.json").dispatch.policy
     gates = policy.gates_for("deployment")
 
     assert gates

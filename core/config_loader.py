@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from core.config_writer import config_path
+from core.config_writer import config_path, ensure_config
 from dispatch.agent_registry import AgentRegistry, load_agent_registry
 from dispatch.directory import HealthConfig, load_health_config
 from dispatch.discovery import DiscoveryConfig, load_discovery_config
@@ -521,7 +521,12 @@ def load_config(path_override: str | None = None) -> Config:
     Returns:
         A `Config` instance populated from the file.
     """
-    path = Path(path_override) if path_override else config_path()
+    if path_override:
+        path = Path(path_override)
+    else:
+        path = config_path()
+        ensure_config(path)
+
     data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
 
     provider_options = data.get("provider_options", {})
