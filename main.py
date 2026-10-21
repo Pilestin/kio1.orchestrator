@@ -126,7 +126,11 @@ def main() -> None:
     session_success = False
     # One transport for the whole session: a NATS transport owns a connection
     # and a thread, so building one per turn would leak both.
-    transport = build_transport(config.dispatch) if config.dispatch.enabled else None
+    transport = (
+        build_transport(config.dispatch, directory.mcp_pool)
+        if config.dispatch.enabled
+        else None
+    )
 
     try:
         while True:

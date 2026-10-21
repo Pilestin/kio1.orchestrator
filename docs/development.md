@@ -1,5 +1,8 @@
 # Development Guide
 
+> `make` is a convenience and Windows does not ship it. Every target has a
+> plain equivalent — see [Usage](usage.md).
+
 ## Prerequisites
 
 - Python 3.10+

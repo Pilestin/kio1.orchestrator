@@ -10,13 +10,15 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py config.json ./
+COPY main.py app.py config.json ./
 COPY core/ ./core/
 COPY providers/ ./providers/
 COPY dispatch/ ./dispatch/
 COPY services/ ./services/
 COPY tools/ ./tools/
 COPY prompts/ ./prompts/
+# The console's page, stylesheet, and script.
+COPY static/ ./static/
 
 # Logs go to stdout so the platform's Collector can scrape them into Loki.
-CMD ["uvicorn", "services.workflow_api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

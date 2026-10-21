@@ -119,7 +119,7 @@ def render(value: Any, message: ExecutionMessage) -> Any:
     return _PLACEHOLDER.sub(substitute, value)
 
 
-def _expand_environment(value: str, *, agent_id: str, field: str) -> str:
+def expand_environment(value: str, *, agent_id: str, field: str) -> str:
     """Replace `${NAME}` references with values from the environment.
 
     Args:
@@ -158,7 +158,7 @@ def _expand_environment(value: str, *, agent_id: str, field: str) -> str:
     return expanded
 
 
-def _reply(
+def protocol_reply(
     message: ExecutionMessage,
     *,
     status: str,
@@ -241,7 +241,7 @@ class HttpToolTransport:
 
         url = render(spec.url, message)
         headers = {
-            name: _expand_environment(
+            name: expand_environment(
                 str(render(value, message)),
                 agent_id=agent.agent_id,
                 field=f"header {name}",
@@ -297,7 +297,7 @@ class HttpToolTransport:
                 f"{agent.agent_id} did not answer within {timeout:g}s"
             ) from error
 
-        return _reply(message, status="ok", output=self._output(text, spec))
+        return protocol_reply(message, status="ok", output=self._output(text, spec))
 
     @staticmethod
     def _output(text: str, spec: HttpToolSpec) -> dict[str, Any]:
@@ -377,7 +377,7 @@ class CliToolTransport:
         environment = dict(os.environ)
         environment.update(
             {
-                name: _expand_environment(
+                name: expand_environment(
                     str(render(value, message)),
                     agent_id=agent.agent_id,
                     field=f"env {name}",
@@ -435,13 +435,13 @@ class CliToolTransport:
                 completed.returncode,
             )
             reason = _clip((stderr or stdout).strip()) or "no output"
-            return _reply(
+            return protocol_reply(
                 message,
                 status="error",
                 error=f"{agent.agent_id} exited {completed.returncode}: {reason}",
             )
 
-        return _reply(message, status="ok", output=self._output(stdout, stderr))
+        return protocol_reply(message, status="ok", output=self._output(stdout, stderr))
 
     @staticmethod
     def _output(stdout: str, stderr: str) -> dict[str, Any]:

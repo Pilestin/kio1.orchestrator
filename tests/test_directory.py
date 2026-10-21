@@ -8,11 +8,13 @@ import json
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import REGISTRY_TOKEN_ENV, _State, app, get_state
 from core.prompt_loader import render_catalog
 from dispatch.agent_registry import AgentRegistry, load_agent_registry
 from dispatch.directory import (
@@ -29,7 +31,19 @@ from dispatch.directory import (
 )
 from dispatch.discovery import DiscoveryConfig, ManifestSource
 from dispatch.scoreboard import Scoreboard
-from services.workflow_api.app import REGISTRY_TOKEN_ENV, _State, app, get_state
+
+
+def write_agents(path: Path, agents: dict[str, Any]) -> None:
+    """Put a `dispatch.agents` block into a configuration file."""
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document.setdefault("dispatch", {})["agents"] = agents
+    path.write_text(json.dumps(document, indent=4), encoding="utf-8")
+
+
+def read_saved(path: Path) -> dict[str, Any]:
+    """Return the `dispatch.agents` a configuration file now holds."""
+    return json.loads(path.read_text(encoding="utf-8"))["dispatch"]["agents"]
+
 
 HEALTH = HealthConfig(enabled=True, interval=0.1, timeout=1)
 
@@ -116,13 +130,16 @@ def kio_registry(origin: str, agent_id: str = "KIO2") -> AgentRegistry:
 def test_a_live_agent_probes_reachable(agent: str) -> None:
     endpoint = kio_registry(agent).entries()[0]
 
-    assert probe_target(endpoint, HEALTH) == (True, "")
+    outcome = probe_target(endpoint, HEALTH)
+
+    assert (outcome.reachable, outcome.detail) == (True, "")
 
 
 def test_an_agent_that_is_down_probes_unreachable(agent: str) -> None:
     AgentHandler.alive = False
     endpoint = kio_registry(agent).entries()[0]
-    reachable, detail = probe_target(endpoint, HEALTH)
+    outcome = probe_target(endpoint, HEALTH)
+    reachable, detail = outcome.reachable, outcome.detail
 
     assert reachable is False
     assert "503" in detail
@@ -136,8 +153,8 @@ def test_a_local_command_is_probed_by_looking_for_the_program() -> None:
         {"Nope": {"type": "cli", "command": ["kio1-not-a-program"], "capabilities": []}}
     ).entries()[0]
 
-    assert probe_target(present, HEALTH) == (True, "")
-    assert probe_target(missing, HEALTH)[0] is False
+    assert (probe_target(present, HEALTH).reachable) is True
+    assert probe_target(missing, HEALTH).reachable is False
 
 
 def test_an_api_with_no_health_url_is_not_guessed_at() -> None:
@@ -147,7 +164,9 @@ def test_an_api_with_no_health_url_is_not_guessed_at() -> None:
         {"Api": {"type": "http", "url": "http://127.0.0.1:1/run", "capabilities": []}}
     ).entries()[0]
 
-    assert probe_target(endpoint, HEALTH) == (True, "not probeable")
+    outcome = probe_target(endpoint, HEALTH)
+
+    assert (outcome.reachable, outcome.detail) == (True, "not probeable")
 
 
 # ── going away and coming back ───────────────────────────────────────────────
@@ -535,16 +554,25 @@ def test_a_registered_agent_can_be_removed_over_the_api(
     assert directory.record_for("KIO2") is None
 
 
-def test_removing_a_configured_agent_over_the_api_is_refused(
-    agent: str, monkeypatch: pytest.MonkeyPatch
+def test_removing_a_configured_agent_takes_it_out_of_the_file(
+    agent: str, monkeypatch: pytest.MonkeyPatch, writable_config: Path
 ) -> None:
+    # A person removing a target in the console is doing what they would have
+    # done by editing the file, so it comes out of the file too — otherwise it
+    # would be back at the next restart.
     monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
-    response = make_client(AgentDirectory(kio_registry(agent))).delete(
+    write_agents(
+        writable_config, {"KIO2": {"endpoint": agent, "capabilities": ["diagnosis"]}}
+    )
+    directory = AgentDirectory(kio_registry(agent))
+
+    response = make_client(directory).delete(
         "/registry/agents/KIO2", headers={"Authorization": "Bearer shared"}
     )
 
-    assert response.status_code == 409
-    assert "config.json" in response.json()["detail"]
+    assert response.status_code == 200
+    assert directory.record_for("KIO2") is None
+    assert "KIO2" not in read_saved(writable_config)
 
 
 def test_removing_an_unknown_agent_is_a_404(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -588,3 +616,299 @@ def test_a_zero_threshold_is_rejected() -> None:
 def test_a_health_path_must_look_like_a_path() -> None:
     with pytest.raises(ValueError, match="must be a string starting with"):
         load_health_config({"path": "health"})
+
+
+# ── saving what the console changed ─────────────────────────────────────────
+
+
+def test_registering_saves_the_target_into_the_configuration(
+    agent: str, monkeypatch: pytest.MonkeyPatch, writable_config: Path
+) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+    directory = AgentDirectory(AgentRegistry({}), health=HEALTH)
+
+    response = make_client(directory).post(
+        "/registry/agents",
+        headers={"Authorization": "Bearer shared"},
+        json={
+            "manifest": {
+                "agent_id": "KIO2",
+                "endpoint": agent,
+                "capabilities": ["diagnosis"],
+            }
+        },
+    )
+
+    assert response.status_code == 201
+    assert read_saved(writable_config)["KIO2"]["endpoint"] == agent
+    # It is in the file now, so it is a configured entry.
+    record = directory.record_for("KIO2")
+    assert record is not None and record.origin == ORIGIN_CONFIG
+
+
+def test_a_registration_can_be_kept_out_of_the_configuration(
+    agent: str, monkeypatch: pytest.MonkeyPatch, writable_config: Path
+) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+    before = read_saved(writable_config)
+
+    make_client(AgentDirectory(AgentRegistry({}), health=HEALTH)).post(
+        "/registry/agents",
+        headers={"Authorization": "Bearer shared"},
+        json={
+            "manifest": {
+                "agent_id": "Ephemeral",
+                "endpoint": agent,
+                "capabilities": ["diagnosis"],
+            },
+            "persist": False,
+        },
+    )
+
+    assert read_saved(writable_config) == before
+
+
+def test_editing_a_target_replaces_it_everywhere(
+    agent: str, monkeypatch: pytest.MonkeyPatch, writable_config: Path
+) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+    write_agents(
+        writable_config, {"KIO2": {"endpoint": agent, "capabilities": ["diagnosis"]}}
+    )
+    directory = AgentDirectory(kio_registry(agent), health=HEALTH)
+
+    response = make_client(directory).put(
+        "/registry/agents/KIO2",
+        headers={"Authorization": "Bearer shared"},
+        json={
+            "entry": {
+                "endpoint": agent,
+                "description": "Now it says what it does.",
+                "capabilities": ["diagnosis", "replay"],
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    record = directory.record_for("KIO2")
+    assert record is not None
+    assert record.endpoint.capabilities == frozenset({"diagnosis", "replay"})
+    assert record.endpoint.description == "Now it says what it does."
+    assert read_saved(writable_config)["KIO2"]["capabilities"] == [
+        "diagnosis",
+        "replay",
+    ]
+
+
+def test_a_malformed_edit_changes_nothing(
+    agent: str, monkeypatch: pytest.MonkeyPatch, writable_config: Path
+) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+    write_agents(
+        writable_config, {"KIO2": {"endpoint": agent, "capabilities": ["diagnosis"]}}
+    )
+    directory = AgentDirectory(kio_registry(agent), health=HEALTH)
+
+    response = make_client(directory).put(
+        "/registry/agents/KIO2",
+        headers={"Authorization": "Bearer shared"},
+        json={"entry": {"type": "cli"}},
+    )
+
+    assert response.status_code == 400
+    assert read_saved(writable_config)["KIO2"]["capabilities"] == ["diagnosis"]
+
+
+def test_a_record_carries_the_entry_it_was_built_from() -> None:
+    # The console needs the definition back to put it in an edit form.
+    entry = {"endpoint": "http://127.0.0.1:8102", "capabilities": ["diagnosis"]}
+    directory = AgentDirectory(
+        load_agent_registry({"KIO2": entry}), sources={"KIO2": entry}
+    )
+    record = directory.record_for("KIO2")
+
+    assert record is not None
+    assert record.to_summary()["source"] == entry
+
+
+def test_the_console_is_told_where_saves_go(
+    monkeypatch: pytest.MonkeyPatch, writable_config: Path
+) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+
+    body = (
+        make_client(AgentDirectory(AgentRegistry({})))
+        .get("/registry/config", headers={"Authorization": "Bearer shared"})
+        .json()
+    )
+
+    assert body["config_path"] == str(writable_config)
+    assert body["writable"] is True
+
+
+def test_saving_while_it_is_turned_off_is_reported(
+    agent: str, monkeypatch: pytest.MonkeyPatch, writable_config: Path
+) -> None:
+    # A read-only deployment should say so, not fail obscurely.
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+    monkeypatch.setenv("KIO1_CONFIG_WRITABLE", "0")
+
+    response = make_client(AgentDirectory(AgentRegistry({}), health=HEALTH)).post(
+        "/registry/agents",
+        headers={"Authorization": "Bearer shared"},
+        json={
+            "manifest": {
+                "agent_id": "KIO2",
+                "endpoint": agent,
+                "capabilities": ["diagnosis"],
+            }
+        },
+    )
+
+    assert response.status_code == 503
+    assert "KIO1_CONFIG_WRITABLE" in response.json()["detail"]
+
+
+# ── trying a definition before committing to it ─────────────────────────────
+
+
+def test_a_probe_reports_a_target_that_answers(
+    agent: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+
+    body = (
+        make_client(AgentDirectory(AgentRegistry({}), health=HEALTH))
+        .post(
+            "/registry/agents/probe",
+            headers={"Authorization": "Bearer shared"},
+            json={
+                "entry": {
+                    "agent_id": "KIO2",
+                    "endpoint": agent,
+                    "capabilities": ["diagnosis"],
+                }
+            },
+        )
+        .json()
+    )
+
+    assert body["status"] == STATUS_READY
+    assert body["kind"] == "kio"
+    assert body["capabilities"] == ["diagnosis"]
+    assert body["probed"].endswith("/health")
+
+
+def test_a_probe_reports_why_a_target_does_not_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+
+    body = (
+        make_client(AgentDirectory(AgentRegistry({}), health=HEALTH))
+        .post(
+            "/registry/agents/probe",
+            headers={"Authorization": "Bearer shared"},
+            json={
+                "entry": {
+                    "agent_id": "Nope",
+                    "endpoint": "http://127.0.0.1:1",
+                    "capabilities": ["x"],
+                }
+            },
+        )
+        .json()
+    )
+
+    assert body["status"] == STATUS_UNREACHABLE
+    assert "127.0.0.1:1" in body["detail"]
+
+
+def test_a_probe_says_when_there_is_nothing_to_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+
+    body = (
+        make_client(AgentDirectory(AgentRegistry({}), health=HEALTH))
+        .post(
+            "/registry/agents/probe",
+            headers={"Authorization": "Bearer shared"},
+            json={
+                "entry": {
+                    "agent_id": "Api",
+                    "type": "http",
+                    "url": "https://example.test/run",
+                    "capabilities": ["x"],
+                }
+            },
+        )
+        .json()
+    )
+
+    assert body["status"] == STATUS_UNCHECKED
+    assert body["probed"] == ""
+
+
+def test_a_probe_shows_the_address_this_deployment_will_really_dial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The thing a person cannot see for themselves: inside a container their
+    # loopback address is rewritten, and the probe says so.
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+    monkeypatch.setenv("KIO1_AGENT_HOST", "host.docker.internal")
+
+    body = (
+        make_client(AgentDirectory(AgentRegistry({}), health=HEALTH))
+        .post(
+            "/registry/agents/probe",
+            headers={"Authorization": "Bearer shared"},
+            json={
+                "entry": {
+                    "agent_id": "Ollama",
+                    "type": "http",
+                    "url": "http://127.0.0.1:11434/api/generate",
+                    "health_url": "http://127.0.0.1:11434/",
+                    "capabilities": ["llm_inference"],
+                }
+            },
+        )
+        .json()
+    )
+
+    assert body["probed"] == "http://host.docker.internal:11434/"
+    assert body["rehosted_from"] == "http://127.0.0.1:11434/"
+
+
+def test_a_probe_changes_nothing(agent: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+    directory = AgentDirectory(AgentRegistry({}), health=HEALTH)
+
+    make_client(directory).post(
+        "/registry/agents/probe",
+        headers={"Authorization": "Bearer shared"},
+        json={
+            "entry": {
+                "agent_id": "KIO2",
+                "endpoint": agent,
+                "capabilities": ["diagnosis"],
+            }
+        },
+    )
+
+    assert directory.record_for("KIO2") is None
+
+
+def test_a_malformed_definition_is_caught_before_saving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+
+    response = make_client(AgentDirectory(AgentRegistry({}))).post(
+        "/registry/agents/probe",
+        headers={"Authorization": "Bearer shared"},
+        json={"entry": {"agent_id": "Broken", "type": "cli"}},
+    )
+
+    assert response.status_code == 400
+    assert "command must be a non-empty list" in response.json()["detail"]

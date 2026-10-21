@@ -211,3 +211,40 @@ def _get_context_window_size(config: Config) -> int:
         )
 
     return context_window_size
+
+
+def list_models(config: Config) -> list[str]:
+    """Return the models this Ollama installation has pulled.
+
+    Optional across providers: a console offering a model to choose needs to
+    know which ones exist, and Ollama is the one provider that can say without
+    an account or a key. A provider that cannot answer simply does not define
+    this, and the caller falls back to letting a name be typed.
+
+    Args:
+        config: Application configuration, for the endpoint.
+
+    Returns:
+        Model names, sorted. Empty when Ollama has none.
+
+    Raises:
+        OSError: If Ollama could not be reached. Reported rather than hidden:
+            "no models" and "Ollama is not running" are different problems and
+            a picker showing an empty list for the second one is a trap.
+    """
+    endpoint = _get_endpoint(config)
+    request = urllib.request.Request(f"{endpoint}/api/tags", method="GET")
+
+    with urllib.request.urlopen(request, timeout=5) as response:
+        decoded = json.loads(response.read().decode("utf-8"))
+
+    listed = decoded.get("models") if isinstance(decoded, dict) else None
+
+    if not isinstance(listed, list):
+        return []
+
+    return sorted(
+        entry["name"]
+        for entry in listed
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    )

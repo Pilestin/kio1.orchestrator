@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from core.config_loader import DispatchConfig, load_config
+from core.config_loader import DispatchConfig, load_config, rehost_entry
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry, load_agent_registry
 from dispatch.agent_transport import AgentTransportError, HttpAgentTransport
 from dispatch.workflow_executor import (
@@ -1031,6 +1031,8 @@ def test_naming_one_agent_wins_over_the_shared_host(
 def test_rehosting_keeps_the_port_and_scheme(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Only the host is replaced: an agent reached over TLS on a private
+    # port is still reached over TLS on that port from the new host.
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps(
@@ -1042,7 +1044,9 @@ def test_rehosting_keeps_the_port_and_scheme(
                 "chat_directory": "chats",
                 "temperature": 0.2,
                 "request_timeout": 120,
-                "dispatch": {"agents": {"KIO2": {"endpoint": "https://old-host:8443"}}},
+                "dispatch": {
+                    "agents": {"KIO2": {"endpoint": "https://localhost:8443"}}
+                },
             }
         ),
         encoding="utf-8",
@@ -1063,3 +1067,104 @@ def test_without_the_variable_agents_stay_where_the_file_puts_them(
     kio2 = config.dispatch.registry.resolve("KIO2")
 
     assert kio2 is not None and kio2.endpoint == "http://127.0.0.1:8102"
+
+
+def test_the_shared_host_rehosts_a_tool_url_not_just_a_kio_endpoint(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    # An `http` tool addresses its service through `url`. Rehosting only
+    # `endpoint` made KIO1_AGENT_HOST a promise that just KIO agents kept,
+    # and a tool pointed at 127.0.0.1 stayed pointed at the container itself.
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "provider": "ollama",
+                "allowed_providers": ["ollama"],
+                "model": "qwen2.5:3b",
+                "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
+                "chat_directory": "chats",
+                "temperature": 0.2,
+                "request_timeout": 60,
+                "keep_alive": -1,
+                "max_output_tokens": 1024,
+                "dispatch": {
+                    "enabled": True,
+                    "agents": {
+                        "KIO2": {
+                            "endpoint": "http://127.0.0.1:8102",
+                            "capabilities": ["diagnosis"],
+                        },
+                        "Ollama": {
+                            "type": "http",
+                            "url": "http://127.0.0.1:11434/api/generate",
+                            "health_url": "http://127.0.0.1:11434/",
+                            "capabilities": ["llm_inference"],
+                        },
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KIO1_AGENT_HOST", "host.docker.internal")
+
+    registry = load_config(str(config_path)).dispatch.registry
+    kio2 = registry.resolve("KIO2")
+    tool = registry.resolve("Ollama")
+
+    assert kio2 is not None and "host.docker.internal" in kio2.endpoint
+    assert tool is not None and tool.tool is not None
+    assert tool.tool.url == "http://host.docker.internal:11434/api/generate"
+    assert tool.tool.health_url == "http://host.docker.internal:11434/"
+
+
+def test_a_public_address_is_left_where_it_is(monkeypatch: Any) -> None:
+    # KIO1_AGENT_HOST asks "what does this machine mean from in here". A
+    # public API was never asking it, and rewriting one replaced a target
+    # that worked with the Docker host — the agent then reported itself
+    # unreachable with nothing in the configuration to blame.
+    monkeypatch.setenv("KIO1_AGENT_HOST", "host.docker.internal")
+
+    rehosted = rehost_entry(
+        "WeatherForecast",
+        {
+            "type": "http",
+            "url": "https://api.open-meteo.com/v1/forecast?latitude=52",
+            "health_url": "https://api.open-meteo.com/v1/forecast?latitude=0",
+        },
+    )
+
+    assert rehosted["url"] == "https://api.open-meteo.com/v1/forecast?latitude=52"
+    assert rehosted["health_url"] == "https://api.open-meteo.com/v1/forecast?latitude=0"
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "http://127.0.0.1:8102",
+        "http://127.0.0.5:8102",
+        "http://localhost:8102",
+        "http://0.0.0.0:8102",
+        "http://[::1]:8102",
+    ],
+)
+def test_every_way_of_saying_this_machine_still_moves(
+    address: str, monkeypatch: Any
+) -> None:
+    monkeypatch.setenv("KIO1_AGENT_HOST", "host.docker.internal")
+
+    rehosted = rehost_entry("KIO2", {"endpoint": address})
+
+    assert rehosted["endpoint"] == "http://host.docker.internal:8102"
+
+
+def test_a_named_override_still_reaches_a_public_address(monkeypatch: Any) -> None:
+    # Naming an agent explicitly is a deliberate redirection, not a guess
+    # about what loopback means, so it is not held to the same rule.
+    monkeypatch.setenv("KIO1_AGENT_ENDPOINT_KIO2", "https://kio2.example.org")
+
+    assert (
+        rehost_entry("KIO2", {"endpoint": "http://127.0.0.1:8102"})["endpoint"]
+        == "https://kio2.example.org"
+    )

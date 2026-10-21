@@ -40,10 +40,18 @@ Each pass probes every target that *can* be probed:
 | `kio` | `GET <endpoint><path>` — `/health` by default |
 | `http` | `GET` its `health_url`, **only if the entry names one** |
 | `cli` | The program is looked for on this machine |
+| `mcp` | The server is asked for its tools |
 
 A REST API with no `health_url` is left alone and marked `unchecked`. An
 arbitrary API has no liveness path KIO1 may assume, and inventing one would
 withdraw a working tool for answering 404 to a URL nobody promised.
+
+Probing an MCP server does something the others do not: it **changes the
+entry**. Reachability and discovery are one round trip there — a server that
+answers `tools/list` is by definition up — and the listing that comes back
+becomes the entry's capabilities. So a server that gains a tool while KIO1
+runs is offering it on the next pass, with nothing edited and nothing
+restarted. See [Connecting an MCP server](mcp.md).
 
 After `failures_before_unreachable` consecutive failures the target is
 **withdrawn**: it disappears from the snapshot, so the planner is no longer

@@ -29,6 +29,11 @@ class PlanStep:
         depends_on: Step ids whose output this step consumes. Optional and
             additive: a plan that omits it behaves exactly as it did before
             the field existed, and nothing is fed into its `data`.
+        arguments: Named inputs for a target that takes structured arguments
+            rather than prose — an MCP tool, whose schema the planner is shown
+            in its catalog. Empty for every other kind of step, which is why
+            it is optional: a KIO agent is told what to do in `task` and works
+            the rest out itself.
     """
 
     step_id: str
@@ -36,6 +41,7 @@ class PlanStep:
     capability: str
     task: str
     depends_on: tuple[str, ...] = ()
+    arguments: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -172,6 +178,7 @@ def parse_plan(parsed_response: Any) -> WorkflowPlan:
                 capability=fields["capability"],
                 task=fields["task"],
                 depends_on=_read_depends_on(step_data, fields["step_id"]),
+                arguments=_read_arguments(step_data, fields["step_id"]),
             )
         )
 
@@ -184,6 +191,39 @@ def parse_plan(parsed_response: Any) -> WorkflowPlan:
         steps=tuple(steps),
         explanation=explanation.strip() if isinstance(explanation, str) else "",
     )
+
+
+def _read_arguments(step_data: dict[str, Any], step_id: str) -> dict[str, Any]:
+    """Read a step's optional structured arguments.
+
+    Like `depends_on`, a malformed value is dropped rather than raised on: a
+    model that gets this wrong should lose the arguments for one step, not
+    turn a whole plan into a failure. The step then falls back to being
+    dispatched on its free-text task, and the transport says plainly if that
+    is not enough for the tool it names.
+
+    Args:
+        step_data: The raw step object.
+        step_id: The step's own id, for warnings.
+
+    Returns:
+        The declared arguments, empty when none were given or they were not an
+        object.
+    """
+    raw = step_data.get("arguments")
+
+    if raw is None:
+        return {}
+
+    if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
+        logger.warning(
+            "Ignoring malformed arguments on step %s: expected an object "
+            "keyed by argument name",
+            step_id,
+        )
+        return {}
+
+    return dict(raw)
 
 
 def _read_depends_on(step_data: dict[str, Any], step_id: str) -> tuple[str, ...]:
@@ -372,6 +412,33 @@ def descendants_of(plan: WorkflowPlan, step_id: str) -> frozenset[str]:
     return frozenset(found)
 
 
+def _message_data(
+    workspace_data: dict[str, Any] | None, step: PlanStep
+) -> dict[str, Any]:
+    """Build the `data` an execution message carries.
+
+    `data` is the protocol's extension point, and both things that travel in
+    it belong there for the same reason: neither is part of the fixed message
+    shape, and adding either as a new top-level field would change a contract
+    shared with nine other KIOs.
+
+    Args:
+        workspace_data: What every step is told about the code under
+            analysis, or None when no workspace is configured.
+        step: The step being routed.
+
+    Returns:
+        The data object. Absent both, an empty one, exactly as before either
+        existed.
+    """
+    data = dict(workspace_data) if workspace_data else {}
+
+    if step.arguments:
+        data["arguments"] = dict(step.arguments)
+
+    return data
+
+
 def route_plan(
     plan: WorkflowPlan,
     registry: AgentRegistry,
@@ -459,7 +526,7 @@ def route_plan(
                 capability=step.capability,
                 endpoint=agent.endpoint,
                 task=step.task,
-                data=dict(workspace_data) if workspace_data else {},
+                data=_message_data(workspace_data, step),
             )
         )
 

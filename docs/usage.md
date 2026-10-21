@@ -12,11 +12,18 @@ in a browser, and then to pointing it at your own work.
 ## Before you start
 
 ```bash
-make install          # creates .venv and installs dependencies
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt     # Windows
+.venv/bin/pip install -r requirements.txt          # macOS, Linux
 ```
 
 Nothing else is required for the walkthrough below. A model, PostgreSQL, and
 an OpenTelemetry collector are all optional and all noted where they matter.
+
+> There is a `Makefile` with shortcuts for all of this — `make install`,
+> `make services`, `make test`. It is a convenience for people who have `make`,
+> which Windows does not ship. Every command below is written out in full so
+> you never need it.
 
 ---
 
@@ -76,6 +83,24 @@ to plan with whatever `config.json` configures instead.
 This is [Use-Case 1](../examples/uc1/README.md) from the AI4SWEng
 deliverable, with its four scenarios in the order the document specifies.
 
+### Making it write real code
+
+The agents in that walkthrough do real work, but deterministically. To see
+the configured model actually generate something from your own prompt:
+
+```bash
+python tools/codegen_agent.py --port 8107 --workspace ./generated
+```
+
+That is a `KIO7`-shaped agent offering `code_generation`. Any plan that
+reaches that capability now leaves files on disk. Everything the model returns
+is treated as untrusted: paths are resolved against the workspace and anything
+escaping it is refused, file count and size are capped, and the result carries
+`hitl_required` because nothing compiled or ran it.
+
+`tools/dummy_fleet.py` covers the other KIOs, and its replies are canned — a
+file list from it is fiction.
+
 ### Without a browser
 
 ```bash
@@ -89,16 +114,62 @@ It exits non-zero if a scenario does not deliver, so it works in CI.
 
 ## 2. Run it on your own work
 
-### Start the services
+### Start it
 
-```bash
-make services                        # Workflow API, Session Manager, PostgreSQL
-export KIO1_REGISTRY_TOKEN=$(openssl rand -hex 16)
+There are two entry points at the root of the repository. `main.py` is the
+terminal orchestrator; **`app.py` is the web service** — the Workflow API, the
+registry API, and the console, all in one process.
+
+**From source**, which is what you want while you are changing things:
+
+```powershell
+# PowerShell
+$env:KIO1_REGISTRY_TOKEN = "choose-a-secret"
+$env:KIO1_SESSION_MANAGER_URL = "http://localhost:8001"   # optional
+.venv\Scripts\uvicorn app:app --port 8000 --reload
 ```
 
-The console is at http://localhost:8000/. Without `KIO1_REGISTRY_TOKEN` the
-registry is closed and the console will tell you so — see
+```bash
+# bash
+export KIO1_REGISTRY_TOKEN=choose-a-secret
+export KIO1_SESSION_MANAGER_URL=http://localhost:8001     # optional
+.venv/bin/uvicorn app:app --port 8000 --reload
+```
+
+Runs still execute without a Session Manager; nothing is written down, and
+the console's Recent runs stays empty. To record them, start it too:
+
+```bash
+# PostgreSQL, or skip it: without KIO1_DATABASE_URL the Session Manager keeps
+# everything in memory, which is fine for a look around.
+docker compose -f deploy/compose.yaml up -d postgres
+
+uvicorn services.session_manager.app:app --port 8001    # in one terminal
+uvicorn app:app --port 8000 --reload                    # in another
+```
+
+**In containers**, which brings up everything at once — PostgreSQL, the
+Session Manager, and `app.py`:
+
+```bash
+docker compose -f deploy/compose.yaml up -d --build
+docker compose -f deploy/compose.yaml logs -f
+docker compose -f deploy/compose.yaml down          # keeps the database
+```
+
+Put your `KIO1_REGISTRY_TOKEN` in the `workflow-api` service's `environment:`
+block in `deploy/compose.yaml`, next to the other settings there.
+
+Either way the console is at **http://localhost:8000/**. Without
+`KIO1_REGISTRY_TOKEN` the registry is closed and the console says so — see
 [the console](console.md).
+
+| Address | What |
+|---------|------|
+| `http://localhost:8000/` | The console |
+| `http://localhost:8000/docs` | The API, as OpenAPI |
+| `http://localhost:8000/health` | Liveness |
+| `http://localhost:8001/health` | The Session Manager, when it is running |
 
 ### Tell it what it can use
 
@@ -140,9 +211,13 @@ There are three kinds:
 Write a real `description`. It is what the planning model reads when deciding
 whether your tool fits a request.
 
-**You do not have to write any of this.** If your service can serve one more
-URL, publish a manifest and let KIO1 ask — see [Discovery](discovery.md). Or
-register it at runtime from the console's **Register a target** box, or by
+**You do not have to write any of this by hand.** The console's **Targets**
+tab adds, edits, and removes targets, and writes the result back into
+`config.json` — so what you do there survives a restart and you never touch
+code. Its **How to use** tab has copy-paste examples for all three kinds.
+
+If your service can serve one more URL, it can skip the form entirely:
+publish a manifest and let KIO1 ask ([Discovery](discovery.md)), or push it to
 `POST /registry/agents`.
 
 ### Decide what must not happen
@@ -177,6 +252,29 @@ curl -X POST http://localhost:8000/workflow/run \
 
 You get a `session_id` back immediately; the run continues in the background.
 `GET /workflow/{session_id}` returns every step with its result.
+
+### The registry token
+
+The console's **Targets** tab reads and writes the agent registry, and those
+endpoints are **closed until you choose a token**. Until then the tab shows:
+
+```text
+The agent registry API is closed, so this page cannot list or change targets.
+Running workflows still works.
+```
+
+That is deliberate, not a misconfiguration. Registering an agent tells KIO1 to
+start sending task text and step results to an address someone supplied over
+the network; leaving that open to anyone who can reach the service would be a
+poor default.
+
+To open it, pick any secret, put it in `KIO1_REGISTRY_TOKEN` **when you start
+the service**, then click **Registry token** in the console and paste the same
+value. The console keeps it in that browser tab only — never on disk, never
+sent anywhere but this service.
+
+It is a shared secret over whatever transport you terminate. Put the service
+behind TLS if it is reachable from anywhere you do not control.
 
 ---
 
@@ -258,6 +356,11 @@ Addresses that differ per deployment come from the environment rather than
 the file: `KIO1_AGENT_HOST`, `KIO1_AGENT_ENDPOINT_<AGENT>`,
 `KIO1_PROVIDER_ENDPOINT`, `KIO1_SESSION_MANAGER_URL`, `KIO1_REGISTRY_TOKEN`.
 
+`KIO1_CONFIG_PATH` says which file all of the above lives in, and which one
+the console saves to. `KIO1_CONFIG_WRITABLE=0` stops it saving at all, for a
+deployment whose configuration is read-only or must only change through the
+repository.
+
 ---
 
 ## When something looks wrong
@@ -279,8 +382,9 @@ python -c "from core.config_loader import load_config; from core.prompt_loader i
 **A run says `failed` but every step is `ok`.** Look for a `not_run` step — a
 gate refused it. The reason names the capability and the verdict it wanted.
 
-**The console says the registry is closed.** `KIO1_REGISTRY_TOKEN` is not set
-on the server. The 503 body says exactly that.
+**The console says the registry is closed.** That is the expected state until
+you choose a token — see [The registry token](#the-registry-token) below.
+Running workflows is unaffected.
 
 **Nothing is recorded and status lookups fail.** `KIO1_SESSION_MANAGER_URL`
 is not set, so nothing is being written down. Runs still execute.

@@ -1,64 +1,217 @@
 # The console
 
-A web page for looking at what KIO1 can reach and what it has been doing,
-served by the Workflow API itself at `/`.
+A web page for administering KIO1: what it can reach, what it has been doing,
+and what you want it to be able to reach. Served by the Workflow API itself
+at `/`.
 
 ```bash
-make services
+docker compose -f deploy/compose.yaml up -d --build
 # then open http://localhost:8000/
 ```
 
-## What it shows
+Or from source, without containers:
 
-**Targets.** Everything the [live directory](live-directory.md) knows: each
-one's kind, where it came from, whether it is answering, what it declares,
-and what it has recently done per capability.
+```bash
+uvicorn app:app --port 8000
+```
+
+## Run
+
+The box here is not a chat with an agent. What you write goes to the planning
+model **once**, together with a generated catalog of the usable targets and the
+rules in the system prompt. The model answers with a plan — a list of steps,
+each naming a target and one of its capabilities — and KIO1 dispatches that.
+Your words are never read again.
+
+Three things follow, and they are where most failed runs come from:
+
+- A capability the catalog does not list cannot be asked for.
+- The model decides the order, including which step consumes which. A step
+  that needs an earlier step's output has to say so, and a small model
+  routinely does not.
+- **Code pasted into the box is not sent to an agent.** It is part of the
+  request the model reads. The code agents analyse comes from the workspace on
+  the Settings tab.
+
+So name the work in the catalog's own words rather than describing the output
+you want: ask to *localize the failure in `x.py`* rather than to *get the trace
+file*, when localization is the capability that produces a trace.
+
+The header shows which model will write the plan and which workspace the
+agents will be pointed at, because those are the two settings a run goes wrong
+on.
+
+## Targets
+
+Everything the [live directory](live-directory.md) knows: each one's kind,
+where it came from, whether it is answering, what it declares, and what it
+has recently done per capability.
 
 ```text
 Id           Kind  Origin        Status        Capabilities              Recent
 KIO3         kio   config        READY         requirements_engineering  1/1 · rate 0.667 · 23 ms
-KIO7         kio   config        READY         code_generation           1/1 · rate 0.667 · 2 ms
 KIO5         kio   config        UNREACHABLE   synthetic_data_generation —
              http://127.0.0.1:8105/health is unreachable: timed out
 Pytest       cli   config        READY         test_execution            —
-MyLogSearch  http  registration  UNCHECKED     log_search                —      [Remove]
+MyLogSearch  http  registration  UNCHECKED     log_search                —
 ```
 
 Two things worth reading off that: `KIO5` says *why* it is not being planned
 for, and `MyLogSearch` is `unchecked` rather than `ready` because it is an
 HTTP tool with no `health_url` — nothing was probed, so nothing is claimed.
 
-**Registering a target.** Paste the same manifest an agent would serve at
-`/manifest`. It is probed before it is trusted, and the result comes straight
-back: `MyAgent → ready`, or `MyAgent → unreachable` with the reason. Targets
-that came from `config.json` show *in config.json* instead of a Remove
-button, because the file is their source of truth.
+### Adding, editing, removing
 
-**Workflows.** A box to send a request, the recent runs, and — for whichever
-run you click — its steps with status, duration, error, and the agent's
-output.
+**Add** takes a definition — the same document an agent serves at
+`/manifest`, or a `dispatch.agents` entry. It is probed straight away and the
+result comes back: `MyAgent → ready`, or `MyAgent → unreachable` with the
+reason.
 
-The page refreshes every four seconds, so a running workflow fills in as it
-goes.
+**Edit** puts a target's current definition in the same box. The whole entry
+is replaced rather than merged, because a merge cannot express *removing* a
+field — dropping a tool's `health_url` would be impossible.
+
+**Remove** takes it out of the directory, and out of the configuration file
+when that is where it came from.
+
+### Test connection
+
+**Test connection** answers "would this work?" without adding anything. It
+reads what is in the box, checks that it parses, and dials the address —
+then reports three things:
+
+- what it understood: `WeatherForecast parses as a http target offering
+  weather_check`,
+- **which address it actually dialled**, and
+- whether that address answered.
+
+The middle line is the point. What gets dialled is not always what you typed:
+`KIO1_AGENT_HOST` and `KIO1_AGENT_ENDPOINT_<AGENT>` redirect addresses
+per-deployment, and when they do, the panel says so explicitly —
+
+> You wrote `http://127.0.0.1:11434/`, and this deployment dials
+> `http://host.docker.internal:11434/` instead (`KIO1_AGENT_HOST`).
+
+Without that line, a target you had written correctly could come back
+`unreachable` with nothing in the entry to explain it.
+
+What is probed depends on the kind: a `kio` target is asked for its health
+path, an `http` tool is asked for its `health_url` (so give it one — without
+it there is nothing safe to call), and a `cli` tool is checked for its
+program being on this machine's `PATH`. Nothing is saved and nothing is run;
+a failing test is information, not a refusal to add.
+
+An `mcp` entry gets the most out of this button, because probing one is a
+`tools/list` — the test tells you every tool the server has and what each one
+takes, which is the list that becomes the entry's capabilities:
+
+```
+Workspace parses as a mcp target offering 14 tools it reported itself
+Tried: npx -y @modelcontextprotocol/server-filesystem /work
+It answered.
+
+  • read_text_file(path (string, required), tail (number), head (number))  Read the complete contents…
+  • write_file(path (string, required), content (string, required))  Create a new file or completely…
+```
+
+See [Connecting an MCP server](mcp.md) for what that kind is and why its
+entry is three lines long.
+
+### Where changes go
+
+By default all three **write to `config.json`**, so what you do here is still
+there after a restart. That file also holds the provider, telemetry, and
+policy settings, so the writer is careful with it:
+
+- Only the `dispatch.agents` object is replaced. Every other key is read and
+  written back as it was found, in its original order.
+- The write is atomic where the filesystem allows it — a temporary file in
+  the same directory, then a replace — so a crash halfway through leaves the
+  original intact.
+- The previous contents are kept alongside as `config.json.bak`.
+
+In a container the configuration arrives as a **single-file bind mount**, and
+the kernel refuses to rename over a mount point. There the file is rewritten
+in place instead, which is not atomic — the backup is what a crash mid-write
+would be recovered from. Saving from the console works either way; you do not
+have to do anything.
+
+The panel header shows which file is being written. Untick **Save to the
+configuration file** to add something for this process only.
+
+`KIO1_CONFIG_PATH` says which file that is; `KIO1_CONFIG_WRITABLE=0` turns
+writing off for a deployment that ships a read-only configuration, and the
+console then says so up front rather than failing when you press Add.
+
+### Why the console may override the file
+
+Discovery never overwrites a hand-written entry — an automatic source has no
+business second-guessing a person. Editing in the console *is* a person, doing
+the same thing they would have done by opening the file. So it overrides, and
+the result is written to the file, which keeps one source of truth rather than
+two.
+
+## Workflows
+
+A box to send a request, the recent runs, and — for whichever run you click —
+its steps with status, duration, error, and the agent's output. The page
+refreshes every four seconds, so a running workflow fills in as it goes.
+
+## How to use
+
+A tab inside the console explaining what a target is, the three kinds with
+copy-paste examples, the placeholders they can carry, how an agent can
+register itself instead, and what every status means. Each example has a
+**Put this in the form** button.
+
+It exists so someone plugging in their own agent does not have to find this
+page first.
+
+## Settings
+
+Three things decide how a run goes that are not targets, and all three used to
+be hand-edits into `config.json`. They are on this tab, they are saved to the
+same file, and they take effect from the next run — nothing restarts.
+
+**Planning model.** Which model writes the plan. For a local provider the list
+is what that installation has pulled; for one that cannot be asked, the name is
+typed and the page says why there is no list.
+
+This is the setting worth reaching for first when a run produces a plan that
+is *valid but wrong* — steps in an impossible order, a capability that does not
+fit the request. Following the system prompt's rules is the hard part of
+planning, and a small model does not. Changing the model here also warms it in
+the background, so the next run is not charged for reading it into memory.
+
+**Temperature** and **planning timeout** sit beside it. Planning wants
+repeatable output, so 0–0.3; and the timeout bounds the model's answer, not the
+agents' work, so raise it when you move to a slower model.
+
+**Workspace.** The repository and entry point every execution message carries,
+so an agent knows what code to analyse without being told in prose.
+
+> **The path is resolved by the agent, not by KIO1.** An agent in its own
+> container has its own filesystem. `E:\projectspp` is real here and absent
+> there, and the agent answers "not found" about a file you can see. Use the
+> path inside the agent's container, and check the code is mounted at it.
 
 ## The registry token
 
-The [registry endpoints are closed](live-directory.md#the-registry-api-is-closed-by-default)
-until `KIO1_REGISTRY_TOKEN` is set on the server. The console asks for it
-with the **Registry token** button and keeps it in `sessionStorage` — this
-browser tab only, gone when the tab closes, never written to disk and never
-sent anywhere but this service.
+The registry endpoints are closed until `KIO1_REGISTRY_TOKEN` is set on the
+server. The console asks for it with the **Registry token** button and keeps
+it in `sessionStorage` — this browser tab only, gone when the tab closes,
+never written to disk and never sent anywhere but this service.
 
 Without a token the Targets tab shows the server's own explanation of what to
 set. Running workflows does not need one.
 
 ## What it is not
 
-It is one HTML file with no build step, no framework, and **no external
-requests** — no CDN, no font host, no analytics. It talks only to the service
-that served it, so it works on a machine with no route to the internet, which
-is where an orchestrator like this usually lives. There is a test that keeps
-it that way.
+Three files — `index.html`, `app.css`, `app.js` — with no build step, no
+framework, and **no external requests**: no CDN, no font host, no analytics.
+It talks only to the service that served it, so it works on a machine with no
+route to the internet, which is where an orchestrator like this usually
+lives. There are tests that keep it that way.
 
 Everything a viewer sees that someone else wrote — an agent's description, an
 error message, an output payload — is escaped before it reaches the page.
@@ -69,17 +222,19 @@ All of them are ordinary API endpoints; the console is just one caller.
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /registry/agents` | Targets, their status, and their history |
-| `POST /registry/agents` | Register from a manifest |
-| `DELETE /registry/agents/{id}` | Remove a discovered or registered target |
+| `GET /registry/agents` | Targets, their status, their history, and their definitions |
+| `POST /registry/agents` | Add from a manifest; `persist` decides whether it is saved |
+| `PUT /registry/agents/{id}` | Replace one target's definition |
+| `DELETE /registry/agents/{id}` | Remove it, from the file too when it is in there |
+| `GET /registry/config` | Which file saves go to, and whether they can |
 | `POST /workflow/run` | Start a run |
 | `GET /workflows?limit=N` | Recent runs, newest first |
 | `GET /workflow/{session_id}` | One run with its steps |
 
-`GET /workflows` answers with an empty list when session recording is off —
-a console asking what has run wants an empty answer when the answer is
-nothing, not an error. It answers `503` when the Session Manager is
-configured but unreachable, which is a different thing.
+`GET /workflows` answers with an empty list when session recording is off — a
+console asking what has run wants an empty answer when the answer is nothing,
+not an error. It answers `503` when the Session Manager is configured but
+unreachable, which is a different thing.
 
 ## Not here yet
 
@@ -87,9 +242,14 @@ configured but unreachable, which is a different thing.
   stopped, and there is no button to approve it and carry on. That needs the
   executor to be able to resume a plan part-way through, which it cannot do
   yet — see [Policy gates](policy-gates.md).
+- **No editing of anything but agents.** Gates, discovery sources, and health
+  settings are still file-only.
 - **No lineage view.** The Session Manager records which artifact fed which
   step; the console does not draw it.
 - **No authentication for running workflows.** Only the registry endpoints
   are token-gated. Anyone who can reach the service can start a run.
 - **Polling, not streaming.** Four seconds is fine for a handful of
   operators and wrong for a wall display.
+- **No concurrency control on saves.** Two people editing the same target at
+  once, or someone editing the file by hand while the console saves, and the
+  last write wins.

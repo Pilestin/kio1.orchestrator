@@ -69,6 +69,84 @@ A request failing with `Response truncated before completion` reached either `ma
 
 Increase `max_output_tokens` if the output cap was reached. Otherwise, raise `context_window_size` or start a new session. The error reports both limits and the actual token counts.
 
+## A step failed because a prerequisite had not run
+
+A reply such as
+
+```
+no trace to replay: set data.trace_ref to a ref returned by a previous
+'bug_localization' or 'diagnosis' step
+```
+
+means the agent was asked to do something that consumes what an earlier step
+produces, and there was no earlier step. The agent is right; the **plan** was
+wrong.
+
+KIO1 does carry a step's output into the steps that declare it — they arrive
+as `data.upstream`, keyed by step id — so a correctly ordered plan works
+without anything else being configured. What went wrong is upstream of that:
+the model put the consuming step first.
+
+Look at the run's steps in the console. One step, or a first step whose
+capability is the consuming one, is the signature.
+
+Two things fix it, in order of how often they are the answer:
+
+1. **Use a larger planning model.** The ordering rules are in the system
+   prompt, and a small model simply does not follow them: a 3B model asked to
+   extract a trace answers with a single `replay` step, which is exactly this
+   error. Change it on the console's **Settings** tab and run again.
+2. **Ask for the work, not the artifact.** "Localize the failure in `x.py`"
+   names a capability the catalog lists, and the step that produces a trace is
+   the one that gets chosen. "Get me the trace XML" describes an output, and
+   the nearest-sounding capability is the one that *reads* traces.
+
+## An agent cannot find the code
+
+A reply such as `target script not found: E:/projects/app/main.py` when that
+file plainly exists means the path was resolved somewhere else.
+
+`dispatch.workspace.path` is **the path as the agent sees it**, not as KIO1
+sees it. An agent running in its own container has its own filesystem: a
+Windows path, or any path on the orchestrator's host, is not there.
+
+Two things have to line up:
+
+- The code must be mounted into the agent's container. That is configured on
+  the agent's side — a `volumes:` entry in its compose file, for instance:
+
+  ```yaml
+  services:
+    kio2:
+      volumes:
+        - E:/projects/app:/work:ro
+  ```
+
+- `dispatch.workspace.path` must be the path **inside** that container
+  (`/work` above), with `entry_point` relative to it. Set both on the
+  console's **Settings** tab.
+
+To check what an agent can actually see:
+
+```bash
+docker inspect <container> --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{\"
+\"}}{{end}}"
+```
+
+Nothing printed means nothing is mounted, and no workspace path will work
+until one is.
+
+## A run failed with "timed out"
+
+That is the *planning* call timing out, not an agent. It is bounded by
+`request_timeout`, which the console's **Settings** tab exposes.
+
+A local model has to be read into memory before it can answer, and the first
+request after choosing one pays for that read. Changing the model from the
+console warms it in the background for this reason, but a large model on a
+cold machine can still exceed a short timeout. Raise `request_timeout` when
+you move to a larger model.
+
 ## Reading the logs
 
 Each run writes `logs/log_<session_id>.log`, where `session_id` is `<YYYYMMDD>_<HHMMSS>_<8-char-uuid>`. The same id names that session's `chats/chat_<session_id>.jsonl`, so the transcript and the log can be read side by side.

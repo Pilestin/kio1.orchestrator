@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
+from dispatch.mcp_client import McpTool
+
 logger = logging.getLogger(__name__)
 
 # What a registry entry is, and therefore how a step addressed to it runs.
@@ -13,11 +15,15 @@ logger = logging.getLogger(__name__)
 # API, or a command line tool sitting on the same machine. They are handled
 # by their own transports, so the planner and the executor never learn the
 # difference.
+# `mcp` is the one that describes itself: the entry says how to start the
+# server and the server says what it can do, so its capabilities and the
+# arguments of each are asked for rather than written down.
 KIND_KIO = "kio"
 KIND_HTTP = "http"
 KIND_CLI = "cli"
+KIND_MCP = "mcp"
 
-ALLOWED_KINDS = frozenset({KIND_KIO, KIND_HTTP, KIND_CLI})
+ALLOWED_KINDS = frozenset({KIND_KIO, KIND_HTTP, KIND_CLI, KIND_MCP})
 
 _ALLOWED_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 
@@ -70,6 +76,49 @@ class CliToolSpec:
 
 
 @dataclass(frozen=True)
+class McpToolSpec:
+    """How to reach a Model Context Protocol server, and what it turned out to offer.
+
+    The configured half is small on purpose — a command to run, or a URL to
+    post to. Everything else about an MCP target is discovered: the server is
+    asked for its tools, and each tool's arguments come back as a JSON Schema.
+    That is the whole reason to prefer this kind over `cli` or `http` for
+    something that speaks MCP.
+
+    Attributes:
+        command: Program and arguments for a server run as a child process.
+            Empty means the server is reached over HTTP instead.
+        cwd: Working directory for a child process. Empty runs in KIO1's own.
+        env: Extra environment variables for the child. Values may contain
+            `${ENV_VAR}` references, so a token stays out of `config.json`.
+        url: Endpoint of a server reached over Streamable HTTP. Empty means
+            the server is run as a child process instead.
+        headers: Extra headers for an HTTP server, typically an Authorization
+            line. Values may contain `${ENV_VAR}` references.
+        discovered: The tools the server last said it had. Empty until it has
+            been asked, which is why an unprobed MCP entry offers nothing
+            specific to the planner rather than offering something invented.
+    """
+
+    command: tuple[str, ...] = ()
+    cwd: str = ""
+    env: dict[str, str] = field(default_factory=dict)
+    url: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
+    discovered: tuple[McpTool, ...] = ()
+
+    @property
+    def transport(self) -> str:
+        """Return `stdio` for a child process, `http` for a URL."""
+        return "stdio" if self.command else "http"
+
+    @property
+    def address(self) -> str:
+        """Return what would be contacted, for probes and error messages."""
+        return " ".join(self.command) if self.command else self.url
+
+
+@dataclass(frozen=True)
 class AgentEndpoint:
     """A single target KIO1 is able to dispatch work to.
 
@@ -87,14 +136,15 @@ class AgentEndpoint:
         subject: NATS subject this agent listens on. Unset lets the NATS
             transport derive one from its subject template. Ignored by every
             other transport.
-        kind: One of `kio`, `http`, or `cli`. Decides which transport runs the
-            step. Defaults to `kio`, so an entry written before this field
-            existed keeps its behaviour.
+        kind: One of `kio`, `http`, `cli`, or `mcp`. Decides which transport
+            runs the step. Defaults to `kio`, so an entry written before this
+            field existed keeps its behaviour.
         description: What this target does, in the words the planning model
             should see. Empty falls back to a line built from the
             capabilities.
-        tool: The call details for `http` and `cli` entries. Always `None` for
-            a `kio` entry, whose call details are `endpoint` and `path`.
+        tool: The call details for everything that is not a KIO agent. Always
+            `None` for a `kio` entry, whose call details are `endpoint` and
+            `path`.
     """
 
     agent_id: str
@@ -104,7 +154,7 @@ class AgentEndpoint:
     subject: str | None = None
     kind: str = KIND_KIO
     description: str = ""
-    tool: HttpToolSpec | CliToolSpec | None = None
+    tool: HttpToolSpec | CliToolSpec | McpToolSpec | None = None
 
     @property
     def url(self) -> str:
@@ -293,6 +343,113 @@ def _read_string_map(
     return dict(value)
 
 
+def _read_mcp_entry(
+    agent_id: str,
+    agent_data: dict[str, Any],
+    *,
+    description: str,
+    capabilities: frozenset[str],
+) -> AgentEndpoint:
+    """Build a registry entry for a Model Context Protocol server.
+
+    This is the shortest entry of any kind, and deliberately so: it says only
+    how to reach the server. What the server can do, and what each of those
+    things needs, is asked for at probe time rather than copied into
+    `config.json` where it would go stale.
+
+    `capabilities` keeps its usual meaning and becomes an allow-list: name
+    some and only those tools are offered to the planner; name none and every
+    tool the server reports is. Naming none is the common case, and it is the
+    point of the whole kind.
+
+    Args:
+        agent_id: Identifier of the entry.
+        agent_data: The raw entry object.
+        description: What the entry does, for the planning model.
+        capabilities: The entry's declared allow-list, possibly empty.
+
+    Returns:
+        The registry entry, with its connection details in `tool`.
+
+    Raises:
+        ValueError: If the entry names neither a command nor a URL, or names
+            both.
+    """
+    command_data = agent_data.get("command", [])
+    url = agent_data.get("url", "")
+
+    if not isinstance(url, str):
+        raise ValueError(f"dispatch.agents.{agent_id}.url must be a string.")
+
+    url = url.strip()
+
+    if command_data and url:
+        raise ValueError(
+            f"dispatch.agents.{agent_id} names both a command and a url. An "
+            "MCP server is either run here as a child process (command) or "
+            "reached over HTTP (url), and which one decides how it is "
+            "contacted, so only one may be set."
+        )
+
+    if not command_data and not url:
+        raise ValueError(
+            f"dispatch.agents.{agent_id} needs either a command or a url. "
+            'Use "command" for a server run here, such as '
+            '["npx", "-y", "@modelcontextprotocol/server-filesystem", "/work"], '
+            'or "url" for one reached over HTTP.'
+        )
+
+    if url:
+        parsed = urlparse(url)
+
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(
+                f"dispatch.agents.{agent_id}.url must be a non-empty HTTP(S) URL."
+            )
+
+        return AgentEndpoint(
+            agent_id=agent_id,
+            endpoint=url,
+            path="",
+            capabilities=capabilities,
+            kind=KIND_MCP,
+            description=description,
+            tool=McpToolSpec(
+                url=url,
+                headers=_read_string_map(agent_id, agent_data, "headers"),
+            ),
+        )
+
+    if not isinstance(command_data, list) or not all(
+        isinstance(part, str) and part for part in command_data
+    ):
+        raise ValueError(
+            f"dispatch.agents.{agent_id}.command must be a non-empty list of "
+            "strings, the program followed by its arguments. It is a list "
+            "rather than one string because the server is started without a "
+            "shell."
+        )
+
+    cwd = agent_data.get("cwd", "")
+
+    if not isinstance(cwd, str):
+        raise ValueError(f"dispatch.agents.{agent_id}.cwd must be a string.")
+
+    return AgentEndpoint(
+        agent_id=agent_id,
+        endpoint=f"mcp:{agent_id}",
+        path="",
+        capabilities=capabilities,
+        kind=KIND_MCP,
+        description=description,
+        tool=McpToolSpec(
+            command=tuple(command_data),
+            cwd=cwd.strip(),
+            env=_read_string_map(agent_id, agent_data, "env"),
+        ),
+    )
+
+
 def _read_tool_entry(
     agent_id: str,
     agent_data: dict[str, Any],
@@ -306,7 +463,7 @@ def _read_tool_entry(
     Args:
         agent_id: Identifier of the entry.
         agent_data: The raw entry object.
-        kind: Either `http` or `cli`.
+        kind: One of `http`, `cli`, or `mcp`.
         description: What the entry does, for the planning model.
         capabilities: The entry's declared capabilities.
 
@@ -316,6 +473,14 @@ def _read_tool_entry(
     Raises:
         ValueError: If the entry is malformed for its kind.
     """
+    if kind == KIND_MCP:
+        return _read_mcp_entry(
+            agent_id,
+            agent_data,
+            description=description,
+            capabilities=capabilities,
+        )
+
     if kind == KIND_HTTP:
         url = agent_data.get("url")
         if not isinstance(url, str) or not url.strip():

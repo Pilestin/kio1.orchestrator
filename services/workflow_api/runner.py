@@ -241,6 +241,13 @@ def build_runner(
     Returns:
         A ready runner.
     """
+    # The directory is settled first because the transport borrows its MCP
+    # sessions: a step dispatched to an MCP server should reuse the one the
+    # probe already started rather than starting a second copy.
+    live_directory = (
+        directory if directory is not None else AgentDirectory(config.dispatch.registry)
+    )
+
     return WorkflowRunner(
         config=config,
         prompt_template=prompt_template,
@@ -248,13 +255,11 @@ def build_runner(
         provider_client=provider_client,
         recorder=recorder,
         transport=(
-            transport if transport is not None else build_transport(config.dispatch)
+            transport
+            if transport is not None
+            else build_transport(config.dispatch, live_directory.mcp_pool)
         ),
-        directory=(
-            directory
-            if directory is not None
-            else AgentDirectory(config.dispatch.registry)
-        ),
+        directory=live_directory,
         scoreboard=(
             scoreboard
             if scoreboard is not None

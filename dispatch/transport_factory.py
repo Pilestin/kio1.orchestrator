@@ -6,6 +6,7 @@ from dispatch.agent_registry import (
     KIND_CLI,
     KIND_HTTP,
     KIND_KIO,
+    KIND_MCP,
     AgentEndpoint,
 )
 from dispatch.agent_transport import (
@@ -13,6 +14,8 @@ from dispatch.agent_transport import (
     AgentTransportError,
     HttpAgentTransport,
 )
+from dispatch.mcp_client import McpSessionPool
+from dispatch.mcp_transport import McpToolTransport
 from dispatch.nats_transport import NatsAgentTransport
 from dispatch.tool_transport import CliToolTransport, HttpToolTransport
 from dispatch.workflow_planner import ExecutionMessage
@@ -89,7 +92,9 @@ class RoutingTransport:
                 logger.warning("A transport failed to close", exc_info=True)
 
 
-def build_transport(dispatch_config: DispatchConfig) -> AgentTransport:
+def build_transport(
+    dispatch_config: DispatchConfig, mcp_pool: McpSessionPool | None = None
+) -> AgentTransport:
     """Return a transport able to reach every kind of registered target.
 
     KIO agents travel over the transport `dispatch.transport` selects, and
@@ -98,6 +103,10 @@ def build_transport(dispatch_config: DispatchConfig) -> AgentTransport:
 
     Args:
         dispatch_config: Validated dispatch settings.
+        mcp_pool: Open MCP sessions to dispatch through. Pass the live
+            directory's, so a step reuses the server its probe already
+            started rather than paying the startup cost twice. Omitted makes
+            a pool of its own.
 
     Returns:
         A ready transport.
@@ -122,5 +131,8 @@ def build_transport(dispatch_config: DispatchConfig) -> AgentTransport:
             KIND_KIO: kio_transport,
             KIND_HTTP: HttpToolTransport(),
             KIND_CLI: CliToolTransport(),
+            KIND_MCP: McpToolTransport(
+                mcp_pool if mcp_pool is not None else McpSessionPool()
+            ),
         }
     )

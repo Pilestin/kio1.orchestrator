@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import logging
 import os
@@ -6,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from core.config_writer import config_path
 from dispatch.agent_registry import AgentRegistry, load_agent_registry
 from dispatch.directory import HealthConfig, load_health_config
 from dispatch.discovery import DiscoveryConfig, load_discovery_config
@@ -57,6 +59,38 @@ def _agent_endpoint_overrides() -> dict[str, str]:
     return overrides
 
 
+def _is_loopback_host(hostname: str | None) -> bool:
+    """Report whether an address means "this machine, wherever it is running".
+
+    Only these are ambiguous between a laptop and a container, and only these
+    are what the shared-host variable exists to repair. A public address such
+    as `api.open-meteo.com` means the same thing in both places, so rewriting
+    it does not fix anything — it breaks a target that worked.
+
+    Args:
+        hostname: Host parsed from the configured address, if any.
+
+    Returns:
+        True for loopback and wildcard addresses, false for everything else.
+    """
+    if not hostname:
+        return False
+
+    hostname = hostname.lower().strip("[]")
+
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        return True
+
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+
+    # `0.0.0.0` is not loopback, but it is what a service binds to in order to
+    # be reachable from outside; as a *destination* it is the same mistake.
+    return address.is_loopback or address.is_unspecified
+
+
 def _rehost(endpoint: str, host: str) -> str:
     """Return an endpoint pointing at a different host, port and scheme intact.
 
@@ -65,12 +99,15 @@ def _rehost(endpoint: str, host: str) -> str:
         host: The host to substitute.
 
     Returns:
-        The endpoint with its host replaced, or unchanged if it cannot be
-        parsed.
+        The endpoint with its host replaced. Unchanged if it cannot be parsed,
+        or if it already names a host that is reachable from anywhere.
     """
     parsed = urlparse(endpoint)
 
     if not parsed.scheme or not parsed.netloc:
+        return endpoint
+
+    if not _is_loopback_host(parsed.hostname):
         return endpoint
 
     netloc = host if parsed.port is None else f"{host}:{parsed.port}"
@@ -94,6 +131,71 @@ def _is_placeholder_host(hostname: str | None) -> bool:
     hostname = hostname.lower()
 
     return hostname in _PLACEHOLDER_OTLP_HOSTS or hostname.endswith(".example.com")
+
+
+def rehost_entry(agent_id: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """Return an entry with its addresses pointed where this deployment can reach.
+
+    `config.json` is committed and shared, so it names agents the way they are
+    addressed from a developer machine — usually `127.0.0.1`. Inside a
+    container that means the container itself. These variables redirect them
+    without editing the file, which is why the file keeps the original and
+    only what runs is rewritten.
+
+    Every address an entry carries is considered, not just `endpoint`: an
+    `http` tool reaches its service through `url`, and a loopback address in
+    there is wrong in exactly the same way.
+
+    Only loopback addresses move. `KIO1_AGENT_HOST` answers the question "what
+    does *this machine* mean from in here", and a public address such as
+    `https://api.open-meteo.com/...` was never asking it — rewriting one
+    silently replaced a working target with the Docker host, and the failure
+    surfaced as an unreachable agent nobody had misconfigured.
+
+    Args:
+        agent_id: The entry's identifier, used for the per-agent override.
+        entry: The raw `dispatch.agents` entry.
+
+    Returns:
+        A copy with any address rewritten. The original is never modified, so
+        a caller that also saves the entry saves what was actually written.
+    """
+    override = _agent_endpoint_overrides().get(agent_id.upper())
+    shared_host = os.environ.get(AGENT_HOST_ENV, "").strip()
+    rehosted = dict(entry)
+
+    if override is not None:
+        logger.info(
+            "Agent endpoint overridden from the environment: agent_id=%s "
+            "endpoint=%s",
+            agent_id,
+            override,
+        )
+        rehosted["endpoint"] = override
+
+        return rehosted
+
+    if not shared_host:
+        return rehosted
+
+    for key in ("endpoint", "url", "health_url"):
+        value = rehosted.get(key)
+
+        if not isinstance(value, str) or not value:
+            continue
+
+        moved = _rehost(value, shared_host)
+
+        if moved != value:
+            logger.info(
+                "Agent rehosted from the environment: agent_id=%s %s=%s",
+                agent_id,
+                key,
+                moved,
+            )
+            rehosted[key] = moved
+
+    return rehosted
 
 
 @dataclass(frozen=True)
@@ -369,34 +471,9 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
         if not isinstance(value, str):
             raise ValueError(f"dispatch.workspace.{name} must be a string.")
 
-    overrides = _agent_endpoint_overrides()
-    shared_host = os.environ.get(AGENT_HOST_ENV, "").strip()
-
     for agent_id, agent_data in agents_data.items():
-        if not isinstance(agent_data, dict):
-            continue
-
-        override = overrides.get(str(agent_id).upper())
-        endpoint = agent_data.get("endpoint")
-
-        if override is not None:
-            logger.info(
-                "Agent endpoint overridden from the environment: agent_id=%s "
-                "endpoint=%s",
-                agent_id,
-                override,
-            )
-            agent_data["endpoint"] = override
-        elif shared_host and isinstance(endpoint, str):
-            rehosted = _rehost(endpoint, shared_host)
-
-            if rehosted != endpoint:
-                logger.info(
-                    "Agent rehosted from the environment: agent_id=%s " "endpoint=%s",
-                    agent_id,
-                    rehosted,
-                )
-                agent_data["endpoint"] = rehosted
+        if isinstance(agent_data, dict):
+            agents_data[agent_id] = rehost_entry(str(agent_id), agent_data)
 
     policy = load_policy(dispatch_data.get("policy"))
     discovery = load_discovery_config(dispatch_data.get("discovery"))
@@ -432,16 +509,19 @@ def _load_dispatch_config(data: dict[str, Any]) -> DispatchConfig:
     )
 
 
-def load_config(config_path: str = "config.json") -> Config:
+def load_config(path_override: str | None = None) -> Config:
     """Load configuration from a JSON file.
 
     Args:
-        config_path: Path to the configuration JSON file.
+        path_override: Path to read instead of the configured one.
+            Mainly for tests; a deployment sets `KIO1_CONFIG_PATH`
+            instead, so the console's writer and this reader always
+            agree on which file they mean.
 
     Returns:
         A `Config` instance populated from the file.
     """
-    path = Path(config_path)
+    path = Path(path_override) if path_override else config_path()
     data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
 
     provider_options = data.get("provider_options", {})

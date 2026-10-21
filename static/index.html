@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KIO1 Console</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<div class="shell">
+
+<aside class="rail">
+  <div class="brand">
+    <span class="mark">K1</span>
+    <span class="name">KIO1<span class="role">Orchestrator</span></span>
+  </div>
+
+  <nav>
+    <button id="tab-workflows" aria-selected="true"><span class="glyph">▶</span>Run</button>
+    <button id="tab-targets" aria-selected="false"><span class="glyph">◉</span>Targets</button>
+    <button id="tab-settings" aria-selected="false"><span class="glyph">⚙</span>Settings</button>
+    <button id="tab-help" aria-selected="false"><span class="glyph">?</span>How to use</button>
+  </nav>
+
+  <div class="foot">
+    <span id="conn" class="chip idle">connecting</span>
+    <button class="action quiet" id="set-token">Registry token</button>
+  </div>
+</aside>
+
+<main>
+  <!-- ── Targets ─────────────────────────────────────────────────────── -->
+  <div id="view-targets" class="stack hidden">
+    <div class="page-head">
+      <div>
+        <h1>Targets</h1>
+        <p>Everything a plan can be dispatched to, and what each is currently
+          answering. The planner is only told about the ones that are usable.</p>
+      </div>
+    </div>
+
+    <div id="token-warning" class="notice bad hidden"></div>
+    <div id="readonly-warning" class="notice warn hidden"></div>
+
+    <section class="panel">
+      <h2>Targets<span class="spacer"></span><span id="targets-count" class="muted small"></span></h2>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Id</th><th>Kind</th><th>Origin</th><th>Status</th>
+              <th>Capabilities</th><th>Recent</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="targets-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" id="editor-panel">
+      <h2><span id="editor-title">Add a target</span><span class="spacer"></span>
+        <span id="save-location" class="muted small mono"></span></h2>
+      <div class="body stack">
+        <p class="hint" id="editor-hint">
+          Paste a manifest — the same document an agent serves at <code>/manifest</code>.
+          It is probed before it is trusted; one that does not answer is recorded as
+          <code>unreachable</code> rather than rejected.
+          <a href="#" id="to-help">What can go in here?</a>
+        </p>
+        <textarea id="entry" spellcheck="false"></textarea>
+        <div class="row">
+          <button class="action" id="save-entry">Add</button>
+          <button class="action quiet" id="test-entry">Test connection</button>
+          <button class="action quiet hidden" id="cancel-edit">Cancel</button>
+          <label class="row small muted" for="persist">
+            <input type="checkbox" id="persist" checked>
+            Save to the configuration file
+          </label>
+          <span id="editor-result" class="small"></span>
+        </div>
+        <div id="probe-result" class="notice hidden"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── Workflows ───────────────────────────────────────────────────── -->
+  <div id="view-workflows" class="stack">
+    <div class="page-head">
+      <div>
+        <h1>Run a workflow</h1>
+        <p>What you write here goes to the planning model together with the
+          catalog of targets. The model answers with a plan; KIO1 dispatches
+          it. Nothing you type reaches an agent directly.</p>
+      </div>
+    </div>
+
+    <section class="panel composer lifted">
+      <h2>Request<span class="spacer"></span><span id="planner-chip" class="chip idle">planner</span></h2>
+      <div class="body stack">
+        <textarea id="request" spellcheck="false" placeholder="Describe what you want done, in plain language. Name the capability you want if you know it &mdash; &ldquo;localize the failure in&nbsp;&hellip;&rdquo; reaches a different step than &ldquo;replay&nbsp;&hellip;&rdquo;."></textarea>
+        <div class="meta">
+          <span id="run-workspace" class="mono small"></span>
+          <span class="spacer"></span>
+          <span id="run-result" class="small"></span>
+          <button class="action" id="run">Run</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Recent runs<span class="spacer"></span><span id="runs-count" class="muted small"></span></h2>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr><th>Opened</th><th>Status</th><th>Request</th><th>Workflow</th></tr>
+          </thead>
+          <tbody id="runs-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel hidden" id="detail-panel">
+      <h2>Steps<span class="spacer"></span><span id="detail-id" class="muted small mono"></span></h2>
+      <div id="detail-note" class="notice hidden"></div>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Step</th><th>Target</th><th>Capability</th><th>Status</th>
+              <th class="num">Time</th><th>Detail</th>
+            </tr>
+          </thead>
+          <tbody id="steps-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── Settings ────────────────────────────────────────────── -->
+  <div id="view-settings" class="stack hidden">
+    <div class="page-head">
+      <div>
+        <h1>Settings</h1>
+        <p>The three things a run depends on that are not a target: which model
+          writes the plan, how freely it writes it, and which code the agents
+          are pointed at. Saved to <code id="settings-path" class="mono">config.json</code>,
+          and in force from the next run &mdash; no restart.</p>
+      </div>
+    </div>
+
+    <div id="settings-readonly" class="notice warn hidden"></div>
+
+    <section class="panel">
+      <h2>Planning model</h2>
+      <div class="body stack">
+        <p class="hint">Producing a valid plan means following the rules in the
+          system prompt: pick a registered capability, order the steps, declare
+          what depends on what. That is hard for a small model, and the failure
+          is not an error message &mdash; it is a plausible-looking plan in the
+          wrong order. If a run fails for a reason that reads like a missing
+          prerequisite, try a larger model before changing anything else.</p>
+
+        <div class="grid-2">
+          <label class="field">
+            Model
+            <select id="settings-model"></select>
+            <span class="hint" id="settings-model-note"></span>
+          </label>
+
+          <label class="field">
+            Temperature
+            <input type="number" id="settings-temperature" min="0" max="2" step="0.1">
+            <span class="hint">Lower is more repeatable. Planning wants
+              repeatable, so 0&ndash;0.3 is the useful range.</span>
+          </label>
+
+          <label class="field">
+            Planning timeout (seconds)
+            <input type="number" id="settings-timeout" min="5" max="3600" step="5">
+            <span class="hint">How long the model gets to answer. A larger
+              model is slower, so raise this when you pick one &mdash; a run that
+              fails with &ldquo;timed out&rdquo; ran out of this, not of
+              anything the agents did.</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <span class="muted small">Provider</span>
+          <span id="settings-provider" class="tag"></span>
+          <span class="muted small">System prompt</span>
+          <span id="settings-prompt" class="tag"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Workspace</h2>
+      <div class="body stack">
+        <p class="hint">The code the agents analyse. It travels in every
+          execution message, so a KIO knows what to run without being told in
+          prose. <strong>This path is resolved by the agent, not by KIO1.</strong>
+          An agent in its own container sees its own filesystem, so
+          <code>E:\projectspp</code> means nothing there even though it is
+          right here &mdash; use the path inside that container, and make sure the
+          code is actually mounted at it.</p>
+
+        <div class="grid-2">
+          <label class="field">
+            Repository path
+            <input type="text" id="settings-workspace-path" class="mono"
+                   placeholder="/work" spellcheck="false">
+          </label>
+
+          <label class="field">
+            Entry point
+            <input type="text" id="settings-workspace-entry" class="mono"
+                   placeholder="main.py" spellcheck="false">
+            <span class="hint">The runnable script, relative to the path above.
+              An agent that records a real execution needs to know what to
+              run.</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <div class="row">
+      <button class="action" id="settings-save">Save</button>
+      <button class="action quiet" id="settings-reload">Discard changes</button>
+      <span id="settings-result" class="small"></span>
+    </div>
+  </div>
+
+  <!-- ── How to use ──────────────────────────────────────────────────── -->
+  <div id="view-help" class="stack hidden">
+    <div class="page-head">
+      <div>
+        <h1>How to use</h1>
+        <p>What a target is, how a request becomes a plan, and what to write in
+          the box on the Targets tab.</p>
+      </div>
+    </div>
+
+    <section class="panel">
+      <h2>How a request becomes a plan</h2>
+      <div class="body prose">
+        <p>The box on the <strong>Run</strong> tab is not a chat with an agent.
+          What you write goes to the planning model, once, together with a
+          generated catalog of every usable target and the rules in the system
+          prompt. The model answers with JSON: a list of steps, each naming a
+          target and one of its capabilities.</p>
+
+        <p>KIO1 then <em>dispatches</em> that plan. It does not interpret your
+          words any further &mdash; the plan is all it has. Three things follow
+          from that, and they are where most failed runs come from:</p>
+
+        <ol>
+          <li><strong>A capability the catalog does not list cannot be asked
+            for.</strong> If nothing registered provides what you want, the
+            model is told to leave it out rather than invent a target.</li>
+          <li><strong>The model decides the order.</strong> A step that needs
+            the output of another must declare it. A small model routinely gets
+            this wrong, and the result is a step that runs before the thing it
+            depends on has produced anything.</li>
+          <li><strong>Code you paste into the box is not sent to an
+            agent.</strong> It becomes part of the request the model reads. The
+            code an agent analyses comes from the workspace on the
+            <strong>Settings</strong> tab, which travels in every message.</li>
+        </ol>
+
+        <p>So a request that names what you want in the catalog&rsquo;s own words
+          works better than one that describes it. Ask to
+          <em>localize the failure</em> rather than to <em>get the trace</em>,
+          when localization is the capability that produces a trace.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Plugging in your own agent</h2>
+      <div class="body prose">
+        <p>KIO1 dispatches to <em>targets</em>. A target is anything that can carry
+          out a step: a KIO agent, an ordinary REST API of yours, or a program on
+          the machine this service runs on. It does not have to know KIO1 exists.</p>
+
+        <p>What a plan actually asks for is a <strong>capability</strong> — the
+          agent name in it is only the planner's guess at who provides one. So the
+          two things every target must declare are the capabilities it offers and a
+          description the planner can read when deciding whether it fits.</p>
+
+        <p><strong>Adding one is the Targets tab.</strong> Paste a definition, press
+          Add. It is probed straight away, and by default written into the
+          configuration file so it is still there after a restart. You never have to
+          edit code.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>The three kinds</h2>
+      <div class="body stack">
+
+        <div class="kind">
+          <h3><code>kio</code> — a service speaking the KIO1–KIO10 protocol</h3>
+          <p class="hint">It accepts an execution message at one path and answers in
+            the agreed shape. This is the default when no <code>type</code> is given.</p>
+          <pre class="sample" data-sample="kio">{
+  "agent_id": "KIO7",
+  "description": "Code generation and code understanding.",
+  "endpoint": "http://127.0.0.1:8107",
+  "path": "/execute",
+  "capabilities": ["code_generation", "code_understanding"]
+}</pre>
+          <button class="action quiet use-sample" data-for="kio">Put this in the form</button>
+        </div>
+
+        <div class="kind">
+          <h3><code>http</code> — any REST API</h3>
+          <p class="hint">The request is built from a template, so an API that knows
+            nothing about KIO1 still works. Omit <code>body</code> and the standard
+            execution message is sent instead. <code>result_path</code> picks the
+            part of the response worth keeping; <code>health_url</code> lets it be
+            probed.</p>
+          <pre class="sample" data-sample="http">{
+  "agent_id": "LogSearch",
+  "type": "http",
+  "description": "Searches the internal log index for a pattern.",
+  "url": "https://logs.internal/api/v1/search",
+  "method": "POST",
+  "headers": {"Authorization": "Bearer ${LOG_API_TOKEN}"},
+  "body": {"query": "{task}", "repo": "{data.repository.path}"},
+  "result_path": ["report"],
+  "health_url": "https://logs.internal/healthz",
+  "capabilities": ["log_search"]
+}</pre>
+          <button class="action quiet use-sample" data-for="http">Put this in the form</button>
+        </div>
+
+        <div class="kind">
+          <h3><code>cli</code> — a program on this machine</h3>
+          <p class="hint">The command is a <strong>list</strong>, and it runs with no
+            shell involved: a task description containing <code>;</code> or quotes
+            becomes one argument and stays one argument. Exit code 0 succeeds. If it
+            prints a JSON object, that object becomes the step's output — which is
+            how a local tool reports <code>verdict</code> like any agent.</p>
+          <pre class="sample" data-sample="cli">{
+  "agent_id": "Pytest",
+  "type": "cli",
+  "description": "Runs the project's test suite and reports what failed.",
+  "command": ["python", "-m", "pytest", "-q", "{data.repository.path}"],
+  "cwd": "",
+  "capabilities": ["test_execution"]
+}</pre>
+          <button class="action quiet use-sample" data-for="cli">Put this in the form</button>
+        </div>
+
+        <div class="kind">
+          <h3><code>mcp</code> — a server that describes itself</h3>
+          <p class="hint">The only kind you do not have to describe. A
+            <strong>Model Context Protocol</strong> server is asked what tools it
+            has, and the answer — names, descriptions, and the exact arguments of
+            each — becomes this entry's capabilities. Nothing about them is typed
+            here, and nothing goes stale when the server changes. There is a large
+            ecosystem of these already written, and any of them is three lines
+            away from being a workflow target.</p>
+          <pre class="sample" data-sample="mcp">{
+  "agent_id": "Workspace",
+  "type": "mcp",
+  "description": "Reads and writes files in the workspace.",
+  "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/work"]
+}</pre>
+          <button class="action quiet use-sample" data-for="mcp">Put this in the form</button>
+          <p class="hint">Use <code>command</code> for a server KIO1 starts here, or
+            <code>url</code> (with <code>headers</code>) for a remote one — one or
+            the other, never both. On Windows an npm-published server needs
+            <code>npx.cmd</code>, because the command runs without a shell. In a
+            container, the program has to be in the image.</p>
+          <p class="hint"><strong>A tool's name is the capability value.</strong> Press
+            <em>Test connection</em> to see the list before you save; adding
+            <code>capabilities</code> turns it into an allow-list, so a server that
+            can also write can be registered read-only.</p>
+          <p class="hint">An MCP tool takes named arguments rather than prose, so a
+            plan step addressed to one may carry an <code>arguments</code> object —
+            the planner fills it in from the schemas it was shown. Where a tool needs
+            exactly one string, the step's <code>task</code> is used as that string.
+            Where it needs more and the plan gave none, the step fails saying what was
+            missing rather than inventing a value for a tool that writes files.</p>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Placeholders</h2>
+      <div class="body stack">
+        <p class="hint">Anything in <code>url</code>, <code>headers</code>,
+          <code>body</code>, <code>command</code> and <code>env</code> can carry
+          these. A string that is <em>exactly</em> one placeholder keeps the value's
+          type, so <code>"{data}"</code> sends an object. A name that is not a known
+          field is left alone, so a typo shows up in the request instead of quietly
+          blanking a field.</p>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Placeholder</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td><code>{task}</code></td><td>The step's instruction from the plan</td></tr>
+              <tr><td><code>{capability}</code></td><td>What the step asked for</td></tr>
+              <tr><td><code>{workflow_id}</code>, <code>{step_id}</code>, <code>{agent_id}</code></td><td>Step identity</td></tr>
+              <tr><td><code>{data}</code></td><td>The whole structured input</td></tr>
+              <tr><td><code>{data.repository.path}</code></td><td>The code under analysis</td></tr>
+              <tr><td><code>{data.upstream.s1}</code></td><td>What step <code>s1</code> returned</td></tr>
+              <tr><td><code>${ENV_VAR}</code></td><td>Read from the server's environment — keeps credentials out of the file</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Letting an agent register itself</h2>
+      <div class="body prose">
+        <p>Pasting a definition is the manual path. If your service can serve one
+          more URL, it can describe itself and skip this form entirely — publish a
+          manifest and point KIO1 at it, or push it to the registry API:</p>
+        <pre class="sample">curl -X POST http://localhost:8000/registry/agents \
+  -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"manifest": {"agent_id": "MyAgent",
+                    "description": "What it does.",
+                    "endpoint": "http://10.0.0.5:9000",
+                    "capabilities": ["my_capability"]}}'</pre>
+        <p>The smallest useful manifest is three fields — <code>agent_id</code>,
+          <code>description</code>, <code>capabilities</code>. Leave the address out
+          and KIO1 uses the one it fetched the manifest from, which is the one
+          address a manifest cannot get wrong.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Before you add it: Test connection</h2>
+      <div class="body stack">
+        <p><strong>Test connection</strong> checks an entry without adding it.
+          It tells you what it understood, <strong>which address it actually
+          dialled</strong>, and whether that address answered.</p>
+        <p>The middle one matters because it is not always what you typed. A
+          deployment can redirect addresses with <code>KIO1_AGENT_HOST</code>
+          or <code>KIO1_AGENT_ENDPOINT_&lt;AGENT&gt;</code>, and when it does,
+          the result says so:</p>
+        <pre><code>You wrote http://127.0.0.1:11434/, and this deployment dials
+http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
+        <p>Only addresses meaning <em>this machine</em> —
+          <code>127.0.0.1</code>, <code>localhost</code>,
+          <code>0.0.0.0</code>, <code>::1</code> — are redirected that way. A
+          public address such as <code>https://api.open-meteo.com/…</code> is
+          dialled exactly as written.</p>
+        <p class="hint">A <code>kio</code> target is asked for its health path,
+          an <code>http</code> tool for its <code>health_url</code>, and a
+          <code>cli</code> tool is checked for its program being on this
+          machine's <code>PATH</code> — so a CLI tool that lives on your laptop
+          will not be found by KIO1 running in a container. Nothing is saved
+          and nothing is run; a failed test does not stop you adding it.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>What the statuses mean</h2>
+      <div class="body stack">
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Shows as</th><th>Means</th></tr></thead>
+            <tbody>
+              <tr><td><span class="chip ok">ready</span></td><td>Probed and answering</td></tr>
+              <tr><td><span class="chip idle">unchecked</span></td><td>Nothing about it can be probed — an <code>http</code> entry with no <code>health_url</code>, for instance. Still used.</td></tr>
+              <tr><td><span class="chip bad">unreachable</span></td><td>Failed its probe enough times to be withdrawn. It is not offered to the planner, and comes back on its own once it answers.</td></tr>
+              <tr><td><code>config</code></td><td>It is in the configuration file. Editing it here rewrites that file.</td></tr>
+              <tr><td><code>discovery</code></td><td>Found by fetching a manifest. Not written down unless you save it.</td></tr>
+              <tr><td><code>registration</code></td><td>Pushed to the registry API without being saved. Gone at the next restart.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="hint">In a run's steps, <code>ok</code> means the call worked —
+          not that it found nothing wrong. What it concluded is the separate
+          verdict: <code>clean</code>, <code>defect</code>, or
+          <code>inconclusive</code>. A step that says <code>not_run</code> was
+          stopped: either a policy gate refused it, or something it depends on did
+          not complete. The reason is printed beside it.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Where changes are saved</h2>
+      <div class="body prose">
+        <p id="help-save-location">Adding, editing, or removing a target here
+          rewrites the <code>dispatch.agents</code> section of the configuration
+          file. Nothing else in it is touched, the write is atomic, and the previous
+          contents are kept alongside as <code>config.json.bak</code>.</p>
+        <p>Untick <em>Save to the configuration file</em> to add something for this
+          process only. On a deployment that ships a read-only configuration, set
+          <code>KIO1_CONFIG_WRITABLE=0</code>; this console then says so rather than
+          failing when you press Add.</p>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -26,20 +26,23 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from dispatch.agent_registry import (
     KIND_CLI,
-    KIND_HTTP,
     KIND_KIO,
+    KIND_MCP,
     AgentEndpoint,
     AgentRegistry,
     CliToolSpec,
     HttpToolSpec,
+    McpToolSpec,
     load_agent_entry,
 )
+from dispatch.agent_transport import AgentTransportError
 from dispatch.discovery import DiscoveryConfig, fetch_entries
+from dispatch.mcp_client import McpError, McpSessionPool
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,9 @@ class AgentRecord:
         failures: Consecutive failed probes.
         last_checked: Wall-clock time of the last probe, or 0 if never probed.
         last_error: Why the last probe failed, empty when it did not.
+        source: The entry this was built from, as written. Kept so the
+            console can show a target's definition and hand it back for
+            editing without reconstructing it from the parsed form.
     """
 
     endpoint: AgentEndpoint
@@ -101,6 +107,7 @@ class AgentRecord:
     failures: int = 0
     last_checked: float = 0.0
     last_error: str = ""
+    source: dict[str, Any] = field(default_factory=dict)
 
     @property
     def agent_id(self) -> str:
@@ -125,66 +132,222 @@ class AgentRecord:
             "failures": self.failures,
             "last_checked": self.last_checked or None,
             "last_error": self.last_error or None,
+            "source": self.source,
         }
 
 
-def probe_target(endpoint: AgentEndpoint, health: HealthConfig) -> tuple[bool, str]:
+def probe_address(endpoint: AgentEndpoint, health: HealthConfig) -> str:
+    """Return what a probe would actually check.
+
+    Worth having separately from the probe itself: the single most useful
+    thing to tell someone whose target will not answer is the address it was
+    tried at, which is often not the address they typed — a container rewrites
+    loopback addresses to reach its host.
+
+    Args:
+        endpoint: The target.
+        health: Probe settings, for the liveness path.
+
+    Returns:
+        The URL or program name that would be checked, or an empty string when
+        nothing about this target can be.
+    """
+    if endpoint.kind == KIND_CLI:
+        spec = endpoint.tool
+
+        return spec.command[0] if isinstance(spec, CliToolSpec) and spec.command else ""
+
+    if endpoint.kind == KIND_KIO:
+        return f"{endpoint.endpoint}{health.path}"
+
+    spec = endpoint.tool
+
+    if isinstance(spec, McpToolSpec):
+        return spec.address
+
+    return spec.health_url if isinstance(spec, HttpToolSpec) else ""
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    """What one probe established about a target.
+
+    A probe used to answer one question — is it there? — and a pair of
+    booleans said everything. An MCP server answers a second question in the
+    same breath: *what can you do?* The listing that comes back belongs on the
+    entry, so the planner's catalog and the capability check both see it, which
+    is why a probe now hands back a target rather than only a verdict.
+
+    Attributes:
+        reachable: Whether the target answered.
+        detail: Why it did not, or `not probeable` when there was nothing to
+            ask. Empty when it answered.
+        endpoint: The target, enriched with anything the probe learned. The
+            same object it was given for every kind that learns nothing.
+    """
+
+    reachable: bool
+    detail: str
+    endpoint: AgentEndpoint
+
+
+def _probe_mcp(
+    endpoint: AgentEndpoint,
+    spec: McpToolSpec,
+    health: HealthConfig,
+    pool: McpSessionPool | None,
+) -> ProbeResult:
+    """Ask an MCP server whether it is there and what it offers.
+
+    Reachability and discovery are the same round trip on purpose. A server
+    that answers `tools/list` is by definition up, and the listing is the
+    thing worth having: it becomes the entry's capabilities, so nobody has to
+    write a tool name into `config.json` and keep it correct.
+
+    Args:
+        endpoint: The target to probe.
+        spec: Its connection details.
+        health: Probe settings, for the timeout.
+        pool: Sessions to borrow from, so the background pass reuses the
+            running server rather than starting one every interval. Omitted
+            opens a session of its own and closes it again, which is what a
+            one-off check of an unsaved entry wants.
+
+    Returns:
+        The outcome, carrying an endpoint whose capabilities and discovered
+        tools are whatever the server just said.
+    """
+    # Imported here rather than at module scope: the transport imports this
+    # module for its reply helpers, and the cycle is only avoidable one way.
+    from dispatch.mcp_transport import session_factory
+
+    borrowed = pool if pool is not None else McpSessionPool(timeout=health.timeout)
+
+    try:
+        session = borrowed.session_for(
+            endpoint.agent_id, session_factory(endpoint, spec, health.timeout)
+        )
+        tools = session.list_tools()
+    except (McpError, AgentTransportError) as error:
+        # A missing program, a handshake the server refused, an unset token.
+        # All of them mean the same thing to the directory.
+        return ProbeResult(False, str(error), endpoint)
+    except Exception as error:  # pragma: no cover - defensive
+        logger.warning(
+            "Probing MCP server %s raised unexpectedly",
+            endpoint.agent_id,
+            exc_info=True,
+        )
+        return ProbeResult(False, str(error), endpoint)
+    finally:
+        # A pool that was made here is closed here; a borrowed one keeps its
+        # sessions, which is the whole reason to pass one in.
+        if pool is None:
+            borrowed.close()
+
+    # A declared capability list is an allow-list; without one, everything the
+    # server offers is offered on.
+    allowed = endpoint.capabilities
+    offered = tuple(tool for tool in tools if not allowed or tool.name in allowed)
+
+    enriched = replace(
+        endpoint,
+        capabilities=frozenset(tool.name for tool in offered),
+        tool=replace(spec, discovered=offered),
+    )
+
+    if not offered:
+        return ProbeResult(
+            False,
+            (
+                f"{endpoint.agent_id} answered but offers no usable tools"
+                + (
+                    f"; it has {', '.join(sorted(tool.name for tool in tools))} "
+                    "and none of them are in this entry's capabilities"
+                    if tools
+                    else ""
+                )
+            ),
+            enriched,
+        )
+
+    logger.info(
+        "MCP server described itself: agent_id=%s tools=%s",
+        endpoint.agent_id,
+        ", ".join(sorted(tool.name for tool in offered)),
+    )
+
+    return ProbeResult(True, "", enriched)
+
+
+def probe_target(
+    endpoint: AgentEndpoint,
+    health: HealthConfig,
+    pool: McpSessionPool | None = None,
+) -> ProbeResult:
     """Check whether one target can be reached right now.
 
     Only what can honestly be checked is checked. A local command is probed by
     looking for the program; a KIO agent by its liveness path; a REST API only
     when the configuration gave one, since an arbitrary API has no path KIO1
-    may assume.
+    may assume. An MCP server is asked what it can do, which answers both
+    questions at once.
 
     Args:
         endpoint: The target to probe.
         health: Probe settings.
+        pool: MCP sessions to borrow from. Ignored for every other kind.
 
     Returns:
-        A pair of (reachable, detail). `detail` is empty when reachable, and
-        the reason when not. A target with nothing to probe reports reachable
-        with the reason "not probeable", which the caller reads as unchecked
-        rather than healthy.
+        The outcome. `detail` is empty when reachable, and the reason when
+        not. A target with nothing to probe reports reachable with the reason
+        "not probeable", which the caller reads as unchecked rather than
+        healthy.
     """
+    address = probe_address(endpoint, health)
+
+    if endpoint.kind == KIND_MCP:
+        spec = endpoint.tool
+
+        if not isinstance(spec, McpToolSpec):  # pragma: no cover - load-time checked
+            return ProbeResult(False, "not configured as an MCP server", endpoint)
+
+        return _probe_mcp(endpoint, spec, health, pool)
+
     if endpoint.kind == KIND_CLI:
-        spec = endpoint.tool
+        if not address:
+            return ProbeResult(False, "no command configured", endpoint)
 
-        if not isinstance(spec, CliToolSpec) or not spec.command:
-            return False, "no command configured"
+        if shutil.which(address) is None:
+            return ProbeResult(False, f"{address!r} is not on this machine", endpoint)
 
-        if shutil.which(spec.command[0]) is None:
-            return False, f"{spec.command[0]!r} is not on this machine"
+        return ProbeResult(True, "", endpoint)
 
-        return True, ""
+    if not address:
+        return ProbeResult(True, "not probeable", endpoint)
 
-    url = ""
-
-    if endpoint.kind == KIND_KIO:
-        url = f"{endpoint.endpoint}{health.path}"
-    elif endpoint.kind == KIND_HTTP:
-        spec = endpoint.tool
-        if isinstance(spec, HttpToolSpec) and spec.health_url:
-            url = spec.health_url
-
-    if not url:
-        return True, "not probeable"
+    url = address
 
     request = urllib.request.Request(url, method="GET")
 
     try:
         with urllib.request.urlopen(request, timeout=health.timeout) as response:
             if 200 <= response.status < 400:
-                return True, ""
+                return ProbeResult(True, "", endpoint)
 
-            return False, f"{url} answered HTTP {response.status}"
+            return ProbeResult(
+                False, f"{url} answered HTTP {response.status}", endpoint
+            )
     except urllib.error.HTTPError as error:
-        return False, f"{url} answered HTTP {error.code}"
+        return ProbeResult(False, f"{url} answered HTTP {error.code}", endpoint)
     except urllib.error.URLError as error:
-        return False, f"{url} is unreachable: {error.reason}"
+        return ProbeResult(False, f"{url} is unreachable: {error.reason}", endpoint)
     except TimeoutError:
-        return False, f"{url} did not answer within {health.timeout:g}s"
+        return ProbeResult(
+            False, f"{url} did not answer within {health.timeout:g}s", endpoint
+        )
     except OSError as error:  # pragma: no cover - platform-specific socket errors
-        return False, f"{url} could not be reached: {error}"
+        return ProbeResult(False, f"{url} could not be reached: {error}", endpoint)
 
 
 class AgentDirectory:
@@ -201,6 +364,8 @@ class AgentDirectory:
         *,
         discovery: DiscoveryConfig | None = None,
         health: HealthConfig | None = None,
+        sources: dict[str, Any] | None = None,
+        mcp_pool: McpSessionPool | None = None,
     ) -> None:
         """Seed the directory with the hand-written registry.
 
@@ -208,12 +373,25 @@ class AgentDirectory:
             configured: Agents read from `dispatch.agents`.
             discovery: Manifest sources to re-read on each pass.
             health: Probe settings.
+            sources: The raw `dispatch.agents` entries, so a record can
+                show and hand back its own definition. Omitted leaves
+                every record's source empty, which only costs the
+                console its edit form.
+            mcp_pool: Open MCP sessions, shared with the transport so a probe
+                and a dispatch talk to the same running server. Omitted makes
+                one, which is what every caller but a test wants.
         """
+        sources = sources or {}
+        self._mcp_pool = mcp_pool if mcp_pool is not None else McpSessionPool()
         self._lock = threading.RLock()
         self._discovery = discovery if discovery is not None else DiscoveryConfig()
         self._health = health if health is not None else HealthConfig()
         self._records: dict[str, AgentRecord] = {
-            entry.agent_id: AgentRecord(endpoint=entry, origin=ORIGIN_CONFIG)
+            entry.agent_id: AgentRecord(
+                endpoint=entry,
+                origin=ORIGIN_CONFIG,
+                source=dict(sources.get(entry.agent_id, {})),
+            )
             for entry in configured.entries()
         }
         self._stop = threading.Event()
@@ -251,7 +429,13 @@ class AgentDirectory:
     # ── writing ─────────────────────────────────────────────────────────────
 
     def upsert(
-        self, endpoint: AgentEndpoint, origin: str, *, probe: bool = False
+        self,
+        endpoint: AgentEndpoint,
+        origin: str,
+        *,
+        probe: bool = False,
+        source: dict[str, Any] | None = None,
+        replace: bool = False,
     ) -> AgentRecord:
         """Add or update one target.
 
@@ -264,6 +448,9 @@ class AgentDirectory:
             origin: Where this came from.
             probe: Whether to check reachability before storing, which is what
                 makes a registration a handshake rather than an assertion.
+            source: The entry this was built from, kept for the console.
+            replace: Whether to overwrite a hand-written entry. Automatic
+                sources never do; a person editing one does.
 
         Returns:
             The stored record.
@@ -271,9 +458,13 @@ class AgentDirectory:
         status, failures, detail = STATUS_UNCHECKED, 0, ""
 
         if probe:
-            reachable, detail = probe_target(endpoint, self._health)
+            outcome = probe_target(endpoint, self._health, self._mcp_pool)
+            detail = outcome.detail
+            # An MCP server just said what it can do, and that belongs on the
+            # entry being stored rather than being thrown away with the probe.
+            endpoint = outcome.endpoint
 
-            if not reachable:
+            if not outcome.reachable:
                 status = STATUS_UNREACHABLE
                 failures = self._health.failures_before_unreachable
             else:
@@ -283,7 +474,11 @@ class AgentDirectory:
         with self._lock:
             existing = self._records.get(endpoint.agent_id)
 
-            if existing is not None and existing.origin == ORIGIN_CONFIG:
+            if (
+                existing is not None
+                and existing.origin == ORIGIN_CONFIG
+                and not replace
+            ):
                 logger.info(
                     "Ignoring %s registration for %s: it is configured by hand",
                     origin,
@@ -305,6 +500,7 @@ class AgentDirectory:
                 failures=failures,
                 last_checked=time.time() if probe else 0.0,
                 last_error=detail,
+                source=dict(source or {}),
             )
             self._records[endpoint.agent_id] = record
 
@@ -318,8 +514,38 @@ class AgentDirectory:
 
             return record
 
+    def replace_entry(self, agent_id: str, entry: dict[str, Any]) -> AgentRecord:
+        """Replace one target's definition outright.
+
+        An edit made by a person is not a discovery: it is the same act as
+        opening the configuration file, so it overrides whatever is there
+        rather than deferring to it.
+
+        Args:
+            agent_id: The target to replace.
+            entry: The new `dispatch.agents`-shaped definition.
+
+        Returns:
+            The stored record, probed like a registration.
+
+        Raises:
+            ValueError: If the entry is malformed.
+        """
+        return self.upsert(
+            load_agent_entry(agent_id, entry),
+            ORIGIN_CONFIG,
+            probe=True,
+            source=entry,
+            replace=True,
+        )
+
     def register(
-        self, agent_id: str, entry: dict[str, Any], origin: str = ORIGIN_REGISTRATION
+        self,
+        agent_id: str,
+        entry: dict[str, Any],
+        origin: str = ORIGIN_REGISTRATION,
+        *,
+        replace: bool = False,
     ) -> AgentRecord:
         """Validate a manifest entry and add it, probing it first.
 
@@ -327,6 +553,8 @@ class AgentDirectory:
             agent_id: The identifier the entry is keyed by.
             entry: A `dispatch.agents`-shaped object.
             origin: Where this came from.
+            replace: Whether to overwrite a hand-written entry. True only for
+                a change a person made deliberately.
 
         Returns:
             The stored record, which may be `unreachable` when the probe
@@ -336,23 +564,32 @@ class AgentDirectory:
         Raises:
             ValueError: If the entry is malformed.
         """
-        return self.upsert(load_agent_entry(agent_id, entry), origin, probe=True)
+        return self.upsert(
+            load_agent_entry(agent_id, entry),
+            origin,
+            probe=True,
+            source=entry,
+            replace=replace,
+        )
 
-    def forget(self, agent_id: str) -> bool:
-        """Remove a target that was discovered or registered.
+    def forget(self, agent_id: str, *, force: bool = False) -> bool:
+        """Remove a target.
 
         Args:
             agent_id: The target to remove.
+            force: Whether to remove a hand-written entry too. A caller that
+                has already taken it out of `config.json` passes True; one
+                that has not would otherwise see it reappear on the next
+                refresh, or at the next restart.
 
         Returns:
-            True when it was removed. False when it is unknown, or when it
-            came from `config.json` and therefore cannot be removed at
-            runtime — the file is the source of truth for those.
+            True when it was removed, False when it is unknown or is
+            configured and `force` was not set.
         """
         with self._lock:
             record = self._records.get(agent_id)
 
-            if record is None or record.origin == ORIGIN_CONFIG:
+            if record is None or (record.origin == ORIGIN_CONFIG and not force):
                 return False
 
             del self._records[agent_id]
@@ -394,7 +631,7 @@ class AgentDirectory:
                 )
                 continue
 
-            self.upsert(endpoint, ORIGIN_DISCOVERY)
+            self.upsert(endpoint, ORIGIN_DISCOVERY, source=entry)
 
     def _probe_all(self) -> None:
         """Probe every target and update what is known about each."""
@@ -409,38 +646,47 @@ class AgentDirectory:
         with ThreadPoolExecutor(
             max_workers=min(_MAX_PROBE_WORKERS, len(targets)),
             thread_name_prefix="kio1-probe",
-        ) as pool:
+        ) as workers:
             outcomes = list(
-                pool.map(lambda target: probe_target(target, self._health), targets)
+                workers.map(
+                    lambda target: probe_target(target, self._health, self._mcp_pool),
+                    targets,
+                )
             )
 
         checked_at = time.time()
 
         with self._lock:
-            for endpoint, (reachable, detail) in zip(targets, outcomes, strict=True):
+            for endpoint, outcome in zip(targets, outcomes, strict=True):
                 record = self._records.get(endpoint.agent_id)
 
                 if record is None:  # removed while the pass was running
                     continue
 
                 self._records[endpoint.agent_id] = self._apply_probe(
-                    record, reachable, detail, checked_at
+                    record, outcome, checked_at
                 )
 
     def _apply_probe(
-        self, record: AgentRecord, reachable: bool, detail: str, checked_at: float
+        self, record: AgentRecord, outcome: ProbeResult, checked_at: float
     ) -> AgentRecord:
         """Return the record a probe outcome produces.
 
         Args:
             record: The record as it stands.
-            reachable: Whether the probe succeeded.
-            detail: The reason it failed, or "not probeable".
+            outcome: What the probe established, including anything it learned
+                about what the target offers.
             checked_at: When the probe ran.
 
         Returns:
             The updated record.
         """
+        reachable, detail = outcome.reachable, outcome.detail
+
+        # An MCP server can gain or lose a tool while KIO1 runs, and the
+        # listing it just gave is more current than the one on the record.
+        record = replace(record, endpoint=outcome.endpoint)
+
         if reachable and detail:
             # Nothing to check. Leave it usable and say so, rather than
             # claiming a health it was never asked about.
@@ -488,6 +734,21 @@ class AgentDirectory:
     # ── the background pass ─────────────────────────────────────────────────
 
     @property
+    def health(self) -> HealthConfig:
+        """Return the settings this directory probes with."""
+        return self._health
+
+    @property
+    def mcp_pool(self) -> McpSessionPool:
+        """Return the MCP sessions this directory keeps open.
+
+        Handed to the transport so a step dispatched to an MCP server reuses
+        the session the probe already opened. Starting a server is the slow
+        part; doing it twice would be the obvious waste.
+        """
+        return self._mcp_pool
+
+    @property
     def watching(self) -> bool:
         """Report whether the background pass is running."""
         return self._thread is not None and self._thread.is_alive()
@@ -515,12 +776,18 @@ class AgentDirectory:
         logger.info("Directory watch started: interval=%gs", self._health.interval)
 
     def stop(self) -> None:
-        """Stop the background pass and wait briefly for it to finish."""
+        """Stop the background pass, and every MCP server it started.
+
+        The servers matter more than the thread: each is a child process that
+        would otherwise outlive KIO1.
+        """
         self._stop.set()
         thread, self._thread = self._thread, None
 
         if thread is not None:
             thread.join(timeout=self._health.interval + self._health.timeout)
+
+        self._mcp_pool.close()
 
     def _loop(self) -> None:
         """Refresh on the interval until stopped."""

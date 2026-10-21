@@ -8,3 +8,6 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 logs/
+
+# Written by the console when it saves registry changes.
+config.json.bak

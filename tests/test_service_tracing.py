@@ -11,6 +11,8 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind
 
+from app import _State, get_state
+from app import app as workflow_app
 from core.config_loader import Config, DispatchConfig, TelemetryConfig
 from core.service_telemetry import TraceContextMiddleware, init_service_tracing
 from core.session_client import SessionClient
@@ -21,8 +23,6 @@ from dispatch.scoreboard import Scoreboard
 from services.session_manager.app import app as session_manager_app
 from services.session_manager.app import get_repository
 from services.session_manager.repository import InMemorySessionRepository
-from services.workflow_api.app import _State, get_state
-from services.workflow_api.app import app as workflow_app
 from services.workflow_api.runner import WorkflowRunner
 from tests.test_services_integration import _serve
 from tools.dummy_agent import build_server, server_address

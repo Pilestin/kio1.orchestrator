@@ -78,7 +78,33 @@ python tools/dummy_agent.py --agent-id KIO2 --port 8102
 
 Steps can declare dependencies with an optional `depends_on` field, and a step's output is fed to the steps that depend on it through the protocol's own `data` field. Messages travel over HTTP by default, or over NATS with `dispatch.transport`; the message body is identical either way.
 
-If you own a KIO and want KIO1 to call it, [Connecting a KIO](docs/connecting-a-kio.md) is the whole contract on one page. To plug in something that is not a KIO — your own API, a script, a build tool — see [Connecting your own module](docs/connecting-a-tool.md).
+### Running it
+
+```bash
+python main.py                                        # terminal orchestrator
+uvicorn app:app --port 8000                           # web service and console
+docker compose -f deploy/compose.yaml up -d --build   # both, plus a database
+```
+
+`main.py` and `app.py` sit side by side at the root: one is how you drive KIO1
+from a terminal, the other is how you drive it from a browser or another
+program. [Usage](docs/usage.md) walks through both.
+
+### Seeing it do real work
+
+`tools/dummy_fleet.py` stands in for every KIO with canned replies — right for
+proving the protocol, and nothing it claims to produce exists. For an agent
+that genuinely writes code with the model `config.json` configures:
+
+```bash
+python tools/codegen_agent.py --port 8107 --workspace ./generated
+```
+
+Ask KIO1 for a FastAPI server and a runnable `main.py` appears in `./generated`.
+It is a demonstration rather than KIO7: one model call, nothing compiled, no
+tests run against the result — so it asks for a human to look.
+
+If you own a KIO and want KIO1 to call it, [Connecting a KIO](docs/connecting-a-kio.md) is the whole contract on one page. To plug in something that is not a KIO — your own API, a script, a build tool — see [Connecting your own module](docs/connecting-a-tool.md). For anything that speaks the Model Context Protocol, [Connecting an MCP server](docs/mcp.md) is three lines of configuration: the server reports its own tools rather than being described.
 
 See the [Workflow Dispatch Guide](docs/workflow-dispatch.md) for the message format, reply contract, dependencies, execution modes, transports, and known gaps.
 
@@ -122,6 +148,7 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Services](docs/services.md) — Workflow API, Session Manager, and PostgreSQL
 - [Connecting a KIO](docs/connecting-a-kio.md) — What a KIO must accept and reply to be reachable
 - [Connecting your own module](docs/connecting-a-tool.md) — Registering a REST API or a local command as a workflow target
+- [Connecting an MCP server](docs/mcp.md) — Pointing KIO1 at a Model Context Protocol server, which reports its own tools instead of being described
 - [Policy gates](docs/policy-gates.md) — Stopping a step until the checks it depends on have passed
 - [Failover](docs/failover.md) — Running a step on another target when the one the plan named cannot
 - [Choosing by history](docs/selection.md) — Asking the target that has actually been working, not the one listed first

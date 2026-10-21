@@ -145,6 +145,7 @@ def main() -> int:
 
     import uvicorn
 
+    import app as api_module
     from core.config_loader import load_config
     from core.session_client import SessionClient
     from dispatch.directory import AgentDirectory
@@ -152,7 +153,6 @@ def main() -> int:
     from dispatch.transport_factory import build_transport
     from providers.provider_client import load_provider
     from services.session_manager.app import app as session_app
-    from services.workflow_api import app as api_module
     from services.workflow_api.runner import WorkflowRunner
 
     root = (

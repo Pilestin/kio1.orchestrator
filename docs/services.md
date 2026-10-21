@@ -106,13 +106,24 @@ settings. Deployment-specific values come from the environment:
 | `KIO1_TEST_DATABASE_URL` | Tests | Enables the PostgreSQL repository tests; they are skipped when unset. |
 | `KIO1_TEST_NATS_SERVERS` | Tests | Enables the live NATS round-trip tests; they are skipped when unset. |
 | `KIO1_PROVIDER_ENDPOINT` | Both | Overrides `provider_options.endpoint`. |
-| `KIO1_AGENT_HOST` | Both | Rehosts every agent, keeping each port. |
+| `KIO1_AGENT_HOST` | Both | Redirects agents addressed at **loopback** (`127.0.0.1`, `localhost`, `0.0.0.0`, `::1`) to this host, keeping each port and scheme. Public addresses are left alone. |
 | `KIO1_AGENT_ENDPOINT_<AGENT_ID>` | Both | Overrides one agent's endpoint, e.g. `KIO1_AGENT_ENDPOINT_KIO2`. Wins over `KIO1_AGENT_HOST`. |
 
 `config.json` is committed and shared, but the model provider and the KIO
 agents sit at different addresses depending on where KIO1 runs. The last two
 variables exist for that: the file keeps a sensible local default and the
 environment wins wherever it differs.
+
+`KIO1_AGENT_HOST` answers one question — *what does "this machine" mean from
+in here?* — so it only touches addresses that were asking it. A target at
+`http://127.0.0.1:11434` means the container itself once KIO1 is in one, and
+moves. A target at `https://api.open-meteo.com/...` means the same thing
+everywhere, and stays. Naming an agent explicitly with
+`KIO1_AGENT_ENDPOINT_<AGENT_ID>` is a deliberate redirection rather than a
+guess, so it is not limited this way.
+
+The console's **Test connection** button shows which address was finally
+dialled, and says so when it differs from what you wrote.
 
 The Session Manager reads `config.json` for its telemetry settings. If that
 file is missing or unreadable it serves requests without tracing rather than
@@ -167,11 +178,11 @@ provider must accept connections from outside the host, which for Ollama means
 Everything at once, in containers:
 
 ```bash
-make services
+docker compose -f deploy/compose.yaml up -d --build
 ```
 
 That brings up PostgreSQL, NATS, the Session Manager on `8001`, and the
-Workflow API on `8000`. Stop it with `make services-down`; the database volume
+Workflow API on `8000`. Stop it with `docker compose -f deploy/compose.yaml down`; the database volume
 survives.
 
 NATS is started with JetStream enabled and its monitoring port on `8222`, so
@@ -204,7 +215,7 @@ To run the services from source against a containerized database, start
 PostgreSQL alone and then each service in its own terminal:
 
 ```bash
-make postgres
+docker compose -f deploy/compose.yaml up -d postgres
 ```
 
 ```bash

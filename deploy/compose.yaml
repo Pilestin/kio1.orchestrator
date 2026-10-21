@@ -71,14 +71,19 @@ services:
       # agent that lives somewhere else.
       KIO1_PROVIDER_ENDPOINT: http://host.docker.internal:11434
       KIO1_AGENT_HOST: host.docker.internal
+      KIO1_REGISTRY_TOKEN: admin
     ports:
       - "8000:8000"
     volumes:
       # config.json and the prompt are baked into the image by the Dockerfile,
       # which would mean rebuilding to change a setting. Mounting them means an
-      # edit needs only `docker compose restart`. Read-only: a service must not
-      # rewrite the file its operator owns.
-      - ../config.json:/app/config.json:ro
+      # edit needs only `docker compose restart`.
+      #
+      # This one is writable, unlike the Session Manager's: the console this
+      # service serves is where an operator adds and edits agents, and those
+      # changes are saved back into dispatch.agents. Set
+      # KIO1_CONFIG_WRITABLE=0 below and make it :ro to forbid that.
+      - ../config.json:/app/config.json
       - ../prompts:/app/prompts:ro
     depends_on:
       session-manager:

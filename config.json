@@ -9,7 +9,7 @@
     "prompt_path": "prompts/kio1_system_prompt_ver2.txt",
     "chat_directory": "chats",
     "temperature": 0.2,
-    "request_timeout": 120,
+    "request_timeout": 60.0,
     "keep_alive": -1,
     "max_output_tokens": 4096,
     "telemetry": {
@@ -28,7 +28,7 @@
         "max_parallel_steps": 4,
         "workspace": {
             "path": "E:/Kodlar/AI4SWeng/Trace/py-test-codes-for-focustracer/codes",
-            "entry_point": "01_siparis_toplami_hesaplama.py"
+            "entry_point": ""
         },
         "health": {
             "enabled": true,
@@ -178,13 +178,13 @@
             },
             "Pytest": {
                 "type": "cli",
-                "description": "Runs this repository's own test suite and reports the result.",
+                "description": "Runs part of this repository's test suite and reports the result. One module rather than all of them: a full run takes longer than dispatch.request_timeout allows a step.",
                 "command": [
                     "python",
                     "-m",
                     "pytest",
                     "-q",
-                    "tests/"
+                    "tests/test_policy_gates.py"
                 ],
                 "capabilities": [
                     "test_execution"
@@ -201,6 +201,55 @@
                 ],
                 "capabilities": [
                     "repository_history"
+                ]
+            },
+            "Deneme": {
+                "type": "cli",
+                "description": "Which python version is running on the machine.",
+                "command": [
+                    "python",
+                    "--version"
+                ],
+                "cwd": "",
+                "capabilities": [
+                    "python_version_check"
+                ]
+            },
+            "OllamaQwenHttp": {
+                "type": "http",
+                "description": "Sends prompt directly to the Ollama REST API for local qwen3.5:4b inference.",
+                "url": "http://127.0.0.1:11434/api/generate",
+                "method": "POST",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "body": {
+                    "model": "qwen3.5:4b",
+                    "prompt": "{task}",
+                    "stream": false
+                },
+                "result_path": [
+                    "response"
+                ],
+                "health_url": "http://localhost:11434/",
+                "capabilities": [
+                    "llm_inference",
+                    "text_generation"
+                ]
+            },
+            "WeatherForecast": {
+                "type": "http",
+                "description": "Belirtilen enlem ve boylam için anlık sıcaklık ve hava durumu bilgisini getirir.",
+                "url": "https://api.open-meteo.com/v1/forecast?latitude={data.latitude}&longitude={data.longitude}&current_weather=true",
+                "method": "GET",
+                "headers": {},
+                "body": {},
+                "result_path": [
+                    "current_weather"
+                ],
+                "health_url": "https://api.open-meteo.com/v1/forecast?latitude=0&longitude=0&current_weather=true",
+                "capabilities": [
+                    "weather_check"
                 ]
             }
         }

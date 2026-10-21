@@ -34,7 +34,7 @@ All application settings are stored in `config.json` at the project root.
 | `dispatch.health` | object | How often targets are probed and refreshed, and when an unreachable one is withdrawn; see [The live directory](live-directory.md) |
 | `dispatch.discovery` | object | Manifest URLs agents describe themselves through; see [Discovery](discovery.md) |
 | `dispatch.policy` | object | Gates saying what must have passed before a step runs; see [Policy gates](policy-gates.md) |
-| `dispatch.agents` | object | Everything KIO1 can dispatch to, keyed by the id plans use. Each entry has a `type`: `kio` (default, the KIO1-KIO10 protocol), `http` (any REST API), or `cli` (a local command). See [Workflow Dispatch](workflow-dispatch.md) and [Connecting your own module](connecting-a-tool.md) |
+| `dispatch.agents` | object | Everything KIO1 can dispatch to, keyed by the id plans use. Each entry has a `type`: `kio` (default, the KIO1-KIO10 protocol), `http` (any REST API), `cli` (a local command), or `mcp` (a Model Context Protocol server, which reports its own tools). See [Workflow Dispatch](workflow-dispatch.md), [Connecting your own module](connecting-a-tool.md), and [Connecting an MCP server](mcp.md) |
 | `dispatch.workspace.path` | string | Repository root the agents should analyse, as *they* can see it (default: `""`, not sent) |
 | `dispatch.workspace.entry_point` | string | Runnable script reproducing the behaviour, relative to `workspace.path` (default: `""`, not sent) |
 | `dispatch.nats.servers` | array of strings | NATS server URLs; required when `transport` is `nats` |
@@ -189,6 +189,34 @@ An agent that analyses code has to be told which code. The plan's `task` is free
 Switching `dispatch.transport` to `nats` changes only how a message is delivered. The message body is identical, so agents that already speak the HTTP contract need no schema change.
 
 For the message format, reply contract, dependencies, execution modes, and telemetry, see [Workflow Dispatch](workflow-dispatch.md).
+
+## Where the file lives, and who may write it
+
+`KIO1_CONFIG_PATH` names the file everything above is read from. It is also
+the file the [console](console.md) writes to when someone adds, edits, or
+removes a target there — the reader and the writer take the same setting, so
+they can never disagree about which file they mean.
+
+```bash
+KIO1_CONFIG_PATH=/etc/kio1/config.json
+KIO1_CONFIG_WRITABLE=0        # console changes last until the next restart
+```
+
+Set `KIO1_CONFIG_WRITABLE` to `0`, `false`, `no`, or `off` where the
+configuration is mounted read-only, or where changes must only arrive through
+the repository. The console then says so up front rather than failing at the
+moment someone presses Save.
+
+When the console does write, only the `dispatch.agents` object changes: every
+other key is read and written back as it was found, and the previous contents
+are kept alongside as `config.json.bak`.
+
+The write is atomic where it can be: a temporary file beside the target, then
+a replace. `deploy/compose.yaml` mounts the configuration into the container
+as a **single file**, which makes it a mount point, and a mount point cannot
+be renamed over — the kernel answers `EBUSY`. There the contents are rewritten
+in place instead. Saving works either way; the difference is only that the
+in-place route is not atomic, which is what the backup covers.
 
 ## Security
 

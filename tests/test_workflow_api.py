@@ -7,13 +7,13 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from app import _State, app, get_state
 from core.config_loader import Config, DispatchConfig
 from core.session_client import NullSessionClient, SessionClientError
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.directory import AgentDirectory
 from dispatch.policy import Gate, Policy
 from dispatch.scoreboard import Scoreboard
-from services.workflow_api.app import _State, app, get_state
 from services.workflow_api.runner import WorkflowRunner
 
 PLAN = {
@@ -429,14 +429,47 @@ def test_the_console_is_served_from_the_service_itself() -> None:
 
 def test_the_console_loads_nothing_from_anywhere_else() -> None:
     # It has to work on a machine with no route to the internet, so no CDN,
-    # no font host, no analytics. Only the placeholder inside the example
-    # manifest names a host, and that one is a loopback address.
+    # no font host, no analytics. What matters is what the page *loads* —
+    # the help tab is full of example URLs that are text, not resources.
+    import re
+    from pathlib import Path
+
+    client, _ = build_client(FakeSessionClient())
+    page = client.get("/").text
+    assets = Path("static")
+
+    references = re.findall(r'(?:src|href)\s*=\s*"([^"]+)"', page)
+    references += re.findall(
+        r"url\(\s*['\"]?([^'\")]+)", (assets / "app.css").read_text(encoding="utf-8")
+    )
+
+    external = [
+        reference
+        for reference in references
+        if reference.startswith(("http://", "https://", "//"))
+    ]
+
+    assert external == []
+
+
+def test_the_console_fetches_only_from_this_service() -> None:
+    # Every request the script makes is a path on this origin. A URL in the
+    # placeholder text a textarea starts with is not a request.
+    import re
+    from pathlib import Path
+
+    script = Path("static/app.js").read_text(encoding="utf-8")
+    requested = re.findall(r"fetch\(\s*([^,)]+)", script)
+
+    assert requested, "the console makes no requests at all, which cannot be right"
+    assert all("http" not in call for call in requested)
+
+
+def test_the_console_stylesheet_and_script_are_served() -> None:
     client, _ = build_client(FakeSessionClient())
 
-    page = client.get("/").text
-
-    assert "https://" not in page
-    assert page.count("http://") == page.count("http://127.0.0.1")
+    assert client.get("/static/app.css").status_code == 200
+    assert client.get("/static/app.js").status_code == 200
 
 
 def test_recent_runs_are_listed() -> None:

@@ -9,6 +9,8 @@ KIO1 Orchestrator is a terminal application that accepts natural-language user r
 ```mermaid
 graph TD
     User[User Terminal] -->|query| Main[main.py]
+    Api[app.py] --> Runner[services/workflow_api/runner.py]
+    Api --> Console[static/index.html]
     Main --> ConfigLoader[core/config_loader.py]
     Main --> PromptLoader[core/prompt_loader.py]
     Main --> ChatHistory[core/chat_history.py]
@@ -52,6 +54,7 @@ graph TD
 | `core/config_loader.py` | Loads and validates `config.json` into a typed `Config` dataclass |
 | `core/session_logger.py` | Per-session log file setup and duration measurement |
 | `providers/provider_client.py` | Dynamically imports `<provider>_client.py` and validates it implements the required provider interface |
+| `core/config_writer.py` | Saves registry changes back into `config.json`, replacing only `dispatch.agents` |
 | `core/prompt_loader.py` | Reads the system prompt from disk and fills its `{{AGENT_CATALOG}}` placeholder from the registry |
 | `providers/ollama_client.py` | Sends HTTP requests to the Ollama `/api/chat` endpoint |
 | `providers/openai_client.py` | Sends requests via the OpenAI Chat Completions API |
@@ -72,8 +75,9 @@ graph TD
 | `dispatch/transport_factory.py` | Routes each step to the transport its target's kind requires; `dispatch.transport` chooses only how KIO agents are reached |
 | `dispatch/workflow_executor.py` | Runs a routed plan sequentially or in parallel and collects per-step results |
 | `tools/dummy_agent.py` | Dependency-free stub agent used to validate the protocol end to end |
-| `services/workflow_api/` | HTTP entry point; accepts a request, runs the workflow in the background, and serves the operator console |
-| `services/workflow_api/static/console.html` | The console: one self-contained page, no build step and no external requests |
+| `app.py` | The web service: the Workflow API's endpoints, the registry API, and the console. Started with `uvicorn app:app` |
+| `services/workflow_api/runner.py` | Turns one request into a plan, dispatches it, and records the outcome |
+| `static/` | The console: `index.html`, `app.css`, `app.js`. No build step and no external requests |
 | `services/session_manager/` | Records sessions, steps, artifacts, and lineage in PostgreSQL |
 | `core/session_client.py` | Client the Workflow API and terminal use to talk to the Session Manager |
 | `core/service_telemetry.py` | Trace export and the server-span middleware shared by both services |

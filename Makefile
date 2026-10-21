@@ -1,9 +1,18 @@
 .DEFAULT_GOAL := help
 
+# Every target here has a plain equivalent in docs/usage.md: `make` is a
+# convenience, not a requirement, and it is not installed everywhere.
 VENV        := .venv
-PYTHON      := $(VENV)/bin/python
-PIP         := $(VENV)/bin/pip
-SOURCES     := main.py core/ providers/ dispatch/ services/ tools/ tests/
+# A virtual environment puts its executables in Scripts/ on Windows and bin/
+# everywhere else. Without this the targets below silently point at nothing.
+ifeq ($(OS),Windows_NT)
+BINDIR      := $(VENV)/Scripts
+else
+BINDIR      := $(VENV)/bin
+endif
+PYTHON      := $(BINDIR)/python
+PIP         := $(BINDIR)/pip
+SOURCES     := main.py app.py core/ providers/ dispatch/ services/ tools/ tests/ examples/
 COMPOSE     := docker compose -f deploy/compose.yaml
 
 # ── Bootstrap ───────────────────────────────────────────────────────────────
@@ -18,23 +27,23 @@ install: ## Create venv and install all dependencies
 
 .PHONY: format
 format: ## Auto-format code (black + isort)
-	$(VENV)/bin/isort --profile black $(SOURCES)
-	$(VENV)/bin/black $(SOURCES)
+	$(BINDIR)/isort --profile black $(SOURCES)
+	$(BINDIR)/black $(SOURCES)
 
 .PHONY: format-check
 format-check: ## Verify code formatting (isort + black)
-	$(VENV)/bin/isort --profile black --check-only $(SOURCES)
-	$(VENV)/bin/black --check $(SOURCES)
+	$(BINDIR)/isort --profile black --check-only $(SOURCES)
+	$(BINDIR)/black --check $(SOURCES)
 
 # ── Linting & type-checking ──────────────────────────────────────────────────
 
 .PHONY: lint
 lint: ## Run ruff linter
-	$(VENV)/bin/ruff check $(SOURCES)
+	$(BINDIR)/ruff check $(SOURCES)
 
 .PHONY: typecheck
 typecheck: ## Run mypy static type checker
-	$(VENV)/bin/mypy $(SOURCES)
+	$(BINDIR)/mypy $(SOURCES)
 
 .PHONY: check
 check: lint typecheck ## Run all static checks (lint + typecheck)
@@ -63,11 +72,11 @@ postgres: ## Start only PostgreSQL
 
 .PHONY: run-session-manager
 run-session-manager: ## Run the Session Manager from source (needs make postgres)
-	KIO1_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 		$(VENV)/bin/uvicorn services.session_manager.app:app --port 8001 --reload
+	KIO1_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 		$(BINDIR)/uvicorn services.session_manager.app:app --port 8001 --reload
 
 .PHONY: run-workflow-api
-run-workflow-api: ## Run the Workflow API from source (needs the Session Manager)
-	KIO1_SESSION_MANAGER_URL=http://localhost:8001 		$(VENV)/bin/uvicorn services.workflow_api.app:app --port 8000 --reload
+run-workflow-api: ## Run the Workflow API and console (needs the Session Manager)
+	KIO1_SESSION_MANAGER_URL=http://localhost:8001 		$(BINDIR)/uvicorn app:app --port 8000 --reload
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
@@ -81,19 +90,19 @@ example-console: ## Serve Use-Case 1 at http://127.0.0.1:8000/
 
 .PHONY: test
 test: ## Run test suite
-	$(VENV)/bin/pytest tests/ -v
+	$(BINDIR)/pytest tests/ -v
 
 .PHONY: test-cov
 test-cov: ## Run tests with coverage report
-	$(VENV)/bin/pytest tests/ -v --cov=. --cov-report=term-missing
+	$(BINDIR)/pytest tests/ -v --cov=. --cov-report=term-missing
 
 .PHONY: test-postgres
 test-postgres: ## Run the suite with the PostgreSQL repository tests enabled
-	KIO1_TEST_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 		$(VENV)/bin/pytest tests/ -v
+	KIO1_TEST_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 		$(BINDIR)/pytest tests/ -v
 
 .PHONY: test-live
 test-live: ## Run every test, including those needing PostgreSQL and NATS
-	KIO1_TEST_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 	KIO1_TEST_NATS_SERVERS=nats://localhost:4222 		$(VENV)/bin/pytest tests/ -v
+	KIO1_TEST_DATABASE_URL=postgresql://kio1:kio1@localhost:5432/kio1 	KIO1_TEST_NATS_SERVERS=nats://localhost:4222 		$(BINDIR)/pytest tests/ -v
 
 # ── Composite ────────────────────────────────────────────────────────────────
 

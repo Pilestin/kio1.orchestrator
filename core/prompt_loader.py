@@ -3,8 +3,10 @@ from pathlib import Path
 from dispatch.agent_registry import (
     KIND_CLI,
     KIND_HTTP,
+    KIND_MCP,
     AgentEndpoint,
     AgentRegistry,
+    McpToolSpec,
 )
 
 # Where the generated catalog is substituted into a prompt file. A prompt
@@ -15,6 +17,7 @@ CATALOG_PLACEHOLDER = "{{AGENT_CATALOG}}"
 _KIND_LABELS = {
     KIND_HTTP: "HTTP API",
     KIND_CLI: "local command",
+    KIND_MCP: "MCP server",
 }
 
 
@@ -35,6 +38,47 @@ def _describe(entry: AgentEndpoint) -> str:
         return f"Handles {', '.join(sorted(entry.capabilities))}."
 
     return "No description configured."
+
+
+def _describe_mcp_tools(entry: AgentEndpoint) -> list[str]:
+    """Return the catalog lines for an MCP server's discovered tools.
+
+    Args:
+        entry: The registry entry to describe.
+
+    Returns:
+        One indented line per tool, naming it, what it does, and the arguments
+        it takes. Empty for anything that is not an MCP server, and for one
+        that has not been asked yet — a server nobody has listed has nothing
+        honest to advertise.
+    """
+    spec = entry.tool
+
+    if entry.kind != KIND_MCP or not isinstance(spec, McpToolSpec):
+        return []
+
+    lines: list[str] = []
+
+    for tool in spec.discovered:
+        parts = [f"  - `{tool.name}`"]
+
+        if tool.description:
+            # One line each: a catalog listing five servers of twenty tools
+            # is already long, and the planner needs to tell them apart
+            # rather than read an essay on each.
+            summary = " ".join(tool.description.split())
+            parts.append(
+                f" — {summary[:160]}…" if len(summary) > 160 else f" — {summary}"
+            )
+
+        arguments = tool.summarize_arguments()
+
+        if arguments:
+            parts.append(f" · arguments: {arguments}")
+
+        lines.append("".join(parts))
+
+    return lines
 
 
 def render_catalog(registry: AgentRegistry) -> str:
@@ -68,6 +112,16 @@ def render_catalog(registry: AgentRegistry) -> str:
         label = _KIND_LABELS.get(entry.kind)
         suffix = f" _({label})_" if label else ""
         lines.append(f"- **{entry.agent_id}**{suffix} — {_describe(entry)}")
+
+        tools = _describe_mcp_tools(entry)
+
+        if tools:
+            # An MCP server's tools are listed one per line with what each
+            # takes, because that is the whole point of the kind: the planner
+            # can fill in real arguments instead of writing a sentence and
+            # hoping. A bare capability list would throw the schemas away.
+            lines.extend(tools)
+            continue
 
         if entry.capabilities:
             capabilities = ", ".join(f"`{name}`" for name in sorted(entry.capabilities))
