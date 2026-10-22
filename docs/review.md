@@ -43,6 +43,28 @@ without a restart. A key pasted there is tried before it is saved to `.env`.
 Each round costs a model call to plan and one to review. With a local model
 on a CPU that is 30–90 seconds each, so the default allows one follow-up.
 
+## Follow-up requests
+
+A request sent with a `conversation_id` continues that conversation. The
+planner and the reviewer then read, before the request, the last
+three runs of the conversation — each request, its answer (cut at 1 500
+characters), and what the person clarified — at most 4 000 characters,
+oldest dropped first:
+
+```
+Earlier in this conversation (context only):
+- Request: This crashes on an empty list: def average(values): ...
+  Answer: len([]) is 0, so it divides by zero [CodeReviewer]
+
+Request now: Now add type hints.
+```
+
+The request comes last on purpose. With it first and the context after,
+`ministral-3:3b` planned the previous request again; with it last, it planned
+the new one and copied the function into the task. The limits are
+`CONTEXT_TURNS` and `CONTEXT_MAX_CHARS` in `services/workflow_api/runner.py`.
+If the conversation cannot be read, the request runs without it.
+
 ## What can go wrong, and what happens
 
 | Situation | Result |

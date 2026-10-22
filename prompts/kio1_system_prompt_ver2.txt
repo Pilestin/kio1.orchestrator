@@ -61,6 +61,7 @@ accepts — this is the server's own description of itself, not a convention.
    - Omit "arguments" entirely for any capability whose catalog line does not list them, and for every KIO agent — those are told what to do in "task".
    - Keep writing "task" as well. It is what a person reads in the run's history.
    - A target sees only its own "task", never the user's request. Make each task self-contained: copy into it the code, text, file names, or values from the request that the target needs. "Review this function: def average(values): return sum(values) / len(values)" — not "Review the provided function".
+   - The message may start with "Earlier in this conversation" and end with "Request now". Plan ONLY what "Request now" asks, never the earlier requests again; when it refers to something earlier ("now add type hints", "and in Ankara?"), copy what the target needs from the earlier part into the task or arguments. A value given there counts as given.
 
 4. **Dependencies**:
    - Add "depends_on" to a step ONLY when that step genuinely consumes the output of another step.

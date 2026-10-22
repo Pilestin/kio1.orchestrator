@@ -78,6 +78,83 @@ class Clarifications:
         return f"{request_text}\n\nClarified with the user:\n{lines}"
 
 
+# How far back a follow-up request sees. Short on purpose: a small local
+# planner loses the request itself in a long context.
+CONTEXT_TURNS = 3
+CONTEXT_MAX_CHARS = 4_000
+_CONTEXT_ANSWER_CHARS = 1_500
+_CONTEXT_HEADING = "Earlier in this conversation (context only):"
+
+
+def conversation_context(
+    detail: dict[str, Any],
+    session_id: UUID,
+    *,
+    turns: int = CONTEXT_TURNS,
+    max_chars: int = CONTEXT_MAX_CHARS,
+) -> str:
+    """Summarise the runs before this one in its conversation.
+
+    Each earlier request with its answer and whatever the person clarified,
+    newest last. The oldest turns are dropped first when it runs long: the
+    turn just before is what "now add type hints" refers to.
+
+    Args:
+        detail: The conversation as `GET /conversations/{id}` returns it.
+        session_id: The run being started; it and anything after it are
+            left out.
+        turns: How many earlier runs to include at most.
+        max_chars: The most the summary may take.
+
+    Returns:
+        The summary, or an empty string when nothing came before.
+    """
+    earlier: list[dict[str, Any]] = []
+
+    for item in detail.get("sessions", []):
+        session = item.get("session", {})
+
+        if session.get("session_id") == str(session_id):
+            break
+
+        earlier.append(session)
+
+    entries = [_context_entry(session) for session in earlier[-turns:]]
+
+    while entries and len(_joined(entries)) > max_chars:
+        if len(entries) == 1:
+            entries[0] = entries[0][: max_chars - len(_CONTEXT_HEADING) - 2] + "…"
+            break
+
+        entries.pop(0)
+
+    return _joined(entries) if entries else ""
+
+
+def _context_entry(session: dict[str, Any]) -> str:
+    """One earlier run, as the planner reads it."""
+    answer = " ".join(str(session.get("answer") or "").split())
+
+    if len(answer) > _CONTEXT_ANSWER_CHARS:
+        answer = answer[:_CONTEXT_ANSWER_CHARS] + "…"
+
+    lines = [
+        f"- Request: {session.get('request_text', '')}",
+        f"  Answer: {answer or '(no answer)'}",
+    ]
+    lines.extend(
+        f"  Clarified: {pair.get('question')} → {pair.get('answer')}"
+        for pair in session.get("clarifications") or []
+    )
+
+    return "\n".join(lines)
+
+
+def _joined(entries: list[str]) -> str:
+    """The entries under their heading."""
+    return "\n".join([_CONTEXT_HEADING, *entries])
+
+
 def guarded_targets(
     plan: WorkflowPlan, registry: AgentRegistry, failover: FailoverConfig
 ) -> list[str]:
@@ -173,7 +250,7 @@ class WorkflowRunner:
     # without asking — the terminal application and most tests.
     approvals: ApprovalDesk | None = None
 
-    def run(self, session_id: UUID, request_text: str) -> None:
+    def run(self, session_id: UUID, request_text: str, earlier: str = "") -> None:
         """Execute one workflow to completion, recording progress as it goes.
 
         Failures are recorded against the session and swallowed: this runs
@@ -183,6 +260,8 @@ class WorkflowRunner:
         Args:
             session_id: The session opened for this run.
             request_text: The user request to plan and execute.
+            earlier: What came before it in its conversation, from
+                `conversation_context`; empty for a first request.
 
         Returns:
             None.
@@ -198,20 +277,28 @@ class WorkflowRunner:
             observing(self.events, str(session_id)),
         ):
             try:
-                self._run(session_id, request_text)
+                self._run(session_id, request_text, earlier)
             finally:
                 # Always the last event, whatever happened, so a reader knows
                 # the stream is over and stops waiting for more.
                 emit(FINISHED)
 
-    def _run(self, session_id: UUID, request_text: str) -> None:
+    def _run(self, session_id: UUID, request_text: str, earlier: str) -> None:
         """Plan, dispatch, review, and answer one request. See `run`.
 
         Rounds: a plan is carried out, the reviewer reads the results, and
         either answers or names what is missing; then only that is planned
         and carried out, until the reviewer answers or the rounds run out.
         With review off this is the single plan-and-dispatch it always was.
+
+        The conversation so far goes into the request, so the planner and
+        the reviewer both read it — before the request, not after: a small
+        model plans whatever it read last, and with the context last that
+        was the previous request.
         """
+        if earlier:
+            request_text = f"{earlier}\n\nRequest now: {request_text}"
+
         self.recorder.update_session(session_id, status="running")
         emit("status", status="running")
 

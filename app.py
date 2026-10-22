@@ -68,7 +68,11 @@ from services.session_manager.storage import (
     EmbeddedSessionClient,
     open_repository,
 )
-from services.workflow_api.runner import WorkflowRunner, build_runner
+from services.workflow_api.runner import (
+    WorkflowRunner,
+    build_runner,
+    conversation_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -462,8 +466,21 @@ def run_workflow(
             detail="Session Manager is unavailable, so the request was not accepted",
         ) from error
 
+    earlier = ""
+
+    if body.conversation_id is not None:
+        # Context is a help, not a condition: a run that cannot read its
+        # conversation still runs, on the request alone.
+        try:
+            earlier = conversation_context(
+                state.session_client.get_conversation(body.conversation_id),
+                session_id,
+            )
+        except SessionClientError as error:
+            logger.warning("Could not read the conversation so far: %s", error)
+
     state.events.publish(str(session_id), "status", status="pending")
-    background_tasks.add_task(state.runner.run, session_id, body.request)
+    background_tasks.add_task(state.runner.run, session_id, body.request, earlier)
 
     logger.info("Workflow accepted: session_id=%s", session_id)
 
