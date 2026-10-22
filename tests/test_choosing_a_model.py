@@ -310,6 +310,97 @@ def test_a_provider_the_deployment_does_not_allow_is_refused(
     assert response.status_code == 400
 
 
+def test_the_answer_model_can_be_another_provider(
+    switching: tuple[TestClient, _State, Cloud, Path],
+) -> None:
+    client, state, _, dotenv = switching
+
+    response = client.put(
+        "/settings",
+        json={
+            "review_provider": "cloud",
+            "review_model": "cloud/large",
+            "review_api_key": "good-key",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["review"]["provider"] == "cloud"
+    # The planner is untouched.
+    assert state.runner.config.provider == "ollama"
+    assert state.runner.config.orchestration.review_model == "cloud/large"
+    saved = json.loads(Path(os.environ["KIO1_CONFIG_PATH"]).read_text("utf-8"))
+    assert saved["orchestration"]["review_provider"] == "cloud"
+    assert parse_dotenv(dotenv.read_text(encoding="utf-8")) == {
+        Cloud.API_KEY_ENV: "good-key"
+    }
+
+
+def test_saving_the_answer_model_keeps_the_other_orchestration_settings(
+    switching: tuple[TestClient, _State, Cloud, Path],
+) -> None:
+    client, _, _, _ = switching
+    path = Path(os.environ["KIO1_CONFIG_PATH"])
+    document = json.loads(path.read_text("utf-8"))
+    document["orchestration"] = {"review": True, "max_rounds": 3}
+    path.write_text(json.dumps(document), encoding="utf-8")
+    os.environ[Cloud.API_KEY_ENV] = "good-key"
+
+    client.put(
+        "/settings", json={"review_provider": "cloud", "review_model": "cloud/small"}
+    )
+
+    saved = json.loads(path.read_text("utf-8"))["orchestration"]
+    assert saved == {
+        "review": True,
+        "max_rounds": 3,
+        "review_provider": "cloud",
+        "review_model": "cloud/small",
+    }
+
+
+def test_the_answer_model_can_go_back_to_the_planning_model(
+    switching: tuple[TestClient, _State, Cloud, Path],
+) -> None:
+    client, state, _, _ = switching
+    os.environ[Cloud.API_KEY_ENV] = "good-key"
+    client.put(
+        "/settings", json={"review_provider": "cloud", "review_model": "cloud/large"}
+    )
+
+    response = client.put(
+        "/settings", json={"review_provider": "", "review_model": "anything"}
+    )
+
+    assert response.json()["review"] == {"enabled": True, "provider": "", "model": ""}
+    assert not state.runner.config.orchestration.separate_reviewer
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        ({"review_provider": "cloud"}, "Choose a cloud model"),
+        (
+            {"review_provider": "cloud", "review_model": "x", "review_api_key": "bad"},
+            "cannot be used yet",
+        ),
+        ({"review_provider": "openai", "review_model": "x"}, "Invalid provider"),
+    ],
+)
+def test_an_answer_model_that_cannot_work_changes_nothing(
+    switching: tuple[TestClient, _State, Cloud, Path],
+    body: dict[str, Any],
+    message: str,
+) -> None:
+    client, state, _, _ = switching
+
+    response = client.put("/settings", json=body)
+
+    assert response.status_code == 400
+    assert message in response.json()["detail"]
+    assert not state.runner.config.orchestration.separate_reviewer
+
+
 def test_the_settings_list_every_allowed_provider(
     switching: tuple[TestClient, _State, Cloud, Path],
 ) -> None:

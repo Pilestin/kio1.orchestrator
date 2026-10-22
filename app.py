@@ -675,6 +675,11 @@ class SettingsRequest(BaseModel):
     request_timeout: float | None = None
     workspace_path: str | None = None
     workspace_entry_point: str | None = None
+    # The model that reviews and answers. An empty provider means "the same
+    # as planning", and clears the model with it.
+    review_provider: str | None = None
+    review_model: str | None = None
+    review_api_key: str | None = Field(default=None, max_length=512)
 
 
 def _models_for(provider: Any, config: Config) -> tuple[list[str], str]:
@@ -737,6 +742,11 @@ def _settings_view(state: _State) -> dict[str, Any]:
         "model": config.model,
         "models": models,
         "models_error": models_error,
+        "review": {
+            "enabled": config.orchestration.review,
+            "provider": config.orchestration.review_provider,
+            "model": config.orchestration.review_model,
+        },
         "temperature": config.temperature,
         "request_timeout": config.request_timeout,
         "prompt_path": config.prompt_path,
@@ -849,6 +859,85 @@ def _switch_provider(
             detail=f"Choose a {name} model to go with the provider.",
         )
 
+    return name, module, _start_client(config, module, name, model or config.model, key)
+
+
+def _switch_reviewer(state: _State, body: SettingsRequest) -> dict[str, str] | None:
+    """Validate a change of the reviewing model, without applying it.
+
+    Args:
+        state: The live service.
+        body: The requested change.
+
+    Returns:
+        The `orchestration` fields to save, or None when the reviewer is not
+        changing.
+
+    Raises:
+        HTTPException: 400 when the provider is not allowed, has no model, or
+            cannot be started with the key given.
+    """
+    if (
+        body.review_provider is None
+        and body.review_model is None
+        and not body.review_api_key
+    ):
+        return None
+
+    config = state.runner.config
+    settings = config.orchestration
+    provider = (
+        body.review_provider
+        if body.review_provider is not None
+        else settings.review_provider
+    ).strip()
+    model = (
+        body.review_model if body.review_model is not None else settings.review_model
+    ).strip()
+
+    if not provider:
+        return {"review_provider": "", "review_model": ""}
+
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Choose a {provider} model to answer with.",
+        )
+
+    try:
+        module = load_provider(provider, config.allowed_providers)
+    except (ValueError, TypeError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    # Started here only to prove it can be; the runner starts its own on the
+    # next review. A provider shared with the planner is already running.
+    if provider != config.provider or body.review_api_key:
+        _start_client(
+            config, module, provider, model, (body.review_api_key or "").strip()
+        )
+
+    return {"review_provider": provider, "review_model": model}
+
+
+def _start_client(config: Config, module: Any, name: str, model: str, key: str) -> Any:
+    """Create a provider's client, trying a new key before keeping it.
+
+    Args:
+        config: The configuration to start from.
+        module: The provider module.
+        name: The provider's name.
+        model: The model the client is for.
+        key: A new API key to try, or empty to use the one already set.
+
+    Returns:
+        The client.
+
+    Raises:
+        HTTPException: 400 when the client cannot be created, or the key
+            works but could not be saved.
+    """
     declared = getattr(module, "API_KEY_ENV", None)
     # The variable a new key goes into, or None when no key is being tried.
     key_env: str | None = declared if key and isinstance(declared, str) else None
@@ -860,9 +949,7 @@ def _switch_provider(
         os.environ[key_env] = key
 
     try:
-        client = module.create_client(
-            replace(config, provider=name, model=model or config.model)
-        )
+        client = module.create_client(replace(config, provider=name, model=model))
     except Exception as error:
         if key_env is not None:
             if previous_key is None:
@@ -885,7 +972,7 @@ def _switch_provider(
                 detail=f"The key works but could not be saved: {error}",
             ) from error
 
-    return name, module, client
+    return client
 
 
 @app.put("/settings")
@@ -958,6 +1045,11 @@ def put_settings(
     if workspace is not None:
         updates["dispatch"] = {"workspace": workspace}
 
+    reviewer = _switch_reviewer(state, body)
+
+    if reviewer is not None:
+        updates["orchestration"] = reviewer
+
     if updates:
         try:
             save_settings(updates)
@@ -988,6 +1080,9 @@ def put_settings(
         # reads as "the new model is broken" rather than "it was cold".
         background.add_task(_preload_model, state)
 
+    if updates.get("orchestration", {}).get("review_provider"):
+        background.add_task(_preload_reviewer, state)
+
     return _settings_view(state)
 
 
@@ -1010,6 +1105,18 @@ def _preload_model(state: _State) -> None:
         logger.warning(
             "Could not preload %s; the first run will load it instead",
             config.model,
+            exc_info=True,
+        )
+
+
+def _preload_reviewer(state: _State) -> None:
+    """Warm the reviewing model, for the same reason as the planning one."""
+    try:
+        reviewer = state.runner._reviewer()
+        reviewer.provider.preload(reviewer.config, reviewer.client)
+    except Exception:
+        logger.warning(
+            "Could not preload the reviewing model; the first review will load it",
             exc_info=True,
         )
 
@@ -1061,6 +1168,19 @@ def _apply_settings(state: _State, updates: dict[str, Any]) -> None:
 
     if "request_timeout" in updates:
         config.request_timeout = updates["request_timeout"]
+
+    reviewer = updates.get("orchestration")
+
+    if reviewer is not None:
+        config.orchestration = replace(config.orchestration, **reviewer)
+        logger.info(
+            "Reviewing model is now %s",
+            (
+                f"{reviewer['review_provider']}/{reviewer['review_model']}"
+                if reviewer["review_provider"]
+                else "the planning model"
+            ),
+        )
 
     workspace = updates.get("dispatch", {}).get("workspace")
 

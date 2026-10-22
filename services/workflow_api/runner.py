@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -37,9 +37,25 @@ from dispatch.workflow_executor import (
     execute_workflow,
 )
 from dispatch.workflow_planner import WorkflowPlan, parse_plan
-from providers.provider_client import supports_streaming
+from providers.provider_client import load_provider, supports_streaming
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ModelRole:
+    """A model to ask, and what asking it takes.
+
+    Attributes:
+        config: The configuration to send with, carrying the provider and
+            model names this role uses.
+        provider: The provider module.
+        client: The provider's client.
+    """
+
+    config: Config
+    provider: Any
+    client: Any
 
 
 class SessionRecorder(Protocol):
@@ -82,6 +98,12 @@ class WorkflowRunner:
     # turns the review off whatever the configuration says: there is no
     # prompt to review with.
     review_template: str = ""
+    # The reviewer's own provider, its client, and which provider they are
+    # for — started on first use when `orchestration` names a provider other
+    # than the planner's. None until then.
+    review_provider: Any = None
+    review_client: Any = None
+    review_provider_name: str = ""
 
     def run(self, session_id: UUID, request_text: str) -> None:
         """Execute one workflow to completion, recording progress as it goes.
@@ -318,7 +340,14 @@ class WorkflowRunner:
         Returns:
             The review.
         """
-        emit("review_started", round=rounds[-1].number, final=final)
+        named = self._review_config()
+        emit(
+            "review_started",
+            round=rounds[-1].number,
+            final=final,
+            provider=named.provider,
+            model=named.model,
+        )
 
         try:
             content = self._ask_model(
@@ -326,6 +355,7 @@ class WorkflowRunner:
                 fill_catalog(self.review_template, registry),
                 review_request(request_text, rounds, final=final),
                 turn=len(rounds) * 2,
+                role=self._reviewer(),
             )
             review = parse_review(parse_response(content), final=final)
         except Exception as error:  # noqa: BLE001 - any failure falls back to an answer
@@ -379,14 +409,65 @@ class WorkflowRunner:
             streaming=observed() and supports_streaming(self.provider),
         )
 
-        content = self._ask_model(session_id, system_prompt, request_text, turn=1)
+        content = self._ask_model(
+            session_id, system_prompt, request_text, turn=1, role=self._planner()
+        )
 
         return parse_plan(parse_response(content))
 
+    def _planner(self) -> ModelRole:
+        """Return the model that plans."""
+        return ModelRole(self.config, self.provider, self.provider_client)
+
+    def _review_config(self) -> Config:
+        """Return the configuration reviews are sent with."""
+        settings = self.config.orchestration
+
+        if not settings.separate_reviewer:
+            return self.config
+
+        return replace(
+            self.config,
+            provider=settings.review_provider or self.config.provider,
+            model=settings.review_model or self.config.model,
+        )
+
+    def _reviewer(self) -> ModelRole:
+        """Return the model that reviews and answers.
+
+        The planner's unless `orchestration` names another. Read per review,
+        not at startup, so a change made on the Settings tab — to either
+        model — reaches the next run. Another model on the planner's provider
+        shares the planner's client; another provider's client is started on
+        first use and kept until the reviewer's provider changes.
+
+        Raises:
+            Exception: If the reviewer's provider cannot be started; the
+                review then falls back to an answer from the results.
+        """
+        config = self._review_config()
+
+        if config.provider == self.config.provider:
+            return ModelRole(config, self.provider, self.provider_client)
+
+        if self.review_provider is None or self.review_provider_name != config.provider:
+            module = load_provider(config.provider, self.config.allowed_providers)
+            self.review_client = module.create_client(config)
+            self.review_provider = module
+            self.review_provider_name = config.provider
+
+        return ModelRole(config, self.review_provider, self.review_client)
+
     def _ask_model(
-        self, session_id: UUID, system_prompt: str, message: str, *, turn: int
+        self,
+        session_id: UUID,
+        system_prompt: str,
+        message: str,
+        *,
+        turn: int,
+        role: ModelRole,
     ) -> str:
-        """Send one request to the model and return its text.
+        """Send one request to a model and return its text.
 
         Streamed only when someone can watch: the answer is identical either
         way, and a provider that cannot stream still answers.
@@ -396,29 +477,30 @@ class WorkflowRunner:
             system_prompt: The system prompt.
             message: The user message.
             turn: Which model call of the run this is, for tracing.
+            role: The model to ask, with its provider and client.
 
         Returns:
             The model's answer.
         """
         messages = [{"role": "user", "content": message}]
-        streaming = observed() and supports_streaming(self.provider)
+        streaming = observed() and supports_streaming(role.provider)
         relay = TokenRelay()
 
         with trace_gen_ai_request(
-            provider=self.config.provider,
-            model=self.config.model,
+            provider=role.config.provider,
+            model=role.config.model,
             session_id=str(session_id),
             turn_number=turn,
             message_count=len(messages) + 1,
-            max_output_tokens=self.config.max_output_tokens,
-            temperature=self.config.temperature,
+            max_output_tokens=role.config.max_output_tokens,
+            temperature=role.config.temperature,
         ):
             extra = {"on_token": relay} if streaming else {}
 
             try:
-                response = self.provider.send_request(
-                    config=self.config,
-                    client=self.provider_client,
+                response = role.provider.send_request(
+                    config=role.config,
+                    client=role.client,
                     system_prompt=system_prompt,
                     messages=messages,
                     **extra,
@@ -426,7 +508,7 @@ class WorkflowRunner:
             finally:
                 relay.flush()
 
-        content = self.provider.extract_content(response)
+        content = role.provider.extract_content(response)
         emit("model_answer", text=content)
 
         return content

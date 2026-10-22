@@ -7,6 +7,7 @@ does wrong in a review can fail a run that has already done its work.
 """
 
 import json
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -494,6 +495,116 @@ def test_with_review_off_a_run_is_one_plan_and_no_answer() -> None:
     assert model.review_messages == []
     assert recorder.last("answer") is None
     assert recorder.last("status") == "completed"
+
+
+def test_reviews_can_use_another_model_on_the_same_provider() -> None:
+    seen: list[str] = []
+
+    class Recording(Model):
+        def send_request(
+            self, config: Config, client: Any, system_prompt: str, messages: Any
+        ) -> Any:
+            seen.append(f"{system_prompt.split()[0]}:{config.model}")
+            return super().send_request(config, client, system_prompt, messages)
+
+    model = Recording(
+        plans=[plan(("s1", "Python", "version"))],
+        reviews=[{"decision": "done", "answer": "ok"}],
+    )
+    runner, _, bus = make_runner(model)
+    runner.config.orchestration = OrchestrationConfig(review_model="big-model")
+    session_id = uuid4()
+
+    runner.run(session_id, "Which python?")
+
+    assert seen == ["PLAN:m", "REVIEW:big-model"]
+    started = next(e for e in bus.read(str(session_id)) if e.kind == "review_started")
+    assert started.data["model"] == "big-model"
+
+
+def test_reviews_can_use_another_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    import services.workflow_api.runner as runner_module
+
+    planner = Model(plans=[plan(("s1", "Python", "version"))] * 2, reviews=[])
+    reviewer = Model(
+        plans=[],
+        reviews=[
+            {"decision": "done", "answer": "From the cloud."},
+            {"decision": "done", "answer": "Again from the cloud."},
+        ],
+    )
+    started: list[str] = []
+
+    class CloudModule:
+        @staticmethod
+        def create_client(config: Config) -> str:
+            started.append(config.model)
+            return "cloud-client"
+
+        send_request = reviewer.send_request
+        extract_content = staticmethod(Model.extract_content)
+
+    monkeypatch.setattr(
+        runner_module, "load_provider", lambda name, allowed: CloudModule
+    )
+
+    runner, recorder, _ = make_runner(planner)
+    runner.config.allowed_providers = frozenset({"fake", "cloud"})
+    runner.config.orchestration = OrchestrationConfig(
+        review_provider="cloud", review_model="cloud/large"
+    )
+
+    runner.run(uuid4(), "Which python?")
+    runner.run(uuid4(), "Again")  # the second review reuses the client
+
+    assert planner.review_messages == []
+    assert len(reviewer.review_messages) == 2
+    assert recorder.last("answer") == "Again from the cloud."
+    assert started == ["cloud/large"]  # one client, reused by the second run
+
+
+def test_a_reviewer_that_cannot_start_still_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import services.workflow_api.runner as runner_module
+
+    def refuse(name: str, allowed: frozenset[str]) -> Any:
+        raise ValueError("no such provider")
+
+    monkeypatch.setattr(runner_module, "load_provider", refuse)
+    model = Model(plans=[plan(("s1", "Python", "version"))], reviews=[])
+    runner, recorder, _ = make_runner(model)
+    runner.config.orchestration = OrchestrationConfig(
+        review_provider="cloud", review_model="cloud/large"
+    )
+
+    runner.run(uuid4(), "Which python?")
+
+    assert recorder.last("answer").startswith("Results:")
+    assert recorder.last("status") == "completed"
+
+
+@pytest.mark.parametrize(
+    "block, message",
+    [
+        ({"review_provider": "openrouter"}, "review_model is required"),
+        (
+            {"review_provider": "elsewhere", "review_model": "x"},
+            "not in allowed_providers",
+        ),
+        ({"review_model": 3}, "must be a string"),
+    ],
+)
+def test_a_reviewer_that_cannot_work_is_refused_at_load(
+    tmp_path: Any, block: dict[str, Any], message: str
+) -> None:
+    document = json.loads(Path("config.example.json").read_text(encoding="utf-8"))
+    document["orchestration"] = block
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        load_config(str(path))
 
 
 def test_a_failed_first_plan_fails_the_run_without_a_review() -> None:

@@ -34,6 +34,11 @@ console; `GET /workflow/{session_id}` returns it as `session.answer`.
 | `review` | `true` | Off runs one plan and stops, with no answer — the behaviour before reviews existed. |
 | `max_rounds` | `2` | Plans per run, the first included, from 1 to 10. The last review is told it must answer. |
 | `review_prompt_path` | `prompts/kio1_review_prompt.txt` | The reviewer's system prompt. If it cannot be read, runs are not reviewed. |
+| `review_provider` | `""` | The provider that reviews and answers. Empty uses the planning provider. |
+| `review_model` | `""` | The model that reviews and answers. Empty uses the planning model; required with `review_provider`. |
+
+Both can be set on the console's Settings tab, under **Answer model**,
+without a restart. A key pasted there is tried before it is saved to `.env`.
 
 Each round costs a model call to plan and one to review. With a local model
 on a CPU that is 30–90 seconds each, so the default allows one follow-up.
@@ -53,11 +58,20 @@ a failure that a follow-up put right does not fail the run.
 
 ## Model quality
 
-The loop is only as good as the model reading the results. In a live test,
-`ministral-3:3b` (local, CPU) answered in the right language and cited its
-sources, but picked older commits as "the latest" and stated a count it had
-not counted. A larger model — locally, or through OpenRouter on the Settings
-tab — reads results far more reliably.
+The loop is only as good as the model reading the results, and the two jobs
+need different things: planning is a structured, repeated task a small model
+manages; reading results and answering is where a larger one pays off. So
+the answer model can differ from the planning model.
+
+Measured on one request ("show the latest commits and the Python version"),
+both local, CPU only:
+
+| Planning | Answering | Answer | Time |
+|----------|-----------|--------|------|
+| `ministral-3:3b` | same | Older commits given as "the latest"; a count it had not counted | ~46 s |
+| `ministral-3:3b` | `qwen3.5:4b` | The three latest commits, verbatim and cited; the right Python version | ~101 s |
+
+A hosted model through OpenRouter answers better still, in seconds.
 
 ---
 

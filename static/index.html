@@ -315,6 +315,30 @@
     </section>
 
     <section class="card">
+      <h2 class="card-title">Answer model</h2>
+      <div class="grid-2">
+        <label class="field">
+          Provider
+          <select id="review-provider"></select>
+        </label>
+
+        <label class="field" id="review-model-field">
+          Model
+          <input type="text" id="review-model" list="review-model-list"
+                 class="mono" spellcheck="false" autocomplete="off"
+                 placeholder="type to search">
+          <datalist id="review-model-list"></datalist>
+          <span class="hint" id="review-model-note"></span>
+        </label>
+
+        <label class="field hidden" id="review-key-field">
+          <span id="review-key-label">API key</span>
+          <input type="password" id="review-key" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
       <h2 class="card-title">Workspace</h2>
       <p class="hint">The code the agents analyse. It travels in every message,
         and <strong>it is resolved by the agent, not by KIO1</strong>: an agent

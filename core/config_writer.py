@@ -103,6 +103,10 @@ def writing_enabled() -> bool:
     }
 
 
+# Sections a settings update merges into rather than replaces.
+_MERGED_SECTIONS = frozenset({"dispatch", "orchestration"})
+
+
 def save_settings(updates: dict[str, Any]) -> Path:
     """Change named settings in the configuration file, leaving the rest alone.
 
@@ -111,12 +115,14 @@ def save_settings(updates: dict[str, Any]) -> Path:
     are the settings a demo gets wrong — so they are worth being able to change
     from the page that shows the result.
 
-    Only the keys given are touched, and `dispatch` is merged rather than
-    replaced, so saving a workspace cannot drop the agents sitting beside it.
+    Only the keys given are touched, and `dispatch` and `orchestration` are
+    merged rather than replaced, so saving a workspace cannot drop the agents
+    sitting beside it, nor saving the review model the round limit.
 
     Args:
-        updates: Values to write. A `dispatch` entry is merged one level deep;
-            every other key replaces its top-level value.
+        updates: Values to write. `dispatch` and `orchestration` entries are
+            merged one level deep; every other key replaces its top-level
+            value.
 
     Returns:
         The path that was written.
@@ -136,22 +142,22 @@ def save_settings(updates: dict[str, Any]) -> Path:
     document = _read_document()
 
     for key, value in updates.items():
-        if key != "dispatch":
+        if key not in _MERGED_SECTIONS:
             document[key] = value
             continue
 
-        dispatch = document.setdefault("dispatch", {})
+        section = document.setdefault(key, {})
 
-        if not isinstance(dispatch, dict):
+        if not isinstance(section, dict):
             raise ConfigWriteError(
-                f"{path} has a 'dispatch' that is not an object, so its "
+                f"{path} has a '{key}' that is not an object, so its "
                 "settings cannot be changed."
             )
 
         if not isinstance(value, dict):
-            raise ConfigWriteError("A 'dispatch' update must be an object.")
+            raise ConfigWriteError(f"A '{key}' update must be an object.")
 
-        dispatch.update(value)
+        section.update(value)
 
     _write_atomically(path, document)
     logger.info("Saved settings to %s: %s", path, sorted(updates))

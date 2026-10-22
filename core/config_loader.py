@@ -304,11 +304,25 @@ class OrchestrationConfig:
             review that finds work missing plans again only while rounds are
             left; the last review always answers.
         review_prompt_path: The reviewer's system prompt.
+        review_provider: The provider that reviews and answers. Empty uses
+            the planning provider. Planning is a structured, repeated task a
+            small local model manages; reading results and writing an answer
+            a person relies on is where a larger model pays for itself.
+        review_model: The model that reviews and answers. Empty uses the
+            planning model; required when `review_provider` names another
+            provider.
     """
 
     review: bool = True
     max_rounds: int = 2
     review_prompt_path: str = "prompts/kio1_review_prompt.txt"
+    review_provider: str = ""
+    review_model: str = ""
+
+    @property
+    def separate_reviewer(self) -> bool:
+        """Report whether reviews use a model other than the planner's."""
+        return bool(self.review_provider or self.review_model)
 
 
 def _load_orchestration_config(data: dict[str, Any]) -> OrchestrationConfig:
@@ -342,8 +356,35 @@ def _load_orchestration_config(data: dict[str, Any]) -> OrchestrationConfig:
     if not isinstance(prompt_path, str) or not prompt_path.strip():
         raise ValueError("orchestration.review_prompt_path must be a non-empty string.")
 
+    review_provider = block.get("review_provider", "")
+    review_model = block.get("review_model", "")
+
+    for name, value in (
+        ("review_provider", review_provider),
+        ("review_model", review_model),
+    ):
+        if not isinstance(value, str):
+            raise ValueError(f"orchestration.{name} must be a string.")
+
+    allowed = data.get("allowed_providers", [])
+
+    if review_provider.strip() and review_provider.strip() not in allowed:
+        raise ValueError(
+            f"orchestration.review_provider {review_provider!r} is not in allowed_providers."
+        )
+
+    if review_provider.strip() and not review_model.strip():
+        raise ValueError(
+            "orchestration.review_model is required when review_provider is set: "
+            "model names differ between providers."
+        )
+
     return OrchestrationConfig(
-        review=review, max_rounds=max_rounds, review_prompt_path=prompt_path.strip()
+        review=review,
+        max_rounds=max_rounds,
+        review_prompt_path=prompt_path.strip(),
+        review_provider=review_provider.strip(),
+        review_model=review_model.strip(),
     )
 
 

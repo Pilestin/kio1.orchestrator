@@ -823,7 +823,7 @@ function onLiveEvent(event) {
     case "review_started":
       live.phase = "review";
       appendText("live-model", "\n\n— review —\n");
-      setLiveState("warn", "reviewing", "");
+      setLiveState("warn", "reviewing", data.provider ? data.provider + " · " + data.model : "");
       startReadingTimer(data.time * 1000);
       break;
 
@@ -1128,6 +1128,60 @@ $("provider-cards").addEventListener("click", function (event) {
   select.dispatchEvent(new Event("change", { bubbles: true }));
 });
 
+// ── the answer model ───────────────────────────────────────────────────────
+
+/** Show the key field only when the chosen provider still needs a key. */
+function renderReviewNeeds(name) {
+  const info = name ? providerInfo(name) : null;
+  const needsKey = Boolean(info && info.key_env && !info.key_set);
+
+  $("review-key-field").classList.toggle("hidden", !needsKey);
+  $("review-model-field").classList.toggle("hidden", !name);
+  if (needsKey) $("review-key-label").textContent = "API key (" + info.key_env + ")";
+}
+
+function renderReview(settings) {
+  const review = settings.review || {};
+
+  setRows($("review-provider"),
+    '<option value="">Same as planning</option>'
+    + (settings.providers || []).filter(function (info) { return info.available; })
+      .map(function (info) {
+        return '<option value="' + esc(info.name) + '">'
+          + esc(String(info.label).split(" — ")[0]) + "</option>";
+      }).join(""));
+
+  $("review-provider").value = review.provider || "";
+  $("review-model").value = review.model || "";
+  $("review-key").value = "";
+  renderReviewNeeds(review.provider || "");
+
+  if (review.provider) loadReviewModels(review.provider);
+}
+
+async function loadReviewModels(name) {
+  try {
+    const data = await api("/settings/models?provider=" + encodeURIComponent(name));
+    setRows($("review-model-list"), (data.models || []).map(function (model) {
+      return '<option value="' + esc(model) + '"></option>';
+    }).join(""));
+    $("review-model-note").textContent = data.models_error
+      || (data.models.length > 1 ? data.models.length + " available" : "");
+  } catch (error) {
+    $("review-model-note").textContent = error.message;
+  }
+}
+
+$("review-provider").addEventListener("change", function () {
+  const name = $("review-provider").value;
+  const current = state.settings && state.settings.review
+    && state.settings.review.provider === name;
+
+  $("review-model").value = current ? state.settings.review.model : "";
+  renderReviewNeeds(name);
+  if (name) loadReviewModels(name);
+});
+
 function renderModels(settings) {
   renderProviders(settings);
   $("settings-model").value = settings.model;
@@ -1181,6 +1235,7 @@ async function loadSettings(options) {
     // the console fighting whoever is using it.
     if (state.tab === "settings" && !formIsFocused() && !state.settingsDirty) {
       renderModels(settings);
+      renderReview(settings);
       $("settings-temperature").value = settings.temperature;
       $("settings-timeout").value = settings.request_timeout;
       $("settings-workspace-path").value = settings.workspace.path;
@@ -1238,12 +1293,16 @@ async function saveSettings() {
         request_timeout: Number($("settings-timeout").value),
         workspace_path: $("settings-workspace-path").value,
         workspace_entry_point: $("settings-workspace-entry").value,
+        review_provider: $("review-provider").value,
+        review_model: $("review-model").value.trim(),
+        review_api_key: $("review-key").value.trim() || null,
       }),
     });
 
     state.settings = settings;
     state.settingsDirty = false;
     $("settings-key").value = "";
+    renderReview(settings);
     renderModels(settings);
     renderPlannerSummary(settings);
     result.textContent = "";

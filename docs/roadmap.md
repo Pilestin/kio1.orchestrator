@@ -85,7 +85,7 @@ KIO1'in "orkestratör" olarak asıl değeri burada.
 - [ ] **Plan önizleme ve onay**: plan önce kullanıcıya gösterilir; "Çalıştır / Düzenle / İptal". Ayarla otomatik onay açılabilir.
 - [x] **Değerlendirme turu** — 2026-10-22: tüm plan bittikten sonra model sonuçları okur ve `done` ya da `continue` der; `continue`'da yalnızca eksik iş yeniden planlanır (`orchestration.max_rounds`, varsayılan 2). Değerlendirme başarısız olursa çalışma bozulmaz, cevap sonuçlardan yazılır. *(Kalan: `retry_step`, `ask_user`, süre/token bütçeleri.)*
 - [x] **Son cevap** — 2026-10-22: isteğin dilinde, kaynak gösteren (`[Deneme]`) cevap; oturuma kaydedilir, konsolda en üstte gösterilir. Bkz. `docs/review.md`.
-- [ ] **Rol bazlı model seçimi önce gelmeli**: canlı denemede `ministral-3:3b` değerlendirmede zayıf kaldı (yanlış commit'leri "son" diye seçti, sayı uydurdu). Değerlendirmeyi daha güçlü bir modelle (ör. OpenRouter) yaptırmak en hızlı kalite kazancı.
+- [x] **Rol bazlı model seçimi (cevap modeli)** — 2026-10-22: değerlendirme ve cevap ayrı sağlayıcı/modelle yapılabiliyor (`orchestration.review_provider/review_model`, Settings → Answer model). Canlı ölçüm: ministral planlayıp qwen3.5:4b cevaplayınca en yeni commit'ler birebir doğru geldi, uydurma kalmadı (~101 sn, CPU).
 - [ ] **İnsan onayı gereken adımlar**: dosya yazan, komut çalıştıran ya da dağıtım yapan adımlar onay bekler (agent ya da capability bazında ayarlanır).
 - [ ] **Olay akışı**: her olay (plan, adım başladı/bitti, değerlendirme, soru) tek bir olay veriyolundan SSE ile konsola akar ve veritabanına yazılır. *(Veriyolu ve SSE hazır; kalan: değerlendirme/soru olayları ve kalıcılık.)*
 - [ ] **İptal**: çalışan bir istek durdurulabilir; MCP ve HTTP çağrılarına iptal iletilir.
