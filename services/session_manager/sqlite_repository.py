@@ -14,36 +14,55 @@ import json
 import logging
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 from services.session_manager.models import (
+    Conversation,
     LineageEdge,
     RecordStepRequest,
     Session,
     SessionDetail,
     Step,
     UpdateSessionRequest,
+    conversation_title,
+)
+from services.session_manager.repository import (
+    UnknownConversationError,
+    storable_changes,
 )
 
 logger = logging.getLogger(__name__)
 
 _ORDERED_EXECUTION_MODES = frozenset({"sequential", "mixed"})
 
+# Indexes on columns added after the first release are made in `_migrate`,
+# once an older table has those columns.
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS conversations (
+    conversation_id TEXT PRIMARY KEY,
+    title           TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS conversations_updated_idx ON conversations (updated_at);
+
 CREATE TABLE IF NOT EXISTS sessions (
-    session_id     TEXT PRIMARY KEY,
-    request_text   TEXT NOT NULL,
-    status         TEXT NOT NULL
+    session_id      TEXT PRIMARY KEY,
+    request_text    TEXT NOT NULL,
+    status          TEXT NOT NULL
         CHECK (status IN ('pending', 'running', 'completed', 'failed')),
-    workflow_id    TEXT,
-    execution_mode TEXT,
-    error          TEXT,
-    answer         TEXT,
-    created_at     TEXT NOT NULL,
-    updated_at     TEXT NOT NULL
+    workflow_id     TEXT,
+    execution_mode  TEXT,
+    error           TEXT,
+    answer          TEXT,
+    conversation_id TEXT REFERENCES conversations (conversation_id) ON DELETE CASCADE,
+    clarifications  TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS sessions_created_idx ON sessions (created_at);
@@ -91,13 +110,30 @@ CREATE INDEX IF NOT EXISTS lineage_session_idx ON lineage (session_id);
 
 _SESSION_COLUMNS = (
     "session_id, request_text, status, workflow_id, execution_mode, error, "
-    "answer, created_at, updated_at"
+    "answer, conversation_id, clarifications, created_at, updated_at"
 )
+
+_CONVERSATION_COLUMNS = "conversation_id, title, created_at, updated_at"
+
+
+_clock_lock = threading.Lock()
+_last_time = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def _now() -> str:
-    """Return the current time as sortable ISO-8601 text in UTC."""
-    return datetime.now(timezone.utc).isoformat()
+    """Return the current time as sortable ISO-8601 text in UTC.
+
+    Never the same value twice: the clock can read the same in two calls a
+    moment apart, and a conversation added to has only its `updated_at` to
+    move it up the list — its `rowid`, the tie-break, stays where it was.
+    """
+    global _last_time
+
+    with _clock_lock:
+        now = datetime.now(timezone.utc)
+        _last_time = max(now, _last_time + timedelta(microseconds=1))
+
+        return _last_time.isoformat()
 
 
 class SqliteSessionRepository:
@@ -136,14 +172,61 @@ class SqliteSessionRepository:
         `CREATE TABLE IF NOT EXISTS` leaves an existing table as it was, so
         a column added later has to be added here. SQLite has no
         `ADD COLUMN IF NOT EXISTS`; the table's columns are read instead.
+
+        Sessions recorded before conversations existed are each given one of
+        their own, so an upgraded history still shows every run.
         """
-        columns = {
-            row[1] for row in self._connection.execute("PRAGMA table_info(sessions)")
+        connection = self._connection
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
+        added = {
+            "answer": "answer TEXT",
+            "conversation_id": "conversation_id TEXT "
+            "REFERENCES conversations (conversation_id) ON DELETE CASCADE",
+            "clarifications": "clarifications TEXT",
         }
 
-        if "answer" not in columns:
-            self._connection.execute("ALTER TABLE sessions ADD COLUMN answer TEXT")
-            logger.info("Session storage migrated: sessions.answer added")
+        for column, definition in added.items():
+            if column not in columns:
+                connection.execute(f"ALTER TABLE sessions ADD COLUMN {definition}")
+                logger.info("Session storage migrated: sessions.%s added", column)
+
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS sessions_conversation_idx "
+            "ON sessions (conversation_id, created_at)"
+        )
+        orphans = connection.execute("""
+            SELECT session_id, request_text, created_at, updated_at
+            FROM sessions
+            WHERE conversation_id IS NULL
+            """).fetchall()
+
+        if not orphans:
+            return
+
+        connection.execute("BEGIN")
+
+        for session_id, request_text, created_at, updated_at in orphans:
+            conversation_id = str(uuid4())
+            connection.execute(
+                f"INSERT INTO conversations ({_CONVERSATION_COLUMNS}) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    conversation_id,
+                    conversation_title(request_text),
+                    created_at,
+                    updated_at,
+                ),
+            )
+            connection.execute(
+                "UPDATE sessions SET conversation_id = ? WHERE session_id = ?",
+                (conversation_id, session_id),
+            )
+
+        connection.execute("COMMIT")
+        logger.info(
+            "Session storage migrated: %d session(s) given a conversation",
+            len(orphans),
+        )
 
     def close(self) -> None:
         """Close the connection."""
@@ -155,20 +238,120 @@ class SqliteSessionRepository:
         with self._lock:
             return self._connection.execute(sql, parameters).fetchall()
 
-    def create_session(self, request_text: str) -> Session:
-        """Open a new session and return it."""
+    def create_session(
+        self, request_text: str, conversation_id: UUID | None = None
+    ) -> Session:
+        """Open a new session and return it. See `SessionRepository`."""
+        now = _now()
+        title = conversation_title(request_text)
+
+        with self._lock:
+            connection = self._connection
+            connection.execute("BEGIN")
+
+            try:
+                if conversation_id is None:
+                    key = str(uuid4())
+                    connection.execute(
+                        f"INSERT INTO conversations ({_CONVERSATION_COLUMNS}) "
+                        "VALUES (?, ?, ?, ?)",
+                        (key, title, now, now),
+                    )
+                else:
+                    key = str(conversation_id)
+                    touched = connection.execute(
+                        """
+                        UPDATE conversations
+                        SET title = CASE WHEN title = '' THEN ? ELSE title END,
+                            updated_at = ?
+                        WHERE conversation_id = ?
+                        RETURNING conversation_id
+                        """,
+                        (title, now, key),
+                    ).fetchone()
+
+                    if touched is None:
+                        raise UnknownConversationError(key)
+
+                row = connection.execute(
+                    f"""
+                    INSERT INTO sessions (session_id, request_text, status,
+                                          conversation_id, created_at, updated_at)
+                    VALUES (?, ?, 'pending', ?, ?, ?)
+                    RETURNING {_SESSION_COLUMNS}
+                    """,
+                    (str(uuid4()), request_text, key, now, now),
+                ).fetchone()
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+
+        return _to_session(row)
+
+    def create_conversation(self, title: str = "") -> Conversation:
+        """Open an empty conversation and return it."""
         now = _now()
         rows = self._query(
             f"""
-            INSERT INTO sessions (session_id, request_text, status,
-                                  created_at, updated_at)
-            VALUES (?, ?, 'pending', ?, ?)
-            RETURNING {_SESSION_COLUMNS}
+            INSERT INTO conversations ({_CONVERSATION_COLUMNS})
+            VALUES (?, ?, ?, ?)
+            RETURNING {_CONVERSATION_COLUMNS}
             """,
-            (str(uuid4()), request_text, now, now),
+            (str(uuid4()), title, now, now),
         )
 
-        return _to_session(rows[0])
+        return _to_conversation(rows[0])
+
+    def get_conversation(self, conversation_id: UUID) -> Conversation | None:
+        """Return a conversation, or None if unknown."""
+        rows = self._query(
+            f"SELECT {_CONVERSATION_COLUMNS} FROM conversations "
+            "WHERE conversation_id = ?",
+            (str(conversation_id),),
+        )
+
+        return _to_conversation(rows[0]) if rows else None
+
+    def list_conversations(self, limit: int) -> list[Conversation]:
+        """Return the conversations most recently added to, newest first."""
+        rows = self._query(
+            f"""
+            SELECT {_CONVERSATION_COLUMNS}
+            FROM conversations
+            ORDER BY updated_at DESC, rowid DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+
+        return [_to_conversation(row) for row in rows]
+
+    def conversation_sessions(self, conversation_id: UUID) -> list[Session]:
+        """Return a conversation's sessions in the order they were opened."""
+        rows = self._query(
+            f"""
+            SELECT {_SESSION_COLUMNS}
+            FROM sessions
+            WHERE conversation_id = ?
+            ORDER BY created_at, rowid
+            """,
+            (str(conversation_id),),
+        )
+
+        return [_to_session(row) for row in rows]
+
+    def delete_conversation(self, conversation_id: UUID) -> bool:
+        """Delete a conversation and its sessions; False if it was unknown."""
+        # Sessions go with it by `ON DELETE CASCADE`, and their steps,
+        # artifacts, and lineage with them.
+        rows = self._query(
+            "DELETE FROM conversations WHERE conversation_id = ? "
+            "RETURNING conversation_id",
+            (str(conversation_id),),
+        )
+
+        return bool(rows)
 
     def get_session(self, session_id: UUID) -> SessionDetail | None:
         """Return a session with its steps and lineage, or None if unknown."""
@@ -238,7 +421,7 @@ class SqliteSessionRepository:
         self, session_id: UUID, update: UpdateSessionRequest
     ) -> Session | None:
         """Apply the non-null fields of an update, or None if unknown."""
-        changes = update.model_dump(exclude_none=True)
+        changes = storable_changes(update)
 
         if not changes:
             detail = self.get_session(session_id)
@@ -390,8 +573,20 @@ def _to_session(row: Any) -> Session:
         execution_mode=row[4],
         error=row[5],
         answer=row[6],
-        created_at=row[7],
-        updated_at=row[8],
+        conversation_id=UUID(row[7]) if row[7] is not None else None,
+        clarifications=json.loads(row[8]) if row[8] is not None else [],
+        created_at=row[9],
+        updated_at=row[10],
+    )
+
+
+def _to_conversation(row: Any) -> Conversation:
+    """Build a `Conversation` from a row."""
+    return Conversation(
+        conversation_id=UUID(row[0]),
+        title=row[1],
+        created_at=row[2],
+        updated_at=row[3],
     )
 
 

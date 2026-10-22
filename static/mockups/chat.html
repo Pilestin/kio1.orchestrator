@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Chat · mockup</title>
+<script>
+  // Mockup only: ?theme=dark or ?theme=light, so both can be screenshotted.
+  (function () {
+    var theme = new URLSearchParams(location.search).get("theme");
+    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+  })();
+</script>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  /* Mockup-only layout. The real screen moves what survives into app.css. */
+  .chat-shell { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; }
+  .threads { border-right: 1px solid var(--line); background: var(--rail-bg); padding: 1rem 0.75rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  .threads .new { justify-content: flex-start; }
+  .thread-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .thread-list li { padding: 0.55rem 0.7rem; border-radius: 10px; cursor: pointer; }
+  .thread-list li:hover { background: var(--surface-2); }
+  .thread-list li.active { background: var(--accent-soft); }
+  .thread-list .title { display: block; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thread-list .when { font-size: 0.75rem; color: var(--muted); }
+  .group { font-size: 0.7rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 0.6rem 0.7rem 0.2rem; }
+
+  .conversation { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
+  .conversation .topbar { position: static; }
+  .messages { flex: 1; overflow: auto; padding: 1.5rem 0; }
+  .lane { max-width: 760px; margin: 0 auto; padding: 0 1.5rem; display: flex; flex-direction: column; gap: 1.1rem; }
+
+  .msg-user { align-self: flex-end; max-width: 80%; padding: 0.7rem 0.95rem; border-radius: 16px 16px 4px 16px; background: var(--accent-gradient); color: #fff; }
+  .msg-kio { display: flex; flex-direction: column; gap: 0.6rem; }
+  .who { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--muted); }
+  .who .mark { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; background: var(--accent-gradient); color: #fff; font: 700 10px var(--mono); }
+
+  .plan-card { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: hidden; }
+  .plan-card summary { list-style: none; display: flex; align-items: center; gap: 0.6rem; padding: 0.7rem 0.9rem; color: var(--ink); font-size: 0.88rem; }
+  .plan-card summary::-webkit-details-marker { display: none; }
+  .plan-card .steps { list-style: none; margin: 0; padding: 0 0.9rem 0.7rem; display: flex; flex-direction: column; gap: 0.35rem; }
+  .plan-card .steps li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; font-size: 0.84rem; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 0.7rem; }
+  .dot.ok { background: var(--ok-bg); color: var(--ok); }
+  .dot.run { background: var(--warn-bg); color: var(--warn); }
+  .dot.wait { background: var(--idle-bg); color: var(--idle); }
+
+  .answer-bubble { padding: 0.85rem 1rem; border-radius: 4px 16px 16px 16px; background: var(--surface); border: 1px solid var(--line); line-height: 1.6; }
+  .answer-bubble .source { display: inline-block; padding: 0 0.4rem; margin: 0 0.1rem; border-radius: 6px; background: var(--accent-soft); color: var(--accent-text); font: 600 0.74rem/1.6 var(--mono); }
+  .msg-actions { display: flex; gap: 0.3rem; }
+
+  .composer-bar { border-top: 1px solid var(--line); background: var(--overlay); backdrop-filter: blur(12px); padding: 0.9rem 0 1.1rem; }
+  .composer-box { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface); padding: 0.6rem 0.7rem; box-shadow: var(--shadow); }
+  .composer-box textarea { border: 0; box-shadow: none; resize: none; min-height: 2.6rem; font-family: var(--sans); padding: 0.3rem; }
+  .composer-row { display: flex; align-items: center; gap: 0.4rem; }
+  .mention { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0.55rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font: 600 0.78rem var(--mono); }
+
+  .drawer { position: fixed; z-index: 40; top: 0; right: 0; bottom: 0; width: 380px; background: var(--surface); border-left: 1px solid var(--line); box-shadow: var(--shadow-lg); padding: 1rem; display: flex; flex-direction: column; gap: 0.6rem; transform: translateX(100%); transition: transform 0.2s ease; }
+  .drawer.open { transform: none; }
+  @media (max-width: 900px) { .chat-shell { grid-template-columns: minmax(0, 1fr); } .threads { display: none; } }
+</style>
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-run" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="m20 11.5-8.5 8.5a5 5 0 0 1-7-7L13 4.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L14.5 7.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></symbol>
+</svg>
+
+<div class="chat-shell">
+
+  <aside class="threads" aria-label="Conversations">
+    <button class="action primary new"><svg class="icon"><use href="#i-plus"/></svg>New chat</button>
+    <div class="group">Today</div>
+    <ol class="thread-list">
+      <li class="active"><span class="title">Ödeme modülündeki hatayı düzelt</span><span class="when">2 min ago</span></li>
+      <li><span class="title">Show the latest commits</span><span class="when">1 h ago</span></li>
+    </ol>
+    <div class="group">Earlier</div>
+    <ol class="thread-list">
+      <li><span class="title">Weather in Istanbul</span><span class="when">Yesterday</span></li>
+      <li><span class="title">Requirements for bulk pricing</span><span class="when">Oct 20</span></li>
+    </ol>
+  </aside>
+
+  <section class="conversation">
+    <header class="topbar">
+      <h1 class="page-title">Ödeme modülündeki hatayı düzelt</h1>
+      <span class="spacer"></span>
+      <span class="chip idle">ollama · ministral-3:3b</span>
+      <button class="icon-button" title="Run details" onclick="document.getElementById('drawer').classList.toggle('open')"><svg class="icon"><use href="#i-panel"/></svg></button>
+    </header>
+
+    <div class="messages">
+      <div class="lane">
+
+        <div class="msg-user">average() boş listede çöküyor, incele ve düzelt.</div>
+
+        <div class="msg-kio">
+          <div class="who"><span class="mark">K1</span>KIO1</div>
+
+          <details class="plan-card" open>
+            <summary><span class="chip ok">completed</span><strong>3 steps</strong><span class="small muted">· 1 min 12 s</span></summary>
+            <ol class="steps">
+              <li><span class="dot ok">✓</span><span><strong>CodeReviewer</strong> <span class="small muted">· code_review</span></span><span class="small mono muted">23 s</span></li>
+              <li><span class="dot ok">✓</span><span><strong>KIO7</strong> <span class="small muted">· code_generation</span></span><span class="small mono muted">31 s</span></li>
+              <li><span class="dot ok">✓</span><span><strong>Pytest</strong> <span class="small muted">· test_execution</span></span><span class="small mono muted">4 s</span></li>
+            </ol>
+          </details>
+
+          <div class="answer-bubble">
+            Boş listede <code>len(values)</code> sıfır olduğu için <code>ZeroDivisionError</code> oluşuyordu <span class="source">CodeReviewer</span>.
+            Fonksiyon boş listede <code>ValueError</code> verecek şekilde düzeltildi <span class="source">KIO7</span>,
+            testlerin hepsi geçiyor <span class="source">Pytest</span>.
+          </div>
+          <div class="msg-actions">
+            <button class="icon-button" title="Copy"><svg class="icon"><use href="#i-copy"/></svg></button>
+            <button class="icon-button" title="Run again"><svg class="icon"><use href="#i-retry"/></svg></button>
+          </div>
+        </div>
+
+        <div class="msg-user">Şimdi aynı fonksiyon için tip ipuçları da ekle.</div>
+
+        <div class="msg-kio">
+          <div class="who"><span class="mark">K1</span>KIO1</div>
+
+          <details class="plan-card" open>
+            <summary><span class="chip warn">running</span><strong>2 steps</strong><span class="small muted">· writing the plan…</span></summary>
+            <ol class="steps">
+              <li><span class="dot run">▶</span><span><strong>KIO7</strong> <span class="small muted">· code_generation</span></span><span class="small mono muted">12 s</span></li>
+              <li><span class="dot wait">·</span><span><strong>Pytest</strong> <span class="small muted">· test_execution</span></span><span></span></li>
+            </ol>
+          </details>
+
+          <div class="approval">
+            <div class="approval-head"><strong>Approve this plan?</strong><span class="small muted">KIO7 writes files</span></div>
+            <div class="row end">
+              <button class="action ghost">Cancel</button>
+              <button class="action primary"><svg class="icon"><use href="#i-run"/></svg>Run plan</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="composer-bar">
+      <div class="lane">
+        <div class="composer-box">
+          <textarea placeholder="Ask KIO1…" aria-label="Message"></textarea>
+          <div class="composer-row">
+            <span class="mention">@CodeReviewer</span>
+            <span class="spacer"></span>
+            <button class="icon-button" title="Mention an agent"><svg class="icon"><use href="#i-at"/></svg></button>
+            <button class="icon-button" title="Attach a file"><svg class="icon"><use href="#i-clip"/></svg></button>
+            <button class="action primary"><svg class="icon"><use href="#i-run"/></svg>Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<aside class="drawer" id="drawer" aria-label="Run details">
+  <div class="row"><strong>Run details</strong><span class="spacer"></span><span class="chip warn">running</span></div>
+  <div class="live-col"><h3>What the model is writing</h3><pre class="output live-text">{"workflow_id": "wf-hints01", "steps": [ …</pre></div>
+  <div class="live-col"><h3>Activity</h3>
+    <ol class="live-log">
+      <li><span class="at">0.0s</span><span class="what">Planning with ollama/ministral-3:3b</span></li>
+      <li><span class="at">41.2s</span><span class="what">Waiting for approval — KIO7</span></li>
+    </ol>
+  </div>
+</aside>
+
+</body>
+</html>

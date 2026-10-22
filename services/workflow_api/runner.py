@@ -465,6 +465,14 @@ class WorkflowRunner:
 
         reply = reply.strip()
         clarified.pairs.append((question, reply))
+        # Kept with the session, so a later request in the same conversation
+        # knows what the person already said.
+        self.recorder.update_session(
+            session_id,
+            clarifications=[
+                {"question": asked, "answer": given} for asked, given in clarified.pairs
+            ],
+        )
         emit("question_answered", round=number, question=question, answer=reply)
 
         return reply

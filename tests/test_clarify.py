@@ -86,6 +86,23 @@ def test_the_answer_is_planned_with() -> None:
     assert recorder.last("status") == "completed"
 
 
+def test_the_answers_are_kept_with_the_session() -> None:
+    desk = ApprovalDesk()
+    model = Model(
+        plans=[WHICH_CITY, {"question": "Which day?"}, plan(("s1", "Reader", "read"))],
+        reviews=[],
+    )
+    runner, recorder, _ = make_runner(model, desk)
+    answer_when_asked(desk, "Istanbul", "Monday")
+
+    runner.run(uuid4(), "What is the weather?")
+
+    assert recorder.last("clarifications") == [
+        {"question": "Which city?", "answer": "Istanbul"},
+        {"question": "Which day?", "answer": "Monday"},
+    ]
+
+
 def test_the_reviewer_sees_what_the_person_said() -> None:
     desk = ApprovalDesk()
     model = Model(

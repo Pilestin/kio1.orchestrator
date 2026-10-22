@@ -1,8 +1,18 @@
 -- Session Manager schema.
 --
--- One session per workflow run. Steps record what each KIO agent was asked
+-- One session per workflow run, each in a conversation: the requests that
+-- follow on from each other. Steps record what each KIO agent was asked
 -- to do and how it answered. Artifacts hold the agent output verbatim.
 -- Lineage records which artifact fed which step.
+
+CREATE TABLE IF NOT EXISTS conversations (
+    conversation_id UUID        PRIMARY KEY,
+    title           TEXT        NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS conversations_updated_idx ON conversations (updated_at);
 
 CREATE TABLE IF NOT EXISTS sessions (
     session_id     UUID        PRIMARY KEY,
@@ -21,6 +31,15 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- Added after the first release: a database created before it gains the
 -- column here, since CREATE TABLE IF NOT EXISTS leaves an old table alone.
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS answer TEXT;
+
+-- Null only on a session recorded before conversations existed; the
+-- repository gives each such session a conversation once the schema is in.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS conversation_id UUID
+    REFERENCES conversations (conversation_id) ON DELETE CASCADE;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS clarifications JSONB;
+
+CREATE INDEX IF NOT EXISTS sessions_conversation_idx
+    ON sessions (conversation_id, created_at);
 
 CREATE TABLE IF NOT EXISTS steps (
     id          BIGSERIAL   PRIMARY KEY,

@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -8,11 +9,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from services.session_manager.app import app, get_repository
-from services.session_manager.models import RecordStepRequest, UpdateSessionRequest
+from services.session_manager.models import (
+    TITLE_MAX_CHARS,
+    Clarification,
+    RecordStepRequest,
+    UpdateSessionRequest,
+    conversation_title,
+)
 from services.session_manager.repository import (
     InMemorySessionRepository,
     PostgresSessionRepository,
     SessionRepository,
+    UnknownConversationError,
 )
 from services.session_manager.sqlite_repository import SqliteSessionRepository
 
@@ -144,9 +152,10 @@ def test_a_runs_answer_is_kept_with_it(repository: SessionRepository) -> None:
 
     assert detail is not None
     assert detail.session.answer == "Python 3.11.7 [Deneme]"
-    assert next(
-        item for item in listed if item.session_id == session.session_id
-    ).answer == "Python 3.11.7 [Deneme]"
+    assert (
+        next(item for item in listed if item.session_id == session.session_id).answer
+        == "Python 3.11.7 [Deneme]"
+    )
 
 
 def test_update_session_returns_none_for_unknown_id(
@@ -256,6 +265,144 @@ def test_steps_without_output_produce_no_lineage(
     assert detail is not None
     assert detail.lineage == []
     assert detail.steps[1].output is None
+
+
+# ── conversations, exercised against every implementation ───────────────────
+
+
+def test_a_session_without_a_conversation_opens_one(
+    repository: SessionRepository,
+) -> None:
+    session = repository.create_session("Why does average() crash?")
+
+    assert session.conversation_id is not None
+    conversation = repository.get_conversation(session.conversation_id)
+    assert conversation is not None
+    assert conversation.title == "Why does average() crash?"
+
+
+def test_a_session_joins_the_conversation_it_names(
+    repository: SessionRepository,
+) -> None:
+    first = repository.create_session("Why does average() crash?")
+    second = repository.create_session("Now add type hints", first.conversation_id)
+
+    assert second.conversation_id == first.conversation_id
+    assert [
+        session.session_id
+        for session in repository.conversation_sessions(first.conversation_id)  # type: ignore[arg-type]
+    ] == [first.session_id, second.session_id]
+
+
+def test_a_new_chat_takes_its_title_from_its_first_request(
+    repository: SessionRepository,
+) -> None:
+    conversation = repository.create_conversation()
+
+    repository.create_session("Fix the payment bug", conversation.conversation_id)
+    repository.create_session("And add a test", conversation.conversation_id)
+
+    found = repository.get_conversation(conversation.conversation_id)
+    assert found is not None
+    assert found.title == "Fix the payment bug"
+
+
+def test_a_session_in_an_unknown_conversation_is_refused(
+    repository: SessionRepository,
+) -> None:
+    with pytest.raises(UnknownConversationError):
+        repository.create_session("Anything", uuid4())
+
+
+def test_the_conversation_last_added_to_is_listed_first(
+    repository: SessionRepository,
+) -> None:
+    older = repository.create_conversation("older")
+    newer = repository.create_conversation("newer")
+
+    repository.create_session("A follow-up", older.conversation_id)
+
+    listed = [item.conversation_id for item in repository.list_conversations(200)]
+    assert listed.index(older.conversation_id) < listed.index(newer.conversation_id)
+
+
+def test_deleting_a_conversation_deletes_its_sessions(
+    repository: SessionRepository,
+) -> None:
+    session = repository.create_session("Fix the payment bug")
+    repository.record_step(session.session_id, make_step())
+    conversation_id = session.conversation_id
+    assert conversation_id is not None
+
+    assert repository.delete_conversation(conversation_id) is True
+
+    assert repository.get_conversation(conversation_id) is None
+    assert repository.get_session(session.session_id) is None
+
+
+def test_deleting_an_unknown_conversation_says_so(
+    repository: SessionRepository,
+) -> None:
+    assert repository.delete_conversation(uuid4()) is False
+
+
+def test_the_questions_a_run_asked_are_kept_with_it(
+    repository: SessionRepository,
+) -> None:
+    session = repository.create_session("What is the weather?")
+
+    repository.update_session(
+        session.session_id,
+        UpdateSessionRequest(
+            clarifications=[Clarification(question="Which city?", answer="Istanbul")]
+        ),
+    )
+
+    detail = repository.get_session(session.session_id)
+    assert detail is not None
+    assert detail.session.clarifications == [
+        Clarification(question="Which city?", answer="Istanbul")
+    ]
+
+
+def test_a_long_request_is_cut_at_a_word_for_a_title() -> None:
+    title = conversation_title("Please " + "explain this stack trace " * 10)
+
+    assert len(title) <= TITLE_MAX_CHARS
+    assert title == "Please explain this stack trace explain this stack trace…"
+
+
+def test_line_breaks_do_not_reach_a_title() -> None:
+    assert conversation_title("Fix\n\n  this   bug") == "Fix this bug"
+
+
+def test_sessions_from_before_conversations_are_each_given_one(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE sessions (
+            session_id TEXT PRIMARY KEY, request_text TEXT NOT NULL,
+            status TEXT NOT NULL, workflow_id TEXT, execution_mode TEXT,
+            error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        INSERT INTO sessions VALUES ('00000000-0000-0000-0000-000000000001',
+            'Which python?', 'completed', NULL, NULL, NULL,
+            '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00');
+        """)
+    old.close()
+
+    upgraded = SqliteSessionRepository(path)
+
+    try:
+        [conversation] = upgraded.list_conversations(10)
+        assert conversation.title == "Which python?"
+        [session] = upgraded.conversation_sessions(conversation.conversation_id)
+        assert session.request_text == "Which python?"
+        assert session.answer is None
+    finally:
+        upgraded.close()
 
 
 # ── HTTP surface ────────────────────────────────────────────────────────────

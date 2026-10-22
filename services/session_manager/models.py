@@ -10,10 +10,53 @@ ExecutionMode = Literal["sequential", "parallel", "mixed"]
 LineageBasis = Literal["execution_order", "declared_dependency"]
 
 
+# How much of a conversation's first request becomes its title.
+TITLE_MAX_CHARS = 60
+
+
+def conversation_title(request_text: str) -> str:
+    """Return a short title for a conversation, from the request that opened it.
+
+    Whitespace is collapsed so a pasted traceback does not become a title of
+    line breaks; a long request is cut at a word boundary where there is one.
+
+    Args:
+        request_text: The conversation's first request.
+
+    Returns:
+        At most `TITLE_MAX_CHARS` characters, an ellipsis included.
+    """
+    collapsed = " ".join(request_text.split())
+
+    if len(collapsed) <= TITLE_MAX_CHARS:
+        return collapsed
+
+    cut = collapsed[: TITLE_MAX_CHARS - 1]
+    word_end = cut.rfind(" ")
+
+    if word_end > TITLE_MAX_CHARS // 2:
+        cut = cut[:word_end]
+
+    return f"{cut.rstrip()}…"
+
+
+class Clarification(BaseModel):
+    """A question the planner put to the person, and the answer it got."""
+
+    question: str = Field(max_length=4_000)
+    answer: str = Field(max_length=4_000)
+
+
 class CreateSessionRequest(BaseModel):
-    """Opens a session for one workflow run."""
+    """Opens a session for one workflow run.
+
+    Without a conversation the session opens one of its own: every run
+    belongs to a conversation, so a history never has runs that no
+    conversation lists.
+    """
 
     request_text: str = Field(min_length=1, max_length=100_000)
+    conversation_id: UUID | None = None
 
 
 class UpdateSessionRequest(BaseModel):
@@ -29,6 +72,9 @@ class UpdateSessionRequest(BaseModel):
     execution_mode: ExecutionMode | None = None
     error: str | None = Field(default=None, max_length=4_000)
     answer: str | None = Field(default=None, max_length=20_000)
+    # Replaces the whole list: a run sends everything asked so far, so a
+    # lost update is made good by the next one.
+    clarifications: list[Clarification] | None = Field(default=None, max_length=32)
 
 
 class RecordStepRequest(BaseModel):
@@ -63,6 +109,21 @@ class Session(BaseModel):
     execution_mode: ExecutionMode | None = None
     error: str | None = None
     answer: str | None = None
+    conversation_id: UUID | None = None
+    clarifications: list[Clarification] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class Conversation(BaseModel):
+    """A run of requests that follow on from each other.
+
+    `updated_at` moves when a request is added, so the list a console shows
+    puts the conversation last written to first.
+    """
+
+    conversation_id: UUID
+    title: str
     created_at: datetime
     updated_at: datetime
 
