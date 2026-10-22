@@ -23,13 +23,20 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from core.agent_store import (
+    ACTION_RESTORED,
+    STORE_FILE,
+    AgentStore,
+    AgentStoreError,
+    FileAgentStore,
+    open_agent_store,
+    registry_from,
+)
 from core.approvals import ApprovalDesk
 from core.config_loader import Config, Workspace, load_config, rehost_entry
 from core.config_writer import (
     ConfigWriteError,
     config_path,
-    read_agents,
-    save_agents,
     save_settings,
     writing_enabled,
 )
@@ -128,6 +135,7 @@ class _State:
     scoreboard: Scoreboard
     events: RunEventBus = field(default_factory=RunEventBus)
     approvals: ApprovalDesk = field(default_factory=ApprovalDesk)
+    store: AgentStore = field(default_factory=FileAgentStore)
 
 
 _state: _State | None = None
@@ -173,11 +181,21 @@ def _build_state() -> _State:
     prompt_template = load_prompt(config.prompt_path)
     review_template = _load_review_prompt(config)
 
+    database_url = os.environ.get(DATABASE_URL_ENV, "").strip() or DEFAULT_DATABASE_URL
+    store = open_agent_store(database_url)
+    stored = store.read()
+
+    if store.kind != STORE_FILE:
+        # The database holds the agents now; config.json's were imported
+        # into it on its first start and are not read again.
+        config.dispatch = replace(config.dispatch, registry=registry_from(stored))
+        logger.info("Agents: %d from %s", len(stored), store.location)
+
     directory = AgentDirectory(
         config.dispatch.registry,
         discovery=config.dispatch.discovery,
         health=config.dispatch.health,
-        sources=_configured_entries(),
+        sources=stored,
     )
     directory.start()
     # One scoreboard for the process, so history accumulates across
@@ -215,9 +233,6 @@ def _build_state() -> _State:
         # No separate service: history is kept by this process, in SQLite
         # unless KIO1_DATABASE_URL says otherwise. A first run on one machine
         # needs neither Docker nor a second program to see what it did.
-        database_url = (
-            os.environ.get(DATABASE_URL_ENV, "").strip() or DEFAULT_DATABASE_URL
-        )
         session_client = EmbeddedSessionClient(*open_repository(database_url))
 
     return _State(
@@ -238,6 +253,7 @@ def _build_state() -> _State:
         scoreboard=scoreboard,
         events=events,
         approvals=approvals,
+        store=store,
     )
 
 
@@ -709,42 +725,19 @@ def _require_registry_token(request: Request) -> None:
         )
 
 
-def _configured_entries() -> dict[str, Any]:
-    """Return `dispatch.agents` as the file holds it, or nothing on failure.
-
-    Returns:
-        The raw entries. An unreadable file is logged rather than raised on:
-        the service has already parsed its configuration successfully by the
-        time this runs, and losing the console's edit forms is a smaller
-        failure than refusing to start.
-    """
-    try:
-        return read_agents()
-    except ConfigWriteError as error:
-        logger.warning("Could not read the configured agents: %s", error)
-        return {}
-
-
-def _persist(changes: dict[str, Any | None]) -> None:
-    """Apply changes to `dispatch.agents` in the configuration file.
+def _persist(state: _State, changes: dict[str, Any | None]) -> None:
+    """Save changes to the targets wherever this deployment keeps them.
 
     Args:
+        state: The service, for its agent store.
         changes: Agent id to entry, or to None to remove it.
 
     Raises:
-        HTTPException: 503 when the file could not be written, naming why.
+        HTTPException: 503 when the change could not be saved, naming why.
     """
     try:
-        agents = read_agents()
-
-        for agent_id, entry in changes.items():
-            if entry is None:
-                agents.pop(agent_id, None)
-            else:
-                agents[agent_id] = entry
-
-        save_agents(agents)
-    except ConfigWriteError as error:
+        state.store.write(changes)
+    except AgentStoreError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
         ) from error
@@ -763,14 +756,16 @@ def registry_config(
             when the service is not ready.
 
     Returns:
-        The configuration path and whether it is writable, so the console can
-        say up front that Save will not stick rather than after someone tries.
+        Where targets are kept — the database or the configuration file —
+        and whether changes can be saved, so the console can say up front
+        that Save will not stick rather than after someone tries.
     """
     _require_registry_token(request)
 
     return {
-        "config_path": str(config_path()),
-        "writable": writing_enabled(),
+        "config_path": state.store.location,
+        "store": state.store.kind,
+        "writable": state.store.writable,
     }
 
 
@@ -1479,7 +1474,7 @@ def register_agent(
         # Written first: a target the console said it saved and did not is
         # worse than one it refused to add. The file is the source of truth
         # for a configured entry, so an entry that reaches it is one.
-        _persist(dict.fromkeys(entries, None) | entries)
+        _persist(state, entries)
 
     registered = []
     origin = ORIGIN_CONFIG if body.persist else ORIGIN_REGISTRATION
@@ -1556,7 +1551,7 @@ def update_agent(
         ) from error
 
     if body.persist:
-        _persist({agent_id: body.entry})
+        _persist(state, {agent_id: body.entry})
 
     logger.info("Agent updated: agent_id=%s persisted=%s", agent_id, body.persist)
 
@@ -1593,9 +1588,126 @@ def unregister_agent(
         )
 
     if record.origin == ORIGIN_CONFIG:
-        _persist({agent_id: None})
+        _persist(state, {agent_id: None})
 
     state.directory.forget(agent_id, force=True)
     logger.info("Agent removed: agent_id=%s origin=%s", agent_id, record.origin)
 
     return {"agent_id": agent_id, "status": "removed"}
+
+
+class RestoreRequest(BaseModel):
+    """Which earlier version of a target to bring back."""
+
+    version: int = Field(ge=1)
+
+
+@app.get("/registry/agents/{agent_id}/history")
+def agent_history(
+    agent_id: str, request: Request, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Return every saved version of a target, newest first.
+
+    Args:
+        agent_id: The target.
+        request: Checked for the registry token.
+        state: The agent store.
+
+    Returns:
+        The versions; empty when the store keeps no history (the file).
+    """
+    _require_registry_token(request)
+
+    return {"agent_id": agent_id, "versions": state.store.history(agent_id)}
+
+
+@app.post("/registry/agents/{agent_id}/restore")
+def restore_agent(
+    agent_id: str,
+    body: RestoreRequest,
+    request: Request,
+    state: _State = Depends(get_state),
+) -> dict[str, Any]:
+    """Bring a target back to an earlier version — or back at all, if removed.
+
+    The restore is itself a new version, so it can be undone the same way.
+
+    Args:
+        agent_id: The target.
+        body: The version to restore.
+        request: Checked for the registry token.
+        state: The agent store and the live directory.
+
+    Returns:
+        The restored target as the directory now holds it.
+
+    Raises:
+        HTTPException: 404 for an unknown version, 400 when it records a
+            removal or is no longer valid.
+    """
+    _require_registry_token(request)
+
+    version = next(
+        (
+            item
+            for item in state.store.history(agent_id)
+            if item["version"] == body.version
+        ),
+        None,
+    )
+
+    if version is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{agent_id} has no version {body.version}.",
+        )
+
+    entry = version["entry"]
+
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That version records the target's removal; pick one before it.",
+        )
+
+    try:
+        record = state.directory.register(
+            agent_id, rehost_entry(agent_id, entry), ORIGIN_CONFIG, replace=True
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    try:
+        state.store.write({agent_id: entry}, action=ACTION_RESTORED)
+    except AgentStoreError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+    logger.info("Agent restored: agent_id=%s version=%d", agent_id, body.version)
+
+    return {"agent": record.to_summary(), "restored_version": body.version}
+
+
+@app.get("/registry/export")
+def export_agents(
+    request: Request, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Return every target's definition in `dispatch.agents` form.
+
+    For a backup, for moving agents to another KIO1, or for keeping them in
+    git: the result can be pasted under `dispatch.agents` in a config.json,
+    or posted to `/registry/agents` as a manifest.
+
+    Args:
+        request: Checked for the registry token.
+        state: The agent store.
+
+    Returns:
+        `{"agents": {id: definition, ...}}`.
+    """
+    _require_registry_token(request)
+
+    return {"agents": state.store.read()}

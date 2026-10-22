@@ -22,8 +22,15 @@ KIND_KIO = "kio"
 KIND_HTTP = "http"
 KIND_CLI = "cli"
 KIND_MCP = "mcp"
+# `llm` is the one nobody has to build: a role written in plain language,
+# carried out by a language model inside KIO1. No server, no code.
+KIND_LLM = "llm"
 
-ALLOWED_KINDS = frozenset({KIND_KIO, KIND_HTTP, KIND_CLI, KIND_MCP})
+ALLOWED_KINDS = frozenset({KIND_KIO, KIND_HTTP, KIND_CLI, KIND_MCP, KIND_LLM})
+
+# Long enough for a detailed role; short enough that a pasted document is
+# refused rather than sent with every step.
+_MAX_INSTRUCTIONS = 8000
 
 _ALLOWED_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 
@@ -141,6 +148,29 @@ class McpToolSpec:
 
 
 @dataclass(frozen=True)
+class LlmToolSpec:
+    """An agent that is a role, carried out by a language model in KIO1.
+
+    The way someone who does not write code adds an agent: say what it is
+    for, in plain language, and it exists. A "code reviewer" or a
+    "requirements writer" is a set of instructions, not a service.
+
+    Attributes:
+        instructions: The role, as the system prompt the model is given.
+        provider: The provider to run it on. Empty uses the planning
+            provider.
+        model: The model. Empty uses the planning model; needed with a
+            provider other than the planner's, since model names differ.
+        temperature: Sampling temperature, or None for the configured one.
+    """
+
+    instructions: str
+    provider: str = ""
+    model: str = ""
+    temperature: float | None = None
+
+
+@dataclass(frozen=True)
 class AgentEndpoint:
     """A single target KIO1 is able to dispatch work to.
 
@@ -183,7 +213,7 @@ class AgentEndpoint:
     subject: str | None = None
     kind: str = KIND_KIO
     description: str = ""
-    tool: HttpToolSpec | CliToolSpec | McpToolSpec | None = None
+    tool: HttpToolSpec | CliToolSpec | McpToolSpec | LlmToolSpec | None = None
     enabled: bool = True
     requires_approval: bool = False
 
@@ -603,6 +633,88 @@ def _read_mcp_entry(
     )
 
 
+def _read_llm_entry(
+    agent_id: str,
+    agent_data: dict[str, Any],
+    *,
+    description: str,
+    capabilities: frozenset[str],
+) -> AgentEndpoint:
+    """Build a registry entry for an agent that is a written role.
+
+    Args:
+        agent_id: Identifier of the entry.
+        agent_data: The raw entry object.
+        description: What the entry does, for the planning model.
+        capabilities: The entry's declared capabilities.
+
+    Returns:
+        The registry entry, with the role in `tool`.
+
+    Raises:
+        ValueError: If the role is missing or too long, or a model setting is
+            malformed.
+    """
+    where = f"dispatch.agents.{agent_id}"
+    instructions = agent_data.get("instructions")
+
+    if not isinstance(instructions, str) or not instructions.strip():
+        raise ValueError(
+            f"{where}.instructions must say what this agent is and does, in plain "
+            'language — for example "You review Python code for bugs and explain '
+            'each one briefly."'
+        )
+
+    if len(instructions) > _MAX_INSTRUCTIONS:
+        raise ValueError(
+            f"{where}.instructions is {len(instructions)} characters; keep it under "
+            f"{_MAX_INSTRUCTIONS}."
+        )
+
+    if not capabilities:
+        raise ValueError(
+            f"{where}.capabilities must name at least one thing it does, such as "
+            '["code_review"]: the planner chooses agents by capability.'
+        )
+
+    provider = agent_data.get("provider", "")
+    model = agent_data.get("model", "")
+
+    for name, value in (("provider", provider), ("model", model)):
+        if not isinstance(value, str):
+            raise ValueError(f"{where}.{name} must be a string.")
+
+    if provider.strip() and not model.strip():
+        raise ValueError(
+            f"{where}.model is required with provider: model names differ between "
+            "providers."
+        )
+
+    temperature = agent_data.get("temperature")
+
+    if temperature is not None and (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, int | float)
+        or not 0 <= temperature <= 2
+    ):
+        raise ValueError(f"{where}.temperature must be a number from 0 to 2.")
+
+    return AgentEndpoint(
+        agent_id=agent_id,
+        endpoint=f"llm:{agent_id}",
+        path="",
+        capabilities=capabilities,
+        kind=KIND_LLM,
+        description=description,
+        tool=LlmToolSpec(
+            instructions=instructions.strip(),
+            provider=provider.strip(),
+            model=model.strip(),
+            temperature=float(temperature) if temperature is not None else None,
+        ),
+    )
+
+
 def _read_tool_entry(
     agent_id: str,
     agent_data: dict[str, Any],
@@ -628,6 +740,14 @@ def _read_tool_entry(
     """
     if kind == KIND_MCP:
         return _read_mcp_entry(
+            agent_id,
+            agent_data,
+            description=description,
+            capabilities=capabilities,
+        )
+
+    if kind == KIND_LLM:
+        return _read_llm_entry(
             agent_id,
             agent_data,
             description=description,

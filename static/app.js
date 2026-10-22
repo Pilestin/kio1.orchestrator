@@ -14,6 +14,7 @@ const state = {
   writable: true,
   settings: null,     // the last /settings payload, or null before it loads
   settingsDirty: false, // the settings form has unsaved changes
+  editorMode: "agent",  // the target editor: "agent" (form) or "json"
 };
 
 const NEW_ENTRY = `{
@@ -298,7 +299,173 @@ function startAdding() {
   $("entry").value = NEW_ENTRY;
   $("editor-result").textContent = "";
   $("probe-result").className = "notice hidden";
+  fillAgentForm({});
+  setEditorMode("agent");
+  $("history-row").classList.add("hidden");
 }
+
+// ── history ─────────────────────────────────────────────────────────────────
+
+/** Offer the earlier versions of the target being edited, when there are any. */
+async function loadHistory(agentId) {
+  const row = $("history-row");
+  row.classList.add("hidden");
+
+  try {
+    const data = await api("/registry/agents/" + encodeURIComponent(agentId) + "/history");
+    // The newest is what the editor already shows.
+    const earlier = (data.versions || []).slice(1).filter(function (v) { return v.entry; });
+
+    if (state.editing !== agentId || !earlier.length) return;
+
+    setRows($("history-select"), earlier.map(function (version) {
+      return '<option value="' + esc(version.version) + '">'
+        + esc(new Date(version.changed_at).toLocaleString() + " · " + version.action)
+        + "</option>";
+    }).join(""));
+    row.classList.remove("hidden");
+  } catch {
+    // A store without history (config.json) simply offers none.
+  }
+}
+
+$("history-restore").addEventListener("click", async function () {
+  const agentId = state.editing;
+  const version = Number($("history-select").value);
+  if (!agentId || !version) return;
+
+  try {
+    await api("/registry/agents/" + encodeURIComponent(agentId) + "/restore", {
+      method: "POST",
+      body: JSON.stringify({ version: version }),
+    });
+    toast(agentId + " restored.", "ok");
+    closeEditor();
+    loadTargets();
+  } catch (error) {
+    toast(error.message, "bad");
+  }
+});
+
+// ── the agent form ──────────────────────────────────────────────────────────
+//
+// Adding an agent without writing JSON: a name, what it does, and its
+// instructions make an `llm` target, run by the configured model.
+
+const AGENT_TEMPLATES = {
+  reviewer: {
+    agent_id: "CodeReviewer",
+    skill: "code_review",
+    description: "Reviews code for bugs and risky patterns, and explains each finding briefly.",
+    instructions: "You are a careful senior code reviewer. Read the code or diff in the inputs "
+      + "and list concrete problems: bugs, unsafe patterns, missing error handling. For each, "
+      + "give where it is and a one-line fix. If the inputs contain no code, say so.",
+  },
+  requirements: {
+    agent_id: "RequirementsWriter",
+    skill: "requirements_writing",
+    description: "Turns a feature idea into user stories with acceptance criteria.",
+    instructions: "You are a business analyst. Turn the idea in the task into three to six "
+      + "user stories (As a … I want … so that …), each with two or three testable acceptance "
+      + "criteria. Ask nothing; state any assumption you make.",
+  },
+  docs: {
+    agent_id: "DocWriter",
+    skill: "documentation",
+    description: "Writes clear documentation for code or a feature, in the language of the task.",
+    instructions: "You are a technical writer. Write short, clear documentation for what the "
+      + "task describes: what it is for, how to use it, and one example. Write in the language "
+      + "of the task. Use only facts from the task and its inputs.",
+  },
+};
+
+/** "Code Reviewer!" → "code_reviewer": a capability from a name. */
+function slug(text) {
+  return String(text || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function fillAgentForm(values) {
+  $("agent-name").value = values.agent_id || "";
+  $("agent-skill").value = values.skill || "";
+  $("agent-description").value = values.description || "";
+  $("agent-instructions").value = values.instructions || "";
+  $("agent-name").disabled = Boolean(state.editing);
+}
+
+function setEditorMode(mode) {
+  state.editorMode = mode;
+  $("agent-form").classList.toggle("hidden", mode !== "agent");
+  $("json-form").classList.toggle("hidden", mode !== "json");
+  $("editor-mode").querySelectorAll("button").forEach(function (button) {
+    button.setAttribute("aria-checked", String(button.dataset.mode === mode));
+  });
+}
+
+/** The `llm` entry the form describes, or an error naming what is missing. */
+function entryFromForm() {
+  const name = $("agent-name").value.trim();
+  const instructions = $("agent-instructions").value.trim();
+
+  if (!name) throw new Error("Give the agent a name.");
+  if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(name)) {
+    throw new Error("Use letters, digits, - or _ in the name, starting with a letter.");
+  }
+  if (!instructions) throw new Error("Write its instructions: what it is and what it does.");
+
+  const skill = slug($("agent-skill").value) || slug(name);
+  const existing = state.editing
+    ? (lastAgents.find(function (item) { return item.agent_id === state.editing; }) || {}).source || {}
+    : {};
+
+  // Fields the form does not show — a model, a temperature, approval — are
+  // kept from the saved definition rather than dropped by an edit.
+  return Object.assign({}, existing, {
+    agent_id: name,
+    type: "llm",
+    description: $("agent-description").value.trim(),
+    instructions: instructions,
+    capabilities: [skill],
+  });
+}
+
+/** In agent mode, write the form into the JSON box the save path reads. */
+function syncFormToJson(result) {
+  if (state.editorMode !== "agent") return true;
+
+  try {
+    $("entry").value = JSON.stringify(entryFromForm(), null, 2);
+    return true;
+  } catch (error) {
+    result.className = "small reason";
+    result.textContent = error.message;
+    return false;
+  }
+}
+
+$("editor-mode").addEventListener("click", function (event) {
+  const button = event.target.closest("button[data-mode]");
+  if (!button) return;
+
+  // Switching to JSON shows what the form makes, so it can be taken further.
+  if (button.dataset.mode === "json" && state.editorMode === "agent"
+      && $("agent-name").value.trim()) {
+    syncFormToJson($("editor-result"));
+  }
+
+  setEditorMode(button.dataset.mode);
+});
+
+$("agent-templates").addEventListener("click", function (event) {
+  const button = event.target.closest("[data-template]");
+  if (!button) return;
+
+  fillAgentForm(AGENT_TEMPLATES[button.dataset.template] || {});
+  $("agent-instructions").focus();
+});
 
 function startEditing(agentId) {
   const agent = lastAgents.find(function (item) { return item.agent_id === agentId; });
@@ -321,6 +488,22 @@ function startEditing(agentId) {
   $("entry").value = JSON.stringify(definition, null, 2);
   $("editor-result").textContent = "";
   $("probe-result").className = "notice hidden";
+
+  loadHistory(agentId);
+
+  // An LLM agent opens in the form it was made with; anything else in JSON.
+  if (agent.kind === "llm") {
+    fillAgentForm({
+      agent_id: agentId,
+      skill: (definition.capabilities || [])[0] || "",
+      description: definition.description || "",
+      instructions: definition.instructions || "",
+    });
+    setEditorMode("agent");
+  } else {
+    setEditorMode("json");
+  }
+
   openEditor();
 }
 
@@ -328,6 +511,8 @@ async function saveEntry() {
   const result = $("editor-result");
   const persist = $("persist").checked;
   let parsed;
+
+  if (!syncFormToJson(result)) return;
 
   try {
     parsed = JSON.parse($("entry").value);
@@ -449,6 +634,8 @@ async function testEntry() {
   const panel = $("probe-result");
   const button = $("test-entry");
   let parsed;
+
+  if (!syncFormToJson($("editor-result"))) return;
 
   try {
     parsed = JSON.parse($("entry").value);

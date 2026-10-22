@@ -1,11 +1,12 @@
 import logging
 from typing import Any
 
-from core.config_loader import DispatchConfig
+from core.config_loader import Config, DispatchConfig
 from dispatch.agent_registry import (
     KIND_CLI,
     KIND_HTTP,
     KIND_KIO,
+    KIND_LLM,
     KIND_MCP,
     AgentEndpoint,
 )
@@ -14,6 +15,7 @@ from dispatch.agent_transport import (
     AgentTransportError,
     HttpAgentTransport,
 )
+from dispatch.llm_transport import LlmTransport
 from dispatch.mcp_client import McpSessionPool
 from dispatch.mcp_transport import McpToolTransport
 from dispatch.nats_transport import NatsAgentTransport
@@ -93,7 +95,9 @@ class RoutingTransport:
 
 
 def build_transport(
-    dispatch_config: DispatchConfig, mcp_pool: McpSessionPool | None = None
+    dispatch_config: DispatchConfig,
+    mcp_pool: McpSessionPool | None = None,
+    config: Config | None = None,
 ) -> AgentTransport:
     """Return a transport able to reach every kind of registered target.
 
@@ -107,6 +111,8 @@ def build_transport(
             directory's, so a step reuses the server its probe already
             started rather than paying the startup cost twice. Omitted makes
             a pool of its own.
+        config: The full configuration, which `llm` targets need for their
+            model. Omitted leaves them without a transport.
 
     Returns:
         A ready transport.
@@ -126,13 +132,18 @@ def build_transport(
         logger.info("Dispatching to KIO agents over HTTP")
         kio_transport = HttpAgentTransport()
 
-    return RoutingTransport(
-        {
-            KIND_KIO: kio_transport,
-            KIND_HTTP: HttpToolTransport(),
-            KIND_CLI: CliToolTransport(),
-            KIND_MCP: McpToolTransport(
-                mcp_pool if mcp_pool is not None else McpSessionPool()
-            ),
-        }
-    )
+    transports: dict[str, AgentTransport] = {
+        KIND_KIO: kio_transport,
+        KIND_HTTP: HttpToolTransport(),
+        KIND_CLI: CliToolTransport(),
+        KIND_MCP: McpToolTransport(
+            mcp_pool if mcp_pool is not None else McpSessionPool()
+        ),
+    }
+
+    if config is not None:
+        # LLM agents need a model, which only the full configuration names.
+        # Without it a step addressed to one fails as unroutable, saying so.
+        transports[KIND_LLM] = LlmTransport(config)
+
+    return RoutingTransport(transports)

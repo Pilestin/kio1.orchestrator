@@ -3,6 +3,7 @@ from pathlib import Path
 from dispatch.agent_registry import (
     KIND_CLI,
     KIND_HTTP,
+    KIND_LLM,
     KIND_MCP,
     AgentEndpoint,
     AgentRegistry,
@@ -19,6 +20,7 @@ _KIND_LABELS = {
     KIND_HTTP: "HTTP API",
     KIND_CLI: "local command",
     KIND_MCP: "MCP server",
+    KIND_LLM: "LLM agent",
 }
 
 

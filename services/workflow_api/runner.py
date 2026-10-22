@@ -839,7 +839,7 @@ def build_runner(
         transport=(
             transport
             if transport is not None
-            else build_transport(config.dispatch, live_directory.mcp_pool)
+            else build_transport(config.dispatch, live_directory.mcp_pool, config)
         ),
         directory=live_directory,
         scoreboard=(

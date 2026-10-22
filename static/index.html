@@ -222,24 +222,54 @@
         <button class="icon-button" id="close-editor" title="Close" aria-label="Close the editor"><svg class="icon"><use href="#i-close"/></svg></button>
       </div>
       <div class="card-body stack">
-        <p class="hint" id="editor-hint">
-          Paste a definition — the same document an agent serves at <code>/manifest</code>.
-          It is tried before it is trusted; one that does not answer is kept as
-          <code>unreachable</code> rather than rejected.
-          <a href="#" id="to-help">What can go in here?</a>
-        </p>
-        <textarea id="entry" spellcheck="false"></textarea>
+        <div class="segmented small" id="editor-mode" role="radiogroup" aria-label="Editor">
+          <button data-mode="agent" aria-checked="true" role="radio">Agent</button>
+          <button data-mode="json" aria-checked="false" role="radio">JSON</button>
+        </div>
+
+        <div id="agent-form" class="stack">
+          <div class="examples" id="agent-templates">
+            <button class="example" data-template="reviewer">Code reviewer</button>
+            <button class="example" data-template="requirements">Requirements writer</button>
+            <button class="example" data-template="docs">Documentation writer</button>
+          </div>
+          <div class="grid-2">
+            <label class="field">Name
+              <input type="text" id="agent-name" placeholder="CodeReviewer" spellcheck="false">
+            </label>
+            <label class="field">Skill
+              <input type="text" id="agent-skill" class="mono" placeholder="code_review" spellcheck="false">
+            </label>
+          </div>
+          <label class="field">What it does
+            <input type="text" id="agent-description" placeholder="Reviews code for bugs and explains each one.">
+          </label>
+          <label class="field">Instructions
+            <textarea id="agent-instructions" class="prose-input" placeholder="You are a careful code reviewer. …"></textarea>
+          </label>
+        </div>
+
+        <div id="json-form" class="stack hidden">
+          <p class="hint" id="editor-hint">
+            Any kind of target, as JSON. <a href="#" id="to-help">What can go in here?</a>
+          </p>
+          <textarea id="entry" spellcheck="false"></textarea>
+        </div>
         <div class="row">
           <button class="action primary" id="save-entry">Add</button>
           <button class="action" id="test-entry">Test connection</button>
           <button class="action ghost hidden" id="cancel-edit">Cancel</button>
           <label class="switch small" for="persist">
             <input type="checkbox" id="persist" checked><span class="track"></span>
-            Save to the configuration file
+            Keep after restart
           </label>
           <span id="editor-result" class="small"></span>
         </div>
         <div id="probe-result" class="notice hidden"></div>
+        <div class="row hidden" id="history-row">
+          <select id="history-select" aria-label="Earlier versions"></select>
+          <button class="action" id="history-restore">Restore</button>
+        </div>
       </div>
     </section>
 
@@ -643,7 +673,7 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
           rewrites the <code>dispatch.agents</code> section of the configuration
           file. Nothing else in it is touched, the write is atomic, and the previous
           contents are kept alongside as <code>config.json.bak</code>.</p>
-        <p>Untick <em>Save to the configuration file</em> to add something for this
+        <p>Untick <em>Keep after restart</em> to add something for this
           process only. On a deployment that ships a read-only configuration, set
           <code>KIO1_CONFIG_WRITABLE=0</code>; this console then says so rather than
           failing when you press Add.</p>

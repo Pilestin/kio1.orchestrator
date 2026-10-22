@@ -508,6 +508,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 
 textarea { font-family: var(--mono); resize: vertical; }
 #entry { min-height: 13rem; font-size: 0.82rem; }
+textarea.prose-input { font-family: var(--sans); min-height: 9rem; font-size: 0.9rem; }
+#editor-mode { align-self: flex-start; }
 
 .grid-2 {
   display: grid;

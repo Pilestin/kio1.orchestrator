@@ -67,14 +67,14 @@ Doğrulama: `.venv` olmadan `start.py` sıfırdan kurdu ve başlattı; "41.01, 2
 
 ### Adım 3 — Veri katmanı: her şey veritabanında  `M`
 
-- [ ] Tek bir depo arayüzü: SQLite (varsayılan) ve PostgreSQL uygulamaları; şema sürümlü migration dosyalarıyla yönetilir.
+- [x] **Agent deposu** — 2026-10-22: `AgentStore` arayüzü; SQLite (varsayılan, `data/kio1.db`) ve `config.json` (`KIO1_AGENT_STORE=file`). *(Kalan: PostgreSQL agent deposu; sürümlü migration dosyaları.)*
 - [ ] Yeni tablolar:
   - `agents`: tanım, `enabled`, kaynak, oluşturan, sürüm.
   - `agent_versions`: değişiklik geçmişi, geri alma.
   - `conversations` / `messages`: sohbet geçmişi.
   - `runs` / `iterations`: bir isteğin turları (plan, yürütme, değerlendirme).
   - Mevcut `sessions`, `steps`, `artifacts` ve `lineage` tabloları bunlara bağlanır.
-- [ ] `config.json`'daki agent'lar ilk açılışta veritabanına aktarılır (seed); sonrasında doğruluk kaynağı veritabanıdır. Dışa ve içe aktarma (JSON/YAML) desteklenir.
+- [x] **Aktarım ve geçmiş** — 2026-10-22: `config.json` agent'ları ilk açılışta bir kez aktarılır; her değişiklik sürüm olarak tutulur, konsoldan geri yüklenir; `GET /registry/export`. Canlı: 18 agent sırasıyla aktarıldı. *(Kalan: içe aktarma; sohbet/tur tabloları.)*
 - [ ] "Bu çalıştırmada hangi agent'ın hangi sürümü kullanıldı" kaydı tutulur.
 
 ### Adım 4 — Ajan döngüsü: planla → çalıştır → değerlendir → cevapla  `L`
@@ -109,11 +109,11 @@ Düzen: **sol** sohbetler ve projeler · **orta** sohbet · **sağ** canlı çal
 
 "Agent Ekle" sihirbazı; her türün kendi formu ve **"Dene"** alanı vardır:
 
-- [ ] **LLM agent** *(yeni tür: `llm`)*: ad, açıklama, rol talimatı (sistem prompt'u), model, isteğe bağlı araçlar (diğer agent'lar ya da MCP araçları). KIO1 içinde barındırılır; ayrı bir sunucu gerekmez. Örnekler: "Gereksinim analisti", "Kod inceleyici", "Türkçe dokümantasyon yazarı".
+- [x] **LLM agent** — 2026-10-22: `type: llm`; ad, açıklama, talimat, yetenek; isteğe bağlı model. Konsolda form (Agent / JSON). Canlı: şablondan oluşturulan CodeReviewer planlayıcı tarafından seçildi, gerçek hatayı buldu. Bkz. `docs/llm-agents.md`. *(Kalan: agent'ın kendi araç çağırması.)*
 - [ ] **Web API**: URL yapıştır → "Dene" → gelen yanıttan sonuç alanına tıklayarak `result_path` seçilir. **OpenAPI/Swagger içe aktarma**: her endpoint otomatik olarak argüman şemasıyla capability olur.
 - [ ] **MCP galerisi**: filesystem, git, fetch, GitHub, SQLite gibi yaygın sunucular tek tıkla eklenir; gereken `npx` ya da `uvx` yoksa nasıl kurulacağı gösterilir.
 - [ ] **Komut / script**: komut, klasör, izin verilen argümanlar; "bu komut dosya değiştirir mi?" onay ayarı.
-- [ ] **Şablondan başla**: hazır agent şablonları; agent'ı dosya olarak dışa aktar ve paylaş.
+- [x] **Şablondan başla** — 2026-10-22: üç hazır şablon (kod inceleyici, gereksinim yazarı, dokümantasyon yazarı); dışa aktarma `GET /registry/export`. *(Kalan: tek agent'ı dosya olarak paylaşma/içe alma.)*
 - [ ] **Geliştiriciler için SDK**: `kio1_sdk` ile 10 satırda Python agent'ı yazılır; kendini KIO1'e otomatik kaydeder (manifest + heartbeat).
 - [ ] **Agent test alanı**: tek bir agent'ı plan olmadan, verilen girdiyle doğrudan çalıştırıp çıktıyı görme.
 

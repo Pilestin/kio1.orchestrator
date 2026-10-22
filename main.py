@@ -1,7 +1,9 @@
 import logging
+import os
 import sys
 from dataclasses import replace
 
+from core.agent_store import STORE_FILE, open_agent_store, registry_from
 from core.chat_history import (
     append_assistant_message,
     append_user_message,
@@ -32,6 +34,7 @@ from dispatch.scoreboard import Scoreboard
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_executor import dispatch_plan, render_summary
 from providers.provider_client import load_provider
+from services.session_manager.storage import DATABASE_URL_ENV, DEFAULT_DATABASE_URL
 
 logger = logging.getLogger("main")
 
@@ -47,6 +50,16 @@ def main() -> None:
 
         load_dotenv()
         config = load_config()
+        # The same agents the web console manages: from the database once
+        # it holds them, rather than config.json's original list.
+        store = open_agent_store(
+            os.environ.get(DATABASE_URL_ENV, "").strip() or DEFAULT_DATABASE_URL
+        )
+
+        if store.kind != STORE_FILE:
+            config.dispatch = replace(
+                config.dispatch, registry=registry_from(store.read())
+            )
         init_telemetry(config.telemetry, llm=config.model)
 
         if config.telemetry.enabled:
@@ -129,7 +142,7 @@ def main() -> None:
     # One transport for the whole session: a NATS transport owns a connection
     # and a thread, so building one per turn would leak both.
     transport = (
-        build_transport(config.dispatch, directory.mcp_pool)
+        build_transport(config.dispatch, directory.mcp_pool, config)
         if config.dispatch.enabled
         else None
     )

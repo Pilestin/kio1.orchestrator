@@ -32,6 +32,7 @@ from typing import Any
 from dispatch.agent_registry import (
     KIND_CLI,
     KIND_KIO,
+    KIND_LLM,
     KIND_MCP,
     AgentEndpoint,
     AgentRegistry,
@@ -315,6 +316,12 @@ def probe_target(
             return ProbeResult(False, "not configured as an MCP server", endpoint)
 
         return _probe_mcp(endpoint, spec, health, pool)
+
+    if endpoint.kind == KIND_LLM:
+        # Runs inside KIO1 on the configured model; there is nothing to dial.
+        # Whether the model answers is the planner's problem too, and the
+        # step says so if it does not.
+        return ProbeResult(True, "", endpoint)
 
     if endpoint.kind == KIND_CLI:
         if not address:
