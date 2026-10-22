@@ -11,7 +11,7 @@ import logging
 import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from hmac import compare_digest
 from pathlib import Path
@@ -41,10 +41,12 @@ from core.config_writer import (
     writing_enabled,
 )
 from core.dotenv import load_dotenv, save_dotenv_value
+from core.model_pull import PullManager
 from core.prompt_loader import load_prompt
 from core.run_events import RunEvent, RunEventBus, install_log_relay
 from core.service_telemetry import TraceContextMiddleware
 from core.session_client import NullSessionClient, SessionClient, SessionClientError
+from core.system_info import hardware, ollama_status, suggest
 from core.telemetry import init_telemetry, shutdown_telemetry, trace_provider_preload
 from dispatch.agent_registry import AgentEndpoint, McpToolSpec, load_agent_entry
 from dispatch.directory import (
@@ -136,6 +138,7 @@ class _State:
     events: RunEventBus = field(default_factory=RunEventBus)
     approvals: ApprovalDesk = field(default_factory=ApprovalDesk)
     store: AgentStore = field(default_factory=FileAgentStore)
+    pulls: PullManager = field(default_factory=PullManager)
 
 
 _state: _State | None = None
@@ -1711,3 +1714,88 @@ def export_agents(
     _require_registry_token(request)
 
     return {"agents": state.store.read()}
+
+
+class PullRequest(BaseModel):
+    """A local model to download."""
+
+    model: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9._:/-]+$")
+
+
+def _ollama_endpoint(config: Config) -> str:
+    """Return Ollama's address, as configured for the planner."""
+    endpoint = config.provider_options.get("endpoint")
+    return (
+        endpoint if isinstance(endpoint, str) and endpoint else "http://127.0.0.1:11434"
+    )
+
+
+@app.get("/system")
+def system_status(
+    request: Request, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Describe this machine and what it can run, for first-time setup.
+
+    Args:
+        request: Checked for the registry token.
+        state: The live service.
+
+    Returns:
+        The hardware, Ollama's state, model suggestions marked for this
+        machine, and the settings a setup step changes.
+    """
+    _require_registry_token(request)
+
+    config = state.runner.config
+    machine = hardware()
+    ollama = ollama_status(_ollama_endpoint(config))
+
+    return {
+        "hardware": asdict(machine),
+        "ollama": ollama,
+        "suggestions": suggest(machine, ollama["models"]),
+        "planner": {"provider": config.provider, "model": config.model},
+        "answerer": {
+            "provider": config.orchestration.review_provider or config.provider,
+            "model": config.orchestration.review_model or config.model,
+        },
+        "workspace": config.dispatch.workspace.path,
+        "pulls": state.pulls.status(),
+    }
+
+
+@app.post("/system/models/pull", status_code=status.HTTP_202_ACCEPTED)
+def pull_model(
+    body: PullRequest, request: Request, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Start downloading a local model; progress is at `GET /system/models/pull`.
+
+    Args:
+        body: The model.
+        request: Checked for the registry token.
+        state: The download manager.
+
+    Returns:
+        The download's progress so far.
+    """
+    _require_registry_token(request)
+
+    endpoint = _ollama_endpoint(state.runner.config)
+
+    if not ollama_status(endpoint)["running"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ollama is not running. Start it, or run start.py, which starts it.",
+        )
+
+    return state.pulls.start(endpoint, body.model).to_dict()
+
+
+@app.get("/system/models/pull")
+def pull_progress(
+    request: Request, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Return every model download this service started, newest first."""
+    _require_registry_token(request)
+
+    return {"pulls": state.pulls.status()}

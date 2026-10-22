@@ -699,6 +699,40 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
   <ol id="palette-list" class="palette-list" role="listbox"></ol>
 </dialog>
 
+<!-- First-time setup: a model, a folder, a first run. -->
+<dialog class="setup" id="setup" aria-labelledby="setup-title">
+  <div class="setup-body">
+    <div class="setup-head">
+      <h2 id="setup-title">Set up KIO1</h2>
+      <button class="icon-button" id="setup-close" aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
+    </div>
+
+    <section class="setup-step">
+      <h3><span class="step-number">1</span>Model</h3>
+      <p id="setup-machine" class="small muted"></p>
+      <div id="setup-ollama" class="notice warn hidden"></div>
+      <ol id="setup-models" class="setup-models"></ol>
+      <div class="row">
+        <button class="action primary" id="setup-use">Use recommended</button>
+        <button class="action ghost" id="setup-cloud">Use a cloud model instead</button>
+      </div>
+    </section>
+
+    <section class="setup-step">
+      <h3><span class="step-number">2</span>Your code</h3>
+      <div class="question-row">
+        <input type="text" id="setup-workspace" class="mono" placeholder="C:\projects\my-app" spellcheck="false" aria-label="Project folder">
+        <button class="action" id="setup-workspace-save">Save</button>
+      </div>
+    </section>
+
+    <section class="setup-step">
+      <h3><span class="step-number">3</span>Try it</h3>
+      <button class="action" id="setup-try"><svg class="icon"><use href="#i-run"/></svg>Show the latest commits and the Python version</button>
+    </section>
+  </div>
+</dialog>
+
 <!-- Questions the page asks: replaces window.prompt and window.confirm. -->
 <dialog class="ask" id="ask">
   <form method="dialog">

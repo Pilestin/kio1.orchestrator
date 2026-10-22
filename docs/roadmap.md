@@ -59,11 +59,11 @@ Doğrulama: `.venv` olmadan `start.py` sıfırdan kurdu ve başlattı; "41.01, 2
 
 - [x] **Sağlayıcı ve model seçimi (Ayarlar sekmesi)** — 2026-10-22: Ollama / OpenRouter / OpenAI / Anthropic arasında yeniden başlatmadan geçiş; aranabilir model listesi (OpenRouter'ın 468 modeli anahtarsız listeleniyor); API anahtarı önce denenip yalnızca çalışırsa git dışındaki `.env`'e yazılıyor. `.env` artık okunuyor ve git dışında.
 - [x] **Canlı izleme** — 2026-10-22: çalışan bir session'da modelin yazdığı plan token token, adımlar başladı/bitti (çıktı önizlemesiyle) ve KIO1'in o çalışmaya ait log satırları SSE ile konsolda (`GET /workflow/{id}/events`). Yerel modelin prompt okuma süresi sayaçla gösteriliyor. Olaylar şimdilik bellekte (son 50 çalışma); veritabanına yazılması Adım 3–4'te.
-- [ ] **1. Model sağlayıcı (sihirbaz)**: "Bilgisayarımda çalışsın (Ollama)" / "OpenAI" / "Anthropic" / "OpenRouter" ilk açılışta adım adım. Ollama seçilirse kurulu olup olmadığı ve çalışıp çalışmadığı denetlenir, kurulu modeller listelenir, donanıma göre model önerilir (RAM/GPU tespiti) ve konsoldan `ollama pull` ilerleme çubuğuyla yapılır. Bulut seçilirse API anahtarı istenir ve bir test çağrısı yapılır.
-- [ ] **2. Çalışma klasörü**: KIO1'in üzerinde çalışacağı proje klasörü seçilir.
+- [x] **1. Model** — 2026-10-22: "Set up KIO1" diyaloğu ilk açılışta bir kez çıkar: makine özeti (RAM/CPU/GPU, Ollama durumu), donanıma göre önerilen modeller, konsoldan indirme (ilerleme çubuğu), "Use recommended" ile planlama + cevap modelini tek tıkla ayarlar; bulut için Settings'e yönlendirir. Bkz. `docs/setup.md`.
+- [x] **2. Çalışma klasörü** — 2026-10-22: kurulum diyaloğunda tek alan.
 - [ ] **3. Hazır agent paketleri**: "Dosya okuma/yazma (MCP filesystem)", "Git geçmişi", "Kod üretici", "Test çalıştırıcı", "Web'den sayfa getir" kutularla seçilir.
-- [ ] **4. Deneme**: örnek bir istekle uçtan uca çalıştırma ve "Hazırsınız" ekranı.
-- [ ] **Sistem durumu sayfası**: model, veritabanı, agent'lar ve disk durumu tek sayfada, sorun varsa sade dille ne yapılacağı yazar.
+- [x] **3. Deneme** — 2026-10-22: tek tıkla örnek istek çalışır, canlı panel açılır.
+- [ ] **Sistem durumu sayfası**: *(kısmen — `GET /system` makine ve Ollama durumunu veriyor; veritabanı/disk ve konsolda ayrı sayfa yok.)*
 
 ### Adım 3 — Veri katmanı: her şey veritabanında  `M`
 
