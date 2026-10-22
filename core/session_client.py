@@ -13,7 +13,17 @@ _MAX_ERROR_BODY_CHARS = 512
 
 
 class SessionClientError(Exception):
-    """Raised when the Session Manager could not be reached or refused a call."""
+    """Raised when the Session Manager could not be reached or refused a call.
+
+    Attributes:
+        status: The HTTP status the Session Manager answered with, or None
+            when it was not reached. A 404 means the conversation or session
+            does not exist, which a caller reports differently from an outage.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class SessionClient:
@@ -35,19 +45,29 @@ class SessionClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
 
-    def create_session(self, request_text: str) -> UUID:
+    def create_session(
+        self, request_text: str, conversation_id: UUID | None = None
+    ) -> UUID:
         """Open a session and return its identifier.
 
         Args:
             request_text: The user request the workflow was built from.
+            conversation_id: The conversation it continues; None opens a
+                conversation for it.
 
         Returns:
             The new session identifier.
 
         Raises:
-            SessionClientError: If the session could not be opened.
+            SessionClientError: If the session could not be opened, with
+                status 404 when the conversation does not exist.
         """
-        payload = self._call("POST", "/sessions", {"request_text": request_text})
+        body: dict[str, Any] = {"request_text": request_text}
+
+        if conversation_id is not None:
+            body["conversation_id"] = str(conversation_id)
+
+        payload = self._call("POST", "/sessions", body)
         session_id = payload.get("session_id")
 
         if not isinstance(session_id, str):
@@ -126,6 +146,64 @@ class SessionClient:
 
         return [item for item in decoded if isinstance(item, dict)]
 
+    def create_conversation(self) -> dict[str, Any]:
+        """Open an empty conversation.
+
+        Returns:
+            The decoded `Conversation`.
+
+        Raises:
+            SessionClientError: If it could not be opened.
+        """
+        return self._call("POST", "/conversations", {})
+
+    def list_conversations(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Return the conversations most recently added to, newest first.
+
+        Raises:
+            SessionClientError: If the list could not be read.
+        """
+        decoded = self._request("GET", f"/conversations?limit={int(limit)}", None)
+
+        if not isinstance(decoded, list):
+            raise SessionClientError(
+                f"Session Manager returned {type(decoded).__name__}, "
+                "expected a JSON array of conversations"
+            )
+
+        return [item for item in decoded if isinstance(item, dict)]
+
+    def get_conversation(self, conversation_id: UUID) -> dict[str, Any]:
+        """Return a conversation with each of its runs.
+
+        Returns:
+            The decoded `ConversationDetail`.
+
+        Raises:
+            SessionClientError: If it could not be read, with status 404 when
+                it does not exist.
+        """
+        return self._call("GET", f"/conversations/{conversation_id}", None)
+
+    def delete_conversation(self, conversation_id: UUID) -> bool:
+        """Delete a conversation and every run in it.
+
+        Returns:
+            True when it was deleted, False when it did not exist.
+
+        Raises:
+            SessionClientError: If the Session Manager could not do it.
+        """
+        try:
+            self._request("DELETE", f"/conversations/{conversation_id}", None)
+        except SessionClientError as error:
+            if error.status == 404:
+                return False
+
+            raise
+
+        return True
+
     def _call(
         self, method: str, path: str, body: dict[str, Any] | None
     ) -> dict[str, Any]:
@@ -191,7 +269,8 @@ class SessionClient:
         except urllib.error.HTTPError as error:
             raise SessionClientError(
                 f"Session Manager returned HTTP {error.code} for "
-                f"{method} {path}: {_read_error_body(error)}"
+                f"{method} {path}: {_read_error_body(error)}",
+                status=error.code,
             ) from error
         except urllib.error.URLError as error:
             raise SessionClientError(
@@ -202,6 +281,9 @@ class SessionClient:
                 f"Session Manager did not answer {method} {path} within "
                 f"{self._timeout:g}s"
             ) from error
+
+        if not raw:
+            return None  # 204: a deletion has nothing to say
 
         try:
             decoded: Any = json.loads(raw)
@@ -237,9 +319,38 @@ class SessionClient:
 class NullSessionClient:
     """Records nothing, so callers need no branch when recording is disabled."""
 
-    def create_session(self, request_text: str) -> UUID:
+    def create_session(
+        self, request_text: str, conversation_id: UUID | None = None
+    ) -> UUID:
         """Return a locally generated identifier without contacting a service."""
         return uuid4()
+
+    def create_conversation(self) -> dict[str, Any]:
+        """Return a conversation that exists only in the reply.
+
+        A chat still needs an identifier to group its requests under, even
+        when nothing is kept; recording being off is not a failure.
+        """
+        return {"conversation_id": str(uuid4()), "title": ""}
+
+    def list_conversations(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Return an empty list: nothing is recorded, as `list_sessions`."""
+        return []
+
+    def get_conversation(self, conversation_id: UUID) -> dict[str, Any]:
+        """Report that nothing was recorded.
+
+        Raises:
+            SessionClientError: Always, as a 404.
+        """
+        raise SessionClientError(
+            "Session recording is disabled; no conversation is available",
+            status=404,
+        )
+
+    def delete_conversation(self, conversation_id: UUID) -> bool:
+        """Report that there was nothing to delete."""
+        return False
 
     def update_session(self, session_id: UUID, **fields: Any) -> None:
         """Do nothing."""

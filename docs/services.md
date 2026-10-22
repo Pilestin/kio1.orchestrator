@@ -60,7 +60,11 @@ request does not pay model-loading cost.
 
 | Route | Purpose |
 |-------|---------|
-| `POST /sessions` | Open a session |
+| `POST /sessions` | Open a session, in the named `conversation_id` or a new conversation |
+| `POST /conversations` | Open an empty conversation |
+| `GET /conversations?limit=N` | Conversations, the one last written to first |
+| `GET /conversations/{id}` | A conversation with each session's detail |
+| `DELETE /conversations/{id}` | Delete a conversation and its sessions |
 | `GET /sessions/{session_id}` | Session with steps and lineage |
 | `PATCH /sessions/{session_id}` | Record status, workflow id, execution mode, or error |
 | `POST /sessions/{session_id}/steps` | Record one step outcome and its output |

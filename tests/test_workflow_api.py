@@ -281,13 +281,21 @@ class FakeSessionClient:
             {"session_id": str(self.session_id), "status": "completed"}
         ]
 
-    def create_session(self, request_text: str) -> UUID:
+    def create_session(
+        self, request_text: str, conversation_id: UUID | None = None
+    ) -> UUID:
         if self.fail:
             raise SessionClientError("Session Manager is unreachable")
 
         self.created.append(request_text)
 
         return self.session_id
+
+    def create_conversation(self) -> dict[str, Any]:
+        if self.fail:
+            raise SessionClientError("Session Manager is unreachable")
+
+        return {"conversation_id": str(uuid4()), "title": ""}
 
     def get_session(self, session_id: UUID) -> dict[str, Any]:
         if self.detail is None:

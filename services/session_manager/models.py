@@ -128,6 +128,12 @@ class Conversation(BaseModel):
     updated_at: datetime
 
 
+class CreateConversationRequest(BaseModel):
+    """Opens an empty conversation; its first request gives it a title."""
+
+    title: str = Field(default="", max_length=200)
+
+
 class Step(BaseModel):
     """One recorded workflow step."""
 
@@ -157,3 +163,14 @@ class SessionDetail(BaseModel):
     session: Session
     steps: list[Step] = Field(default_factory=list)
     lineage: list[LineageEdge] = Field(default_factory=list)
+
+
+class ConversationDetail(BaseModel):
+    """A conversation with each of its runs, oldest first.
+
+    Everything a chat needs to show it again in one read: every request,
+    its steps, and its answer.
+    """
+
+    conversation: Conversation
+    sessions: list[SessionDetail] = Field(default_factory=list)

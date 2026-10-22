@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from services.session_manager.models import (
     Conversation,
+    ConversationDetail,
     LineageEdge,
     RecordStepRequest,
     Session,
@@ -666,6 +667,31 @@ class PostgresSessionRepository:
                 )
 
         return _to_step((*row[:7], step.output, row[7]))
+
+
+def conversation_detail(
+    repository: SessionRepository, conversation_id: UUID
+) -> ConversationDetail | None:
+    """Return a conversation with each of its runs, or None if unknown.
+
+    Built from the repository's own calls, so every implementation answers
+    alike; a conversation is a handful of runs, and one read per run costs
+    nothing worth a query of its own.
+    """
+    conversation = repository.get_conversation(conversation_id)
+
+    if conversation is None:
+        return None
+
+    details = (
+        repository.get_session(session.session_id)
+        for session in repository.conversation_sessions(conversation_id)
+    )
+
+    return ConversationDetail(
+        conversation=conversation,
+        sessions=[detail for detail in details if detail is not None],
+    )
 
 
 def _last_step_with_output(steps: list[Step]) -> Step | None:

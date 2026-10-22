@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 
 from core.config_loader import load_config
 from core.service_telemetry import (
@@ -13,6 +13,9 @@ from core.service_telemetry import (
     shutdown_service_tracing,
 )
 from services.session_manager.models import (
+    Conversation,
+    ConversationDetail,
+    CreateConversationRequest,
     CreateSessionRequest,
     RecordStepRequest,
     Session,
@@ -20,7 +23,11 @@ from services.session_manager.models import (
     Step,
     UpdateSessionRequest,
 )
-from services.session_manager.repository import SessionRepository
+from services.session_manager.repository import (
+    SessionRepository,
+    UnknownConversationError,
+    conversation_detail,
+)
 from services.session_manager.storage import DATABASE_URL_ENV, open_repository
 
 logger = logging.getLogger(__name__)
@@ -138,11 +145,83 @@ def create_session(
     request: CreateSessionRequest,
     repository: SessionRepository = Depends(get_repository),
 ) -> Session:
-    """Open a session for one workflow run."""
-    session = repository.create_session(request.request_text)
+    """Open a session for one workflow run.
+
+    It joins the conversation the request names, or opens one of its own.
+    """
+    try:
+        session = repository.create_session(
+            request.request_text, request.conversation_id
+        )
+    except UnknownConversationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown conversation: {request.conversation_id}",
+        ) from error
+
     logger.info("Session created: session_id=%s", session.session_id)
 
     return session
+
+
+@app.post("/conversations", status_code=status.HTTP_201_CREATED)
+def create_conversation(
+    request: CreateConversationRequest,
+    repository: SessionRepository = Depends(get_repository),
+) -> Conversation:
+    """Open an empty conversation."""
+    return repository.create_conversation(request.title)
+
+
+@app.get("/conversations")
+def list_conversations(
+    limit: int = 25,
+    repository: SessionRepository = Depends(get_repository),
+) -> list[Conversation]:
+    """Return the conversations most recently added to, newest first.
+
+    Args:
+        limit: How many to return, clamped as for sessions.
+        repository: Where conversations are stored.
+
+    Returns:
+        Conversations without their runs.
+    """
+    return repository.list_conversations(max(1, min(limit, 200)))
+
+
+@app.get("/conversations/{conversation_id}")
+def get_conversation(
+    conversation_id: UUID,
+    repository: SessionRepository = Depends(get_repository),
+) -> ConversationDetail:
+    """Return a conversation with each of its runs, oldest first."""
+    detail = conversation_detail(repository, conversation_id)
+
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown conversation: {conversation_id}",
+        )
+
+    return detail
+
+
+@app.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(
+    conversation_id: UUID,
+    repository: SessionRepository = Depends(get_repository),
+) -> Response:
+    """Delete a conversation and every run in it."""
+    if not repository.delete_conversation(conversation_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown conversation: {conversation_id}",
+        )
+
+    logger.info("Conversation deleted: conversation_id=%s", conversation_id)
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/sessions")

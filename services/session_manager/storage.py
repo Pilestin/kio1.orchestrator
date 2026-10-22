@@ -22,6 +22,8 @@ from services.session_manager.repository import (
     InMemorySessionRepository,
     PostgresSessionRepository,
     SessionRepository,
+    UnknownConversationError,
+    conversation_detail,
 )
 from services.session_manager.sqlite_repository import SqliteSessionRepository
 
@@ -102,12 +104,51 @@ class EmbeddedSessionClient:
         """Release the store."""
         self._close()
 
-    def create_session(self, request_text: str) -> UUID:
+    def create_session(
+        self, request_text: str, conversation_id: UUID | None = None
+    ) -> UUID:
         """Open a session and return its identifier."""
         try:
-            return self._repository.create_session(request_text).session_id
+            return self._repository.create_session(
+                request_text, conversation_id
+            ).session_id
+        except UnknownConversationError as error:
+            raise SessionClientError(
+                f"No conversation {conversation_id}", status=404
+            ) from error
         except Exception as error:
             raise SessionClientError(f"Could not open a session: {error}") from error
+
+    def create_conversation(self) -> dict[str, Any]:
+        """Open an empty conversation."""
+        try:
+            conversation = self._repository.create_conversation()
+        except Exception as error:
+            raise SessionClientError(
+                f"Could not open a conversation: {error}"
+            ) from error
+
+        return conversation.model_dump(mode="json")
+
+    def list_conversations(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Return the conversations most recently added to, newest first."""
+        return [
+            conversation.model_dump(mode="json")
+            for conversation in self._repository.list_conversations(limit)
+        ]
+
+    def get_conversation(self, conversation_id: UUID) -> dict[str, Any]:
+        """Return a conversation with each of its runs, as JSON-ready data."""
+        detail = conversation_detail(self._repository, conversation_id)
+
+        if detail is None:
+            raise SessionClientError(f"No conversation {conversation_id}", status=404)
+
+        return detail.model_dump(mode="json")
+
+    def delete_conversation(self, conversation_id: UUID) -> bool:
+        """Delete a conversation and every run in it; False if unknown."""
+        return self._repository.delete_conversation(conversation_id)
 
     def update_session(self, session_id: UUID, **fields: Any) -> None:
         """Record progress on a session, logging rather than raising."""

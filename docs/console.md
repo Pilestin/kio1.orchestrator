@@ -269,7 +269,11 @@ All of them are ordinary API endpoints; the console is just one caller.
 | `PUT /registry/agents/{id}` | Replace one target's definition |
 | `DELETE /registry/agents/{id}` | Remove it, from the file too when it is in there |
 | `GET /registry/config` | Which file saves go to, and whether they can |
-| `POST /workflow/run` | Start a run |
+| `POST /workflow/run` | Start a run; `conversation_id` continues a conversation, without it a new one starts |
+| `POST /conversations` | Open an empty conversation (New chat) |
+| `GET /conversations?limit=N` | Conversations, the one last written to first |
+| `GET /conversations/{id}` | One conversation with every run in it, oldest first |
+| `DELETE /conversations/{id}` | Delete it and its runs (registry token) |
 | `GET /workflows?limit=N` | Recent runs, newest first |
 | `GET /workflow/{session_id}` | One run with its steps |
 | `GET /workflow/{session_id}/events` | The run's live stream (Server-Sent Events); resumes from `Last-Event-ID` or `?after=` |

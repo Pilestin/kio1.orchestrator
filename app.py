@@ -80,15 +80,21 @@ REGISTRY_TOKEN_ENV = "KIO1_REGISTRY_TOKEN"
 
 
 class RunWorkflowRequest(BaseModel):
-    """A natural-language software-development request."""
+    """A natural-language software-development request.
+
+    `conversation_id` continues a conversation; without it the request
+    starts a new one.
+    """
 
     request: str = Field(min_length=1, max_length=100_000)
+    conversation_id: UUID | None = None
 
 
 class RunWorkflowResponse(BaseModel):
     """Acknowledges that a workflow was accepted for execution."""
 
     session_id: UUID
+    conversation_id: UUID
     status: str
     status_url: str
 
@@ -429,11 +435,27 @@ def run_workflow(
         The session identifier and where to poll for progress.
 
     Raises:
-        HTTPException: If a session could not be opened.
+        HTTPException: 404 when the conversation does not exist, 503 when a
+            session could not be opened.
     """
+    conversation_id = body.conversation_id
+
     try:
-        session_id = state.session_client.create_session(body.request)
+        # Opened here rather than left to the Session Manager, so its
+        # identifier can be handed back with the session's.
+        if conversation_id is None:
+            conversation_id = UUID(
+                state.session_client.create_conversation()["conversation_id"]
+            )
+
+        session_id = state.session_client.create_session(body.request, conversation_id)
     except SessionClientError as error:
+        if error.status == status.HTTP_404_NOT_FOUND:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No conversation {conversation_id}",
+            ) from error
+
         logger.error("Could not open a session: %s", error)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -447,6 +469,7 @@ def run_workflow(
 
     return RunWorkflowResponse(
         session_id=session_id,
+        conversation_id=conversation_id,
         status="pending",
         status_url=str(request.url_for("get_workflow", session_id=session_id)),
     )
@@ -505,6 +528,121 @@ def get_workflow(
         ) from error
 
     return JSONResponse(content=detail)
+
+
+@app.post("/conversations", status_code=status.HTTP_201_CREATED)
+def create_conversation(state: _State = Depends(get_state)) -> dict[str, Any]:
+    """Open an empty conversation: the console's "New chat".
+
+    Raises:
+        HTTPException: 503 when the Session Manager is unavailable.
+    """
+    try:
+        return state.session_client.create_conversation()
+    except SessionClientError as error:
+        logger.warning("Could not open a conversation: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Session Manager is unavailable",
+        ) from error
+
+
+@app.get("/conversations")
+def list_conversations(
+    limit: int = 25,
+    state: _State = Depends(get_state),
+) -> dict[str, Any]:
+    """Return the conversations most recently added to, newest first.
+
+    Args:
+        limit: How many to return.
+        state: The Session Manager client.
+
+    Returns:
+        Conversations without their runs; an empty list when nothing is
+        recorded, as `/workflows`.
+    """
+    try:
+        return {
+            "conversations": state.session_client.list_conversations(
+                max(1, min(limit, 200))
+            )
+        }
+    except SessionClientError as error:
+        logger.warning("Could not list conversations: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Session Manager is unavailable",
+        ) from error
+
+
+@app.get("/conversations/{conversation_id}")
+def get_conversation(
+    conversation_id: UUID,
+    state: _State = Depends(get_state),
+) -> JSONResponse:
+    """Return a conversation with each of its runs, oldest first.
+
+    Every request, its steps, and its answer: what a chat shows when it is
+    opened again.
+
+    Raises:
+        HTTPException: 404 when the conversation is unknown, 503 when the
+            Session Manager is unavailable.
+    """
+    try:
+        detail = state.session_client.get_conversation(conversation_id)
+    except SessionClientError as error:
+        if error.status == status.HTTP_404_NOT_FOUND:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No conversation {conversation_id}",
+            ) from error
+
+        logger.warning("Could not read conversation %s: %s", conversation_id, error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Session Manager is unavailable",
+        ) from error
+
+    return JSONResponse(content=detail)
+
+
+@app.delete("/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: UUID,
+    request: Request,
+    state: _State = Depends(get_state),
+) -> dict[str, str]:
+    """Delete a conversation and every run in it.
+
+    Behind the registry token: deleting history cannot be undone, and
+    running workflows, which needs no token, must not be enough to do it.
+
+    Raises:
+        HTTPException: 404 when the conversation is unknown, 503 when the
+            Session Manager is unavailable.
+    """
+    _require_registry_token(request)
+
+    try:
+        deleted = state.session_client.delete_conversation(conversation_id)
+    except SessionClientError as error:
+        logger.warning("Could not delete conversation %s: %s", conversation_id, error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Session Manager is unavailable",
+        ) from error
+
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No conversation {conversation_id}",
+        )
+
+    logger.info("Conversation deleted: conversation_id=%s", conversation_id)
+
+    return {"conversation_id": str(conversation_id), "status": "deleted"}
 
 
 # How long one wait for new events lasts before a keep-alive is sent. Short
