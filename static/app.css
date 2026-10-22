@@ -819,6 +819,19 @@ td.actions .icon-button .icon { width: 16px; height: 16px; }
 .approval-steps li.guarded .target-name { color: var(--warn); }
 .approval-steps li.guarded .target-name::after { content: " 🔒"; font-size: 0.8em; }
 
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.question-row { display: flex; gap: 0.5rem; }
+.question-row input { flex: 1; }
+
 .lock { width: 14px; height: 14px; margin-left: 0.35rem; color: var(--warn); vertical-align: -2px; }
 
 .answer {

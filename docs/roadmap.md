@@ -81,7 +81,7 @@ Doğrulama: `.venv` olmadan `start.py` sıfırdan kurdu ve başlattı; "41.01, 2
 
 KIO1'in "orkestratör" olarak asıl değeri burada.
 
-- [ ] **Netleştirme**: istek belirsizse (ör. konum verilmemiş bir hava durumu sorusu) KIO1 plan yapmadan önce soru sorar.
+- [x] **Netleştirme** — 2026-10-22: zorunlu bir bilgi istekte yoksa planlayıcı plan yerine soru sorar; cevap isteğe eklenip yeniden planlanır, değerlendirici de görür (`orchestration.clarify/max_questions/question_timeout`). Canlı: "Şu an hava nasıl?" → model Türkçe koordinat sordu, konsoldan cevaplandı. *(Kalan: soru-cevapları oturuma kalıcı kaydetmek.)*
 - [x] **Plan önizleme ve onay** — 2026-10-22: plan çalışmadan önce gösterilir, "Run plan / Cancel"; `orchestration.approval` = `auto` / `always` / `never`, cevapsız kalan plan süre dolunca iptal. Bkz. `docs/approval.md`. *(Kalan: planı onaydan önce düzenleyebilmek.)*
 - [x] **Değerlendirme turu** — 2026-10-22: tüm plan bittikten sonra model sonuçları okur ve `done` ya da `continue` der; `continue`'da yalnızca eksik iş yeniden planlanır (`orchestration.max_rounds`, varsayılan 2). Değerlendirme başarısız olursa çalışma bozulmaz, cevap sonuçlardan yazılır. *(Kalan: `retry_step`, `ask_user`, süre/token bütçeleri.)*
 - [x] **Son cevap** — 2026-10-22: isteğin dilinde, kaynak gösteren (`[Deneme]`) cevap; oturuma kaydedilir, konsolda en üstte gösterilir. Bkz. `docs/review.md`.

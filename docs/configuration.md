@@ -46,6 +46,9 @@ agents, and the console's edits, and git ignores it.
 | `orchestration.review_prompt_path` | string | The reviewer's system prompt (default: `prompts/kio1_review_prompt.txt`) |
 | `orchestration.approval` | string | `auto` (ask when a plan could reach a target marked `approval`), `always`, or `never` (default: `auto`). See [Approving a plan](approval.md) |
 | `orchestration.approval_timeout` | number | Seconds a plan waits for approval before it is cancelled (default: `1800`) |
+| `orchestration.clarify` | boolean | Whether the planner may ask the person a question when the request lacks something it needs (default: `true`). See [Approving a plan](approval.md#when-the-planner-needs-to-ask) |
+| `orchestration.max_questions` | int | Questions per run, from 0 to 5 (default: `2`) |
+| `orchestration.question_timeout` | number | Seconds to wait for an answer (default: `1800`) |
 | `dispatch.agents.<id>.approval` | boolean | Plans that could reach this target wait for a person to approve them (default: `false`) |
 | `dispatch.agents.<id>.enabled` | boolean | Whether the planner may use this target (default: `true`). A disabled target keeps its definition and history and its row in the console, but is neither probed nor offered — the console's **Disable** button sets this |
 | `dispatch.workspace.path` | string | Repository root the agents should analyse, as *they* can see it (default: `""`, not sent) |

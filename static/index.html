@@ -148,6 +148,13 @@
             <button class="action primary" id="approval-run"><svg class="icon"><use href="#i-run"/></svg>Run plan</button>
           </div>
         </div>
+        <form id="detail-question" class="question hidden">
+          <strong id="question-text"></strong>
+          <div class="question-row">
+            <input type="text" id="question-answer" autocomplete="off" spellcheck="true" aria-labelledby="question-text">
+            <button class="action primary" type="submit" id="question-send">Send</button>
+          </div>
+        </form>
         <div id="detail-answer" class="answer hidden"></div>
 
         <div id="live" class="live hidden">

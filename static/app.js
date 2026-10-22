@@ -685,15 +685,67 @@ function hideApproval() {
   delete $("detail-approval").dataset.key;
 }
 
+/** Show what a running run is waiting for: an approval, or an answer. */
 async function loadApproval(sessionId) {
   try {
-    const pending = await api("/workflow/" + encodeURIComponent(sessionId) + "/approval");
-    if (!pending.waiting) { hideApproval(); return; }
-    if (state.selected === sessionId) showApproval(pending.plan, pending.expires_at);
+    const pending = await api("/workflow/" + encodeURIComponent(sessionId) + "/waiting");
+    if (state.selected !== sessionId) return;
+
+    if (pending.waiting && pending.kind === "question") {
+      hideApproval();
+      showQuestion(pending.plan.question);
+    } else if (pending.waiting) {
+      hideQuestion();
+      showApproval(pending.plan, pending.expires_at);
+    } else {
+      hideApproval();
+      hideQuestion();
+    }
   } catch {
     hideApproval();
+    hideQuestion();
   }
 }
+
+// ── questions ───────────────────────────────────────────────────────────────
+
+function showQuestion(text) {
+  const box = $("detail-question");
+  const fresh = box.classList.contains("hidden") || $("question-text").textContent !== text;
+
+  $("question-text").textContent = text;
+  box.classList.remove("hidden");
+
+  // Focus only when it first appears: the refresh timer calls this every few
+  // seconds, and stealing the caret back each time would fight the reader.
+  if (fresh) $("question-answer").focus({ preventScroll: true });
+}
+
+function hideQuestion() {
+  $("detail-question").classList.add("hidden");
+}
+
+$("detail-question").addEventListener("submit", async function (event) {
+  event.preventDefault();
+
+  const text = $("question-answer").value.trim();
+  if (!text || !state.selected) return;
+
+  $("question-send").disabled = true;
+
+  try {
+    await api("/workflow/" + encodeURIComponent(state.selected) + "/answer", {
+      method: "POST",
+      body: JSON.stringify({ text: text }),
+    });
+    $("question-answer").value = "";
+    hideQuestion();
+  } catch (error) {
+    toast(error.message, "bad");
+  } finally {
+    $("question-send").disabled = false;
+  }
+});
 
 async function decideApproval(approve) {
   const session = state.selected;
@@ -755,7 +807,12 @@ async function loadDetail() {
 
     // A run that is still going may be waiting for a yes — including one
     // opened after a reload, which missed the live event.
-    if (session.status === "running") loadApproval(state.selected); else hideApproval();
+    if (session.status === "running") {
+      loadApproval(state.selected);
+    } else {
+      hideApproval();
+      hideQuestion();
+    }
 
     // A run that never got past planning records its reason here and has no
     // steps at all. Without this the console shows an empty table and no
@@ -818,7 +875,7 @@ const LIVE_KINDS = [
   "status", "planning_started", "model_output", "model_answer", "plan",
   "step_started", "step_finished", "log", "finished",
   "round_started", "round_failed", "review_started", "review", "answer",
-  "approval_required", "approval",
+  "approval_required", "approval", "question", "question_answered",
 ];
 
 const live = { source: null, session: null, started: 0, streamed: false, timer: null };
@@ -906,6 +963,19 @@ function onLiveEvent(event) {
 
     case "answer":
       showAnswer(data.text);
+      break;
+
+    case "question":
+      stopReadingTimer("");
+      setLiveState("warn", "waiting", "for your answer");
+      showQuestion(data.question);
+      liveLine("Question: " + esc(data.question), "warn");
+      break;
+
+    case "question_answered":
+      hideQuestion();
+      setLiveState("warn", "planning", "");
+      liveLine("Answer: " + esc(data.answer), "ok");
       break;
 
     case "approval_required":

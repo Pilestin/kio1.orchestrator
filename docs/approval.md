@@ -51,3 +51,38 @@ when a marked one could end up running the step.
 
 Pending approvals are held in memory: a restart forgets them, and the runs
 waiting on them end.
+
+## When the planner needs to ask
+
+A request can lack something only the person knows — *"What is the weather
+now?"* says nothing about where. Rather than invent a place, the planner
+answers with a question, and the run waits for the reply in the same way it
+waits for an approval. The console shows the question with a box to answer
+in; the answer is added to the request and the round is planned again.
+
+The reviewer, and any later round, see the questions and answers too.
+
+```json
+"orchestration": {
+    "clarify": true,
+    "max_questions": 2,
+    "question_timeout": 1800
+}
+```
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `clarify` | `true` | Off turns such a request into a failed run whose error says what was missing. |
+| `max_questions` | `2` | Questions a run may ask in total, from 0 to 5; a planner still asking after that fails the run. |
+| `question_timeout` | `1800` | Seconds to wait; an unanswered question ends the run. |
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /workflow/{session_id}/waiting` | `waiting: false`, or `kind: "approval"` with the plan, or `kind: "question"` with the question. |
+| `POST /workflow/{session_id}/answer` | `{"text": "Istanbul"}`. No token needed: an answer only lets the planner plan, and a plan reaching a marked target still waits for approval. `409` when nothing is being asked. |
+
+The planner is told to ask only when a required argument is missing from the
+request or nothing in it points at any target. In a live test,
+`ministral-3:3b` asked for coordinates when given *"Şu an hava nasıl?"* — in
+Turkish, as the request was — because the weather target's arguments are a
+latitude and a longitude.

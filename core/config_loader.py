@@ -323,6 +323,12 @@ class OrchestrationConfig:
             runs behaved before approval existed.
         approval_timeout: Seconds a plan waits for an answer before it is
             treated as rejected. A run is never left waiting for ever.
+        clarify: Whether the planner may ask the person a question when the
+            request lacks something it needs, such as which city a weather
+            request means. Off turns such a request into a failed run that
+            says what was missing.
+        max_questions: Questions a run may ask in total.
+        question_timeout: Seconds a run waits for an answer before it stops.
     """
 
     review: bool = True
@@ -332,6 +338,9 @@ class OrchestrationConfig:
     review_model: str = ""
     approval: str = "auto"
     approval_timeout: float = 1800.0
+    clarify: bool = True
+    max_questions: int = 2
+    question_timeout: float = 1800.0
 
     @property
     def separate_reviewer(self) -> bool:
@@ -411,6 +420,20 @@ def _load_orchestration_config(data: dict[str, Any]) -> OrchestrationConfig:
             "orchestration.approval_timeout must be a number of seconds from 10 to 86400."
         )
 
+    clarify = block.get("clarify", defaults.clarify)
+
+    if type(clarify) is not bool:
+        raise ValueError("orchestration.clarify must be true or false.")
+
+    max_questions = block.get("max_questions", defaults.max_questions)
+
+    if type(max_questions) is not int or not 0 <= max_questions <= 5:
+        raise ValueError("orchestration.max_questions must be an integer from 0 to 5.")
+
+    question_timeout = _read_seconds(
+        block, "question_timeout", defaults.question_timeout
+    )
+
     return OrchestrationConfig(
         review=review,
         max_rounds=max_rounds,
@@ -419,7 +442,30 @@ def _load_orchestration_config(data: dict[str, Any]) -> OrchestrationConfig:
         review_model=review_model.strip(),
         approval=approval,
         approval_timeout=float(approval_timeout),
+        clarify=clarify,
+        max_questions=max_questions,
+        question_timeout=question_timeout,
     )
+
+
+def _read_seconds(block: dict[str, Any], name: str, default: float) -> float:
+    """Read an `orchestration` wait, in seconds, from 10 to a day.
+
+    Raises:
+        ValueError: If the value is not a number in range.
+    """
+    value = block.get(name, default)
+
+    if (
+        not isinstance(value, int | float)
+        or isinstance(value, bool)
+        or not 10 <= value <= 86_400
+    ):
+        raise ValueError(
+            f"orchestration.{name} must be a number of seconds from 10 to 86400."
+        )
+
+    return float(value)
 
 
 @dataclass

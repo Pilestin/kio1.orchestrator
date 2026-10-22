@@ -564,19 +564,25 @@ class ApprovalRequest(BaseModel):
     approve: bool
 
 
+class AnswerRequest(BaseModel):
+    """A person's answer to the planner's question."""
+
+    text: str = Field(min_length=1, max_length=4_000)
+
+
+@app.get("/workflow/{session_id}/waiting")
 @app.get("/workflow/{session_id}/approval")
-def get_approval(
-    session_id: UUID, state: _State = Depends(get_state)
-) -> dict[str, Any]:
-    """Return the plan a run is waiting to have approved.
+def get_waiting(session_id: UUID, state: _State = Depends(get_state)) -> dict[str, Any]:
+    """Return what a run is waiting for a person to do, if anything.
 
     Args:
         session_id: The run.
         state: The approval desk.
 
     Returns:
-        `waiting: false` when the run is not waiting. Otherwise the plan, the
-        targets that made it need approval, and when the wait ends. Not
+        `waiting: false` when the run is not waiting. Otherwise `kind` —
+        `approval`, with the plan and the targets that made it need one, or
+        `question`, with the planner's question — and when the wait ends. Not
         waiting is an answer rather than a 404: the console asks this of
         every running run, and most of them are not waiting.
     """
@@ -586,6 +592,36 @@ def get_approval(
         return {"session_id": str(session_id), "waiting": False}
 
     return {**pending.to_dict(), "waiting": True}
+
+
+@app.post("/workflow/{session_id}/answer")
+def answer_question(
+    session_id: UUID, body: AnswerRequest, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Answer the question a run's planner asked.
+
+    Not behind the administration token: starting a run is not either, and
+    an answer only lets the planner plan — a plan that reaches a marked
+    target still waits for approval.
+
+    Args:
+        session_id: The run.
+        body: The answer.
+        state: The approval desk.
+
+    Returns:
+        Confirmation.
+
+    Raises:
+        HTTPException: 409 when the run is not waiting on a question.
+    """
+    if not state.approvals.answer(str(session_id), body.text.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This run is not waiting for an answer.",
+        )
+
+    return {"session_id": str(session_id), "answered": True}
 
 
 @app.post("/workflow/{session_id}/approval")
@@ -1491,10 +1527,24 @@ def update_agent(
         A summary of the stored record.
 
     Raises:
-        HTTPException: 400 when the entry is malformed, 503 when it could not
-            be saved.
+        HTTPException: 400 when the entry is malformed or names another
+            target, 503 when it could not be saved.
     """
     _require_registry_token(request)
+
+    named = body.entry.get("agent_id", body.entry.get("id"))
+
+    if isinstance(named, str) and named.strip() and named.strip() != agent_id:
+        # Pasting another target's definition into the editor would save it
+        # under this target's name — a "WeatherForecast" that calls a time
+        # API and answers weather requests with an error.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"This definition is for {named.strip()}, not {agent_id}. "
+                f"Use Add to create {named.strip()}, or change agent_id."
+            ),
+        )
 
     try:
         record = state.directory.replace_entry(

@@ -719,6 +719,28 @@ def test_a_malformed_edit_changes_nothing(
     assert read_saved(writable_config)["KIO2"]["capabilities"] == ["diagnosis"]
 
 
+def test_another_targets_definition_is_not_saved_under_this_name(
+    agent: str, monkeypatch: pytest.MonkeyPatch, writable_config: Path
+) -> None:
+    # What happened to a real configuration: TimeLookup's definition was
+    # pasted while editing WeatherForecast, and saved as WeatherForecast.
+    monkeypatch.setenv(REGISTRY_TOKEN_ENV, "shared")
+    write_agents(
+        writable_config, {"KIO2": {"endpoint": agent, "capabilities": ["diagnosis"]}}
+    )
+    directory = AgentDirectory(kio_registry(agent), health=HEALTH)
+
+    response = make_client(directory).put(
+        "/registry/agents/KIO2",
+        headers={"Authorization": "Bearer shared"},
+        json={"entry": {"agent_id": "KIO3", "endpoint": agent, "capabilities": ["x"]}},
+    )
+
+    assert response.status_code == 400
+    assert "This definition is for KIO3, not KIO2" in response.json()["detail"]
+    assert read_saved(writable_config)["KIO2"]["capabilities"] == ["diagnosis"]
+
+
 def test_a_record_carries_the_entry_it_was_built_from() -> None:
     # The console needs the definition back to put it in an edit form.
     entry = {"endpoint": "http://127.0.0.1:8102", "capabilities": ["diagnosis"]}

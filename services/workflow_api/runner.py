@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -46,6 +46,36 @@ logger = logging.getLogger(__name__)
 
 class PlanRejected(Exception):
     """A plan was cancelled, or not approved in time."""
+
+
+class PlannerQuestion(Exception):
+    """The planner answered with a question instead of a plan."""
+
+    def __init__(self, question: str) -> None:
+        super().__init__(question)
+        self.question = question
+
+
+@dataclass
+class Clarifications:
+    """The questions a run asked the person, and the answers it got.
+
+    Kept for the whole run, so the reviewer and every later round see what
+    the person said, not only the round that asked.
+    """
+
+    pairs: list[tuple[str, str]] = field(default_factory=list)
+
+    def apply(self, request_text: str) -> str:
+        """Return the request with the answers given so far appended."""
+        if not self.pairs:
+            return request_text
+
+        lines = "\n".join(
+            f"- Q: {question}\n  A: {answer}" for question, answer in self.pairs
+        )
+
+        return f"{request_text}\n\nClarified with the user:\n{lines}"
 
 
 def guarded_targets(
@@ -190,6 +220,7 @@ class WorkflowRunner:
         max_rounds = settings.max_rounds if reviewing else 1
         registry = self.directory.snapshot()
         rounds: list[Round] = []
+        clarified = Clarifications()
         planning_request = request_text
         review: Review | None = None
 
@@ -198,7 +229,9 @@ class WorkflowRunner:
                 emit("round_started", round=number, request=planning_request)
 
             try:
-                done = self._carry_out(session_id, number, planning_request, registry)
+                done = self._carry_out(
+                    session_id, number, planning_request, registry, clarified
+                )
             except PlanRejected:
                 if not rounds:
                     reason = "The plan was not approved."
@@ -222,14 +255,18 @@ class WorkflowRunner:
                 break
 
             review = self._review(
-                session_id, request_text, rounds, registry, final=number == max_rounds
+                session_id,
+                clarified.apply(request_text),
+                rounds,
+                registry,
+                final=number == max_rounds,
             )
 
             if review.decision != DECISION_CONTINUE:
                 break
 
             planning_request = follow_up_request(
-                request_text, rounds, review.next_request
+                clarified.apply(request_text), rounds, review.next_request
             )
 
         last = rounds[-1].result
@@ -277,6 +314,7 @@ class WorkflowRunner:
         number: int,
         planning_request: str,
         registry: AgentRegistry,
+        clarified: Clarifications,
     ) -> Round | None:
         """Plan and dispatch one round, recording its steps.
 
@@ -286,6 +324,8 @@ class WorkflowRunner:
             planning_request: What to plan: the request itself in the first
                 round, the missing work after that.
             registry: The targets this run plans against.
+            clarified: The run's questions and answers so far; a question the
+                planner asks in this round is added to it.
 
         Returns:
             The round, or None when planning or dispatch failed. A first
@@ -293,7 +333,9 @@ class WorkflowRunner:
             one only ends the rounds early.
         """
         try:
-            plan = self._build_plan(session_id, planning_request, registry)
+            plan = self._plan_asking(
+                session_id, number, planning_request, registry, clarified
+            )
         except Exception as error:
             logger.exception(
                 "Planning failed: session_id=%s round=%d", session_id, number
@@ -355,6 +397,77 @@ class WorkflowRunner:
         self._record_results(session_id, plan, result)
 
         return Round(number=number, plan=plan, result=result)
+
+    def _plan_asking(
+        self,
+        session_id: UUID,
+        number: int,
+        planning_request: str,
+        registry: AgentRegistry,
+        clarified: Clarifications,
+    ) -> WorkflowPlan:
+        """Plan, asking the person whatever the planner needs to know first.
+
+        Each answer is added to the request and the round is planned again,
+        until the planner produces a plan or the run's questions run out.
+
+        Raises:
+            ValueError: If the planner asks and cannot be answered — asking
+                is off, nobody answers in time, or it keeps asking — with the
+                question in the message, so the run says what was missing.
+            Exception: Any planning failure, as `_build_plan`.
+        """
+        request = planning_request
+
+        while True:
+            try:
+                return self._build_plan(session_id, request, registry)
+            except PlannerQuestion as asked:
+                reply = self._ask_person(session_id, number, asked.question, clarified)
+                request = f"{request}\n\nQ: {asked.question}\nA: {reply}"
+
+    def _ask_person(
+        self, session_id: UUID, number: int, question: str, clarified: Clarifications
+    ) -> str:
+        """Put the planner's question to the person and wait for the answer.
+
+        Returns:
+            The answer.
+
+        Raises:
+            ValueError: If the question cannot be put, or is not answered.
+        """
+        settings = self.config.orchestration
+
+        if not settings.clarify or self.approvals is None:
+            raise ValueError(f"The planner needs more information: {question}")
+
+        if len(clarified.pairs) >= settings.max_questions:
+            raise ValueError(
+                f"The planner still needs more after {len(clarified.pairs)} "
+                f"answer(s): {question}"
+            )
+
+        emit(
+            "question",
+            round=number,
+            question=question,
+            timeout=settings.question_timeout,
+        )
+        logger.info("Waiting for an answer: session_id=%s round=%d", session_id, number)
+
+        reply = self.approvals.ask_question(
+            str(session_id), number, question, settings.question_timeout
+        )
+
+        if reply is None or not reply.strip():
+            raise ValueError(f"The question was not answered: {question}")
+
+        reply = reply.strip()
+        clarified.pairs.append((question, reply))
+        emit("question_answered", round=number, question=question, answer=reply)
+
+        return reply
 
     def _approved(
         self, session_id: UUID, number: int, plan: WorkflowPlan, registry: AgentRegistry
@@ -524,8 +637,17 @@ class WorkflowRunner:
         content = self._ask_model(
             session_id, system_prompt, request_text, turn=1, role=self._planner()
         )
+        decoded = parse_response(content)
 
-        return parse_plan(parse_response(content))
+        if (
+            isinstance(decoded, dict)
+            and "steps" not in decoded
+            and isinstance(decoded.get("question"), str)
+            and decoded["question"].strip()
+        ):
+            raise PlannerQuestion(decoded["question"].strip())
+
+        return parse_plan(decoded)
 
     def _planner(self) -> ModelRole:
         """Return the model that plans."""
