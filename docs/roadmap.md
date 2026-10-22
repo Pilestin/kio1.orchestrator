@@ -82,11 +82,11 @@ Doğrulama: `.venv` olmadan `start.py` sıfırdan kurdu ve başlattı; "41.01, 2
 KIO1'in "orkestratör" olarak asıl değeri burada.
 
 - [ ] **Netleştirme**: istek belirsizse (ör. konum verilmemiş bir hava durumu sorusu) KIO1 plan yapmadan önce soru sorar.
-- [ ] **Plan önizleme ve onay**: plan önce kullanıcıya gösterilir; "Çalıştır / Düzenle / İptal". Ayarla otomatik onay açılabilir.
+- [x] **Plan önizleme ve onay** — 2026-10-22: plan çalışmadan önce gösterilir, "Run plan / Cancel"; `orchestration.approval` = `auto` / `always` / `never`, cevapsız kalan plan süre dolunca iptal. Bkz. `docs/approval.md`. *(Kalan: planı onaydan önce düzenleyebilmek.)*
 - [x] **Değerlendirme turu** — 2026-10-22: tüm plan bittikten sonra model sonuçları okur ve `done` ya da `continue` der; `continue`'da yalnızca eksik iş yeniden planlanır (`orchestration.max_rounds`, varsayılan 2). Değerlendirme başarısız olursa çalışma bozulmaz, cevap sonuçlardan yazılır. *(Kalan: `retry_step`, `ask_user`, süre/token bütçeleri.)*
 - [x] **Son cevap** — 2026-10-22: isteğin dilinde, kaynak gösteren (`[Deneme]`) cevap; oturuma kaydedilir, konsolda en üstte gösterilir. Bkz. `docs/review.md`.
 - [x] **Rol bazlı model seçimi (cevap modeli)** — 2026-10-22: değerlendirme ve cevap ayrı sağlayıcı/modelle yapılabiliyor (`orchestration.review_provider/review_model`, Settings → Answer model). Canlı ölçüm: ministral planlayıp qwen3.5:4b cevaplayınca en yeni commit'ler birebir doğru geldi, uydurma kalmadı (~101 sn, CPU).
-- [ ] **İnsan onayı gereken adımlar**: dosya yazan, komut çalıştıran ya da dağıtım yapan adımlar onay bekler (agent ya da capability bazında ayarlanır).
+- [x] **İnsan onayı gereken hedefler** — 2026-10-22: hedefe `"approval": true` eklenince ona ulaşabilecek her plan (failover adayları dahil) onay bekler; konsolda kilit simgesi. *(Kalan: capability bazında işaretleme.)*
 - [ ] **Olay akışı**: her olay (plan, adım başladı/bitti, değerlendirme, soru) tek bir olay veriyolundan SSE ile konsola akar ve veritabanına yazılır. *(Veriyolu ve SSE hazır; kalan: değerlendirme/soru olayları ve kalıcılık.)*
 - [ ] **İptal**: çalışan bir istek durdurulabilir; MCP ve HTTP çağrılarına iptal iletilir.
 - [ ] **Rol bazlı model seçimi**: planlama, değerlendirme ve son cevap için ayrı model seçilebilir (ör. planlama için yerel model, değerlendirme için bulut model).

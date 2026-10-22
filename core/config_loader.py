@@ -292,6 +292,12 @@ class DispatchConfig:
     selection: SelectionConfig = field(default_factory=SelectionConfig)
 
 
+APPROVAL_AUTO = "auto"
+APPROVAL_ALWAYS = "always"
+APPROVAL_NEVER = "never"
+APPROVAL_MODES = frozenset({APPROVAL_AUTO, APPROVAL_ALWAYS, APPROVAL_NEVER})
+
+
 @dataclass(frozen=True)
 class OrchestrationConfig:
     """How a run goes on after its plan has been carried out.
@@ -311,6 +317,12 @@ class OrchestrationConfig:
         review_model: The model that reviews and answers. Empty uses the
             planning model; required when `review_provider` names another
             provider.
+        approval: When a plan waits for a person before it runs: `auto`
+            when it may reach a target marked `"approval": true`, `always`,
+            or `never`. `auto` with nothing marked never asks, which is how
+            runs behaved before approval existed.
+        approval_timeout: Seconds a plan waits for an answer before it is
+            treated as rejected. A run is never left waiting for ever.
     """
 
     review: bool = True
@@ -318,6 +330,8 @@ class OrchestrationConfig:
     review_prompt_path: str = "prompts/kio1_review_prompt.txt"
     review_provider: str = ""
     review_model: str = ""
+    approval: str = "auto"
+    approval_timeout: float = 1800.0
 
     @property
     def separate_reviewer(self) -> bool:
@@ -379,12 +393,32 @@ def _load_orchestration_config(data: dict[str, Any]) -> OrchestrationConfig:
             "model names differ between providers."
         )
 
+    approval = block.get("approval", defaults.approval)
+
+    if approval not in APPROVAL_MODES:
+        raise ValueError(
+            f"orchestration.approval must be one of {sorted(APPROVAL_MODES)}."
+        )
+
+    approval_timeout = block.get("approval_timeout", defaults.approval_timeout)
+
+    if (
+        not isinstance(approval_timeout, int | float)
+        or isinstance(approval_timeout, bool)
+        or not 10 <= approval_timeout <= 86_400
+    ):
+        raise ValueError(
+            "orchestration.approval_timeout must be a number of seconds from 10 to 86400."
+        )
+
     return OrchestrationConfig(
         review=review,
         max_rounds=max_rounds,
         review_prompt_path=prompt_path.strip(),
         review_provider=review_provider.strip(),
         review_model=review_model.strip(),
+        approval=approval,
+        approval_timeout=float(approval_timeout),
     )
 
 

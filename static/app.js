@@ -141,6 +141,9 @@ function targetRow(agent) {
 
   return '<tr class="' + (off ? "is-off" : "") + '">'
     + '<td class="target-cell"><span class="target-name">' + id + "</span>"
+      + (agent.approval
+        ? '<svg class="icon lock" aria-label="Asks before running"><title>Asks before running</title>'
+          + '<use href="#i-lock"/></svg>' : "")
       + '<span class="kind-tag ' + esc(agent.kind) + '">' + esc(agent.kind) + "</span>"
       + '<span class="target-origin muted small" title="Where this target came from">'
       + esc(agent.origin) + "</span>"
@@ -653,6 +656,68 @@ function showAnswer(text) {
   box.classList.remove("hidden");
 }
 
+// ── approval ────────────────────────────────────────────────────────────────
+
+/** Show a plan waiting for a yes, its marked targets highlighted. */
+function showApproval(plan, expiresAt) {
+  const box = $("detail-approval");
+  const guarded = plan.guarded || [];
+  const key = JSON.stringify([plan.workflow_id, (plan.steps || []).map(function (s) { return s.step_id; })]);
+
+  if (box.dataset.key !== key) {
+    setRows($("approval-steps"), (plan.steps || []).map(function (step) {
+      const marked = guarded.indexOf(step.agent_id) !== -1;
+      return "<li" + (marked ? ' class="guarded"' : "") + ">"
+        + '<span class="target-name">' + esc(step.agent_id) + "</span>"
+        + '<span class="mono small muted"> · ' + esc(step.capability) + "</span>"
+        + '<div class="small">' + esc(step.task) + "</div></li>";
+    }).join(""));
+    box.dataset.key = key;
+  }
+
+  $("approval-expires").textContent = expiresAt
+    ? "cancels itself at " + new Date(expiresAt * 1000).toLocaleTimeString() : "";
+  box.classList.remove("hidden");
+}
+
+function hideApproval() {
+  $("detail-approval").classList.add("hidden");
+  delete $("detail-approval").dataset.key;
+}
+
+async function loadApproval(sessionId) {
+  try {
+    const pending = await api("/workflow/" + encodeURIComponent(sessionId) + "/approval");
+    if (!pending.waiting) { hideApproval(); return; }
+    if (state.selected === sessionId) showApproval(pending.plan, pending.expires_at);
+  } catch {
+    hideApproval();
+  }
+}
+
+async function decideApproval(approve) {
+  const session = state.selected;
+  if (!session) return;
+
+  $("approval-run").disabled = $("approval-cancel").disabled = true;
+
+  try {
+    await api("/workflow/" + encodeURIComponent(session) + "/approval", {
+      method: "POST",
+      body: JSON.stringify({ approve: approve }),
+    });
+    hideApproval();
+    toast(approve ? "Approved — running." : "Plan cancelled.", approve ? "ok" : "warn");
+  } catch (error) {
+    toast(error.message, "bad");
+  } finally {
+    $("approval-run").disabled = $("approval-cancel").disabled = false;
+  }
+}
+
+$("approval-run").addEventListener("click", function () { decideApproval(true); });
+$("approval-cancel").addEventListener("click", function () { decideApproval(false); });
+
 function durationOf(session) {
   const ms = new Date(session.updated_at) - new Date(session.created_at);
 
@@ -687,6 +752,10 @@ async function loadDetail() {
       session.execution_mode || "",
     ].filter(Boolean).join(" · ");
     showAnswer(session.answer);
+
+    // A run that is still going may be waiting for a yes — including one
+    // opened after a reload, which missed the live event.
+    if (session.status === "running") loadApproval(state.selected); else hideApproval();
 
     // A run that never got past planning records its reason here and has no
     // steps at all. Without this the console shows an empty table and no
@@ -749,6 +818,7 @@ const LIVE_KINDS = [
   "status", "planning_started", "model_output", "model_answer", "plan",
   "step_started", "step_finished", "log", "finished",
   "round_started", "round_failed", "review_started", "review", "answer",
+  "approval_required", "approval",
 ];
 
 const live = { source: null, session: null, started: 0, streamed: false, timer: null };
@@ -836,6 +906,20 @@ function onLiveEvent(event) {
 
     case "answer":
       showAnswer(data.text);
+      break;
+
+    case "approval_required":
+      stopReadingTimer("");
+      setLiveState("warn", "waiting", "for your approval");
+      showApproval(data, data.time + data.timeout);
+      liveLine("Waiting for approval" + (data.guarded && data.guarded.length
+        ? " — " + esc(data.guarded.join(", ")) : "") + ".", "warn");
+      break;
+
+    case "approval":
+      hideApproval();
+      liveLine(data.approved ? "Plan approved." : "Plan not approved.", data.approved ? "ok" : "bad");
+      if (data.approved) setLiveState("warn", "running", "");
       break;
 
     case "model_output":

@@ -796,6 +796,31 @@ td.actions .icon-button .icon { width: 16px; height: 16px; }
 
 .copy-chip:hover { color: var(--ink); border-color: var(--accent); }
 
+.approval {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+}
+
+.approval-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+
+.approval-steps {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.approval-steps li.guarded .target-name { color: var(--warn); }
+.approval-steps li.guarded .target-name::after { content: " 🔒"; font-size: 0.8em; }
+
+.lock { width: 14px; height: 14px; margin-left: 0.35rem; color: var(--warn); vertical-align: -2px; }
+
 .answer {
   padding: 0.9rem 1rem;
   border-radius: var(--radius);

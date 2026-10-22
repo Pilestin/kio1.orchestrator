@@ -171,6 +171,9 @@ class AgentEndpoint:
             target stays registered — its definition, history, and place in
             the console are kept — but it is neither probed nor offered, so
             switching one off is reversible in a way removing it is not.
+        requires_approval: Whether a plan that may run this target waits for
+            a person to approve it first. For targets that change things — a
+            command that writes files, an API that deploys.
     """
 
     agent_id: str
@@ -182,6 +185,7 @@ class AgentEndpoint:
     description: str = ""
     tool: HttpToolSpec | CliToolSpec | McpToolSpec | None = None
     enabled: bool = True
+    requires_approval: bool = False
 
     @property
     def url(self) -> str:
@@ -463,12 +467,33 @@ def _read_enabled(agent_id: str, agent_data: dict[str, Any]) -> bool:
     Raises:
         ValueError: If the value is not a boolean.
     """
-    enabled = agent_data.get("enabled", True)
+    return _read_flag(agent_id, agent_data, "enabled", default=True)
 
-    if type(enabled) is not bool:
-        raise ValueError(f"dispatch.agents.{agent_id}.enabled must be true or false.")
 
-    return enabled
+def _read_flag(
+    agent_id: str, agent_data: dict[str, Any], name: str, *, default: bool
+) -> bool:
+    """Read an optional boolean field of an entry.
+
+    Args:
+        agent_id: Identifier of the entry, for error messages.
+        agent_data: The raw entry object.
+        name: The field.
+        default: The value when absent.
+
+    Returns:
+        The flag.
+
+    Raises:
+        ValueError: If the value is not a boolean — `"false"` as a string is
+            truthy, and reading it as on would be exactly the wrong way round.
+    """
+    value = agent_data.get(name, default)
+
+    if type(value) is not bool:
+        raise ValueError(f"dispatch.agents.{agent_id}.{name} must be true or false.")
+
+    return value
 
 
 def _read_mcp_entry(
@@ -739,6 +764,7 @@ def load_agent_registry(
 
         capabilities = _read_capabilities(agent_id, agent_data)
         enabled = _read_enabled(agent_id, agent_data)
+        approval = _read_flag(agent_id, agent_data, "approval", default=False)
 
         if kind != KIND_KIO:
             entry = _read_tool_entry(
@@ -748,8 +774,8 @@ def load_agent_registry(
                 description=description.strip(),
                 capabilities=capabilities,
             )
-            agents[agent_id.strip()] = (
-                entry if enabled else replace(entry, enabled=False)
+            agents[agent_id.strip()] = replace(
+                entry, enabled=enabled, requires_approval=approval
             )
             continue
 
@@ -807,6 +833,7 @@ def load_agent_registry(
             kind=KIND_KIO,
             description=description.strip(),
             enabled=enabled,
+            requires_approval=approval,
         )
 
     if announce:

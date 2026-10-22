@@ -127,6 +127,7 @@ class AgentRecord:
             "origin": self.origin,
             "status": self.status,
             "enabled": self.endpoint.enabled,
+            "approval": self.endpoint.requires_approval,
             "description": self.endpoint.description,
             "capabilities": sorted(self.endpoint.capabilities),
             "endpoint": self.endpoint.endpoint,

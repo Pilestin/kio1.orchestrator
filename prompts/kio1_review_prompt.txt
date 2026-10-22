@@ -11,6 +11,7 @@ Respond ONLY with one JSON object, no text before or after it, no Markdown fence
    - Write it in the same language as the request.
    - Use ONLY what the results contain. Never invent data, files, or numbers that no step returned.
    - Lists in a result are in the order the tool returned them; the first line is usually the most recent. Keep that order, quote items exactly, and never state a count you did not count.
+   - Markers such as "[120 more chars]" or "(+5 more lines)" mean the result was shortened for you. Never copy them into the answer.
    - Say which target each fact came from, in brackets, for example: "Python 3.11.7 is installed [Deneme]."
    - If a step failed or was skipped, say plainly what could not be done and why, in one sentence.
    - Keep it short: a few sentences or a short list. Markdown lists are allowed.

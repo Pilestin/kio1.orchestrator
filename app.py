@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from core.approvals import ApprovalDesk
 from core.config_loader import Config, Workspace, load_config, rehost_entry
 from core.config_writer import (
     ConfigWriteError,
@@ -126,6 +127,7 @@ class _State:
     directory: AgentDirectory
     scoreboard: Scoreboard
     events: RunEventBus = field(default_factory=RunEventBus)
+    approvals: ApprovalDesk = field(default_factory=ApprovalDesk)
 
 
 _state: _State | None = None
@@ -182,6 +184,7 @@ def _build_state() -> _State:
     # requests instead of resetting with every workflow.
     scoreboard = Scoreboard(config.dispatch.selection)
     events = RunEventBus()
+    approvals = ApprovalDesk()
 
     provider = load_provider(config.provider, config.allowed_providers)
     provider_client = provider.create_client(config)
@@ -228,11 +231,13 @@ def _build_state() -> _State:
             scoreboard=scoreboard,
             events=events,
             review_template=review_template,
+            approvals=approvals,
         ),
         session_client=session_client,
         directory=directory,
         scoreboard=scoreboard,
         events=events,
+        approvals=approvals,
     )
 
 
@@ -551,6 +556,78 @@ def workflow_events(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+class ApprovalRequest(BaseModel):
+    """A person's answer to a plan waiting for approval."""
+
+    approve: bool
+
+
+@app.get("/workflow/{session_id}/approval")
+def get_approval(
+    session_id: UUID, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Return the plan a run is waiting to have approved.
+
+    Args:
+        session_id: The run.
+        state: The approval desk.
+
+    Returns:
+        `waiting: false` when the run is not waiting. Otherwise the plan, the
+        targets that made it need approval, and when the wait ends. Not
+        waiting is an answer rather than a 404: the console asks this of
+        every running run, and most of them are not waiting.
+    """
+    pending = state.approvals.pending(str(session_id))
+
+    if pending is None:
+        return {"session_id": str(session_id), "waiting": False}
+
+    return {**pending.to_dict(), "waiting": True}
+
+
+@app.post("/workflow/{session_id}/approval")
+def decide_approval(
+    session_id: UUID,
+    body: ApprovalRequest,
+    request: Request,
+    state: _State = Depends(get_state),
+) -> dict[str, Any]:
+    """Approve or cancel a plan that is waiting.
+
+    Behind the administration token: approving lets a plan run commands and
+    reach targets that were marked as needing a person's say-so.
+
+    Args:
+        session_id: The run.
+        body: Whether to approve.
+        request: Checked for the registry token.
+        state: The approval desk.
+
+    Returns:
+        What was decided.
+
+    Raises:
+        HTTPException: 409 when nothing is waiting — decided already, timed
+            out, or never asked.
+    """
+    _require_registry_token(request)
+
+    if not state.approvals.decide(str(session_id), body.approve):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This run is not waiting for approval.",
+        )
+
+    logger.info(
+        "Plan %s: session_id=%s",
+        "approved" if body.approve else "cancelled",
+        session_id,
+    )
+
+    return {"session_id": str(session_id), "approved": body.approve}
 
 
 def _require_registry_token(request: Request) -> None:

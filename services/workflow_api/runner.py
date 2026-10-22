@@ -3,7 +3,8 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol
 from uuid import UUID
 
-from core.config_loader import Config
+from core.approvals import ApprovalDesk
+from core.config_loader import APPROVAL_AUTO, APPROVAL_NEVER, Config
 from core.formatter import parse_response
 from core.prompt_loader import fill_catalog
 from core.run_events import (
@@ -18,6 +19,7 @@ from core.telemetry import trace_gen_ai_request, trace_operation
 from dispatch.agent_registry import AgentRegistry
 from dispatch.agent_transport import AgentTransport
 from dispatch.directory import AgentDirectory
+from dispatch.failover import FailoverConfig, candidates_for
 from dispatch.review import (
     DECISION_CONTINUE,
     DECISION_DONE,
@@ -40,6 +42,39 @@ from dispatch.workflow_planner import WorkflowPlan, parse_plan
 from providers.provider_client import load_provider, supports_streaming
 
 logger = logging.getLogger(__name__)
+
+
+class PlanRejected(Exception):
+    """A plan was cancelled, or not approved in time."""
+
+
+def guarded_targets(
+    plan: WorkflowPlan, registry: AgentRegistry, failover: FailoverConfig
+) -> list[str]:
+    """Return the targets marked for approval that a plan could reach.
+
+    Not only the targets the plan names: with failover on, a step can move
+    to any target declaring its capability, and approving a plan has to
+    cover where its steps may actually run.
+
+    Args:
+        plan: The plan about to run.
+        registry: The targets.
+        failover: Whether steps may move to another target.
+
+    Returns:
+        The marked targets, sorted.
+    """
+    found: set[str] = set()
+
+    for step in plan.steps:
+        for candidate in candidates_for(
+            step.agent_id, step.capability, registry, failover
+        ):
+            if candidate.requires_approval:
+                found.add(candidate.agent_id)
+
+    return sorted(found)
 
 
 @dataclass(frozen=True)
@@ -104,6 +139,9 @@ class WorkflowRunner:
     review_provider: Any = None
     review_client: Any = None
     review_provider_name: str = ""
+    # Where plans that need a person wait for one. None runs every plan
+    # without asking — the terminal application and most tests.
+    approvals: ApprovalDesk | None = None
 
     def run(self, session_id: UUID, request_text: str) -> None:
         """Execute one workflow to completion, recording progress as it goes.
@@ -159,7 +197,18 @@ class WorkflowRunner:
             if number > 1:
                 emit("round_started", round=number, request=planning_request)
 
-            done = self._carry_out(session_id, number, planning_request, registry)
+            try:
+                done = self._carry_out(session_id, number, planning_request, registry)
+            except PlanRejected:
+                if not rounds:
+                    reason = "The plan was not approved."
+                    self.recorder.update_session(
+                        session_id, status="failed", error=reason
+                    )
+                    emit("status", status="failed", error=reason)
+                    return
+
+                break  # a follow-up was turned down; the last answer stands
 
             if done is None:
                 if not rounds:
@@ -281,6 +330,9 @@ class WorkflowRunner:
                 execution_mode=plan.execution_mode,
             )
 
+        if not self._approved(session_id, number, plan, registry):
+            raise PlanRejected(number)
+
         try:
             result = execute_workflow(
                 plan,
@@ -303,6 +355,66 @@ class WorkflowRunner:
         self._record_results(session_id, plan, result)
 
         return Round(number=number, plan=plan, result=result)
+
+    def _approved(
+        self, session_id: UUID, number: int, plan: WorkflowPlan, registry: AgentRegistry
+    ) -> bool:
+        """Ask a person to approve a plan when it needs it, and wait.
+
+        Args:
+            session_id: The run.
+            number: The round the plan belongs to.
+            plan: The plan about to run.
+            registry: The targets, to find the ones that need approval.
+
+        Returns:
+            True when the plan may run: approval is off, nothing in it needs
+            approval, or a person approved it. False when it was cancelled or
+            nobody answered in time.
+        """
+        settings = self.config.orchestration
+
+        if settings.approval == APPROVAL_NEVER or self.approvals is None:
+            return True
+
+        guarded = guarded_targets(plan, registry, self.config.dispatch.failover)
+
+        if settings.approval == APPROVAL_AUTO and not guarded:
+            return True
+
+        summary = {
+            "workflow_id": plan.workflow_id,
+            "guarded": guarded,
+            "steps": [
+                {
+                    "step_id": step.step_id,
+                    "agent_id": step.agent_id,
+                    "capability": step.capability,
+                    "task": step.task,
+                    "arguments": step.arguments,
+                }
+                for step in plan.steps
+            ],
+        }
+        emit(
+            "approval_required",
+            round=number,
+            timeout=settings.approval_timeout,
+            **summary,
+        )
+        logger.info(
+            "Waiting for approval: session_id=%s round=%d guarded=%s",
+            session_id,
+            number,
+            ",".join(guarded) or "-",
+        )
+
+        approved = self.approvals.ask(
+            str(session_id), number, summary, settings.approval_timeout
+        )
+        emit("approval", round=number, approved=approved)
+
+        return approved
 
     def _round_failed(self, session_id: UUID, number: int, error: Exception) -> None:
         """Record why a round could not be carried out."""
@@ -563,6 +675,7 @@ def build_runner(
     scoreboard: Scoreboard | None = None,
     events: RunEventBus | None = None,
     review_template: str = "",
+    approvals: ApprovalDesk | None = None,
 ) -> WorkflowRunner:
     """Assemble a runner with the transport the configuration selects.
 
@@ -614,4 +727,5 @@ def build_runner(
         ),
         events=events,
         review_template=review_template,
+        approvals=approvals,
     )

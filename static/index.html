@@ -39,6 +39,7 @@
   <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3.5 13.8 9 19.5 11l-5.7 2-1.8 5.5-1.8-5.5L4.5 11l5.7-2z"/></symbol>
   <symbol id="i-empty" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M4 10h16M9 14.5h6"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z"/><path d="m13.5 6.5 4 4"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12.5h9l1-12.5M9.5 7V4.5h5V7"/></symbol>
 </svg>
@@ -136,6 +137,17 @@
         </div>
 
         <div id="detail-note" class="notice hidden"></div>
+        <div id="detail-approval" class="approval hidden">
+          <div class="approval-head">
+            <strong>Approve this plan?</strong>
+            <span id="approval-expires" class="small muted"></span>
+          </div>
+          <ol id="approval-steps" class="approval-steps"></ol>
+          <div class="row end">
+            <button class="action ghost" id="approval-cancel">Cancel</button>
+            <button class="action primary" id="approval-run"><svg class="icon"><use href="#i-run"/></svg>Run plan</button>
+          </div>
+        </div>
         <div id="detail-answer" class="answer hidden"></div>
 
         <div id="live" class="live hidden">
