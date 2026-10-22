@@ -235,5 +235,10 @@
         "endpoint": "http://127.0.0.1:11434",
         "context_window_size": 16384,
         "think": false
+    },
+    "orchestration": {
+        "review": true,
+        "max_rounds": 2,
+        "review_prompt_path": "prompts/kio1_review_prompt.txt"
     }
 }

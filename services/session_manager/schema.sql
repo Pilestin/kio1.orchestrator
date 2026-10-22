@@ -11,11 +11,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     workflow_id    TEXT,
     execution_mode TEXT,
     error          TEXT,
+    answer         TEXT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT sessions_status_allowed
         CHECK (status IN ('pending', 'running', 'completed', 'failed'))
 );
+
+-- Added after the first release: a database created before it gains the
+-- column here, since CREATE TABLE IF NOT EXISTS leaves an old table alone.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS answer TEXT;
 
 CREATE TABLE IF NOT EXISTS steps (
     id          BIGSERIAL   PRIMARY KEY,

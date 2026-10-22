@@ -131,6 +131,30 @@ class _State:
 _state: _State | None = None
 
 
+def _load_review_prompt(config: Config) -> str:
+    """Read the reviewer's prompt, or turn the review off without it.
+
+    Args:
+        config: Application configuration.
+
+    Returns:
+        The prompt, catalog placeholder still in it; empty when reviewing is
+        off or the file cannot be read. A missing reviewer prompt costs the
+        answer, not the service.
+    """
+    if not config.orchestration.review:
+        return ""
+
+    try:
+        return load_prompt(config.orchestration.review_prompt_path)
+    except OSError:
+        logger.warning(
+            "Review prompt %s could not be read; runs will not be reviewed",
+            config.orchestration.review_prompt_path,
+        )
+        return ""
+
+
 def _build_state() -> _State:
     """Load configuration, the prompt, and the provider, then assemble a runner.
 
@@ -145,6 +169,7 @@ def _build_state() -> _State:
     # The prompt keeps its catalog placeholder: the runner fills it per
     # request from whatever the directory can reach at that moment.
     prompt_template = load_prompt(config.prompt_path)
+    review_template = _load_review_prompt(config)
 
     directory = AgentDirectory(
         config.dispatch.registry,
@@ -202,6 +227,7 @@ def _build_state() -> _State:
             directory=directory,
             scoreboard=scoreboard,
             events=events,
+            review_template=review_template,
         ),
         session_client=session_client,
         directory=directory,

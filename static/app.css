@@ -796,6 +796,28 @@ td.actions .icon-button .icon { width: 16px; height: 16px; }
 
 .copy-chip:hover { color: var(--ink); border-color: var(--accent); }
 
+.answer {
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.answer .source {
+  display: inline-block;
+  padding: 0 0.4rem;
+  margin: 0 0.1rem;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--accent-text);
+  font: 600 0.74rem/1.6 var(--mono);
+  vertical-align: 1px;
+}
+
 .steps th, .steps td { padding: 0.6rem 0.7rem; }
 .steps td:last-child { min-width: 7rem; }
 .steps .reason { max-width: 24rem; }

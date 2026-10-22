@@ -20,13 +20,15 @@ class UpdateSessionRequest(BaseModel):
     """Records progress on a session.
 
     Every field is optional so a caller can update the status alone, or
-    attach the plan identifiers once the model has produced them.
+    attach the plan identifiers once the model has produced them, and the
+    answer once the run has been reviewed.
     """
 
     status: SessionStatus | None = None
     workflow_id: str | None = Field(default=None, max_length=128)
     execution_mode: ExecutionMode | None = None
     error: str | None = Field(default=None, max_length=4_000)
+    answer: str | None = Field(default=None, max_length=20_000)
 
 
 class RecordStepRequest(BaseModel):
@@ -60,6 +62,7 @@ class Session(BaseModel):
     workflow_id: str | None = None
     execution_mode: ExecutionMode | None = None
     error: str | None = None
+    answer: str | None = None
     created_at: datetime
     updated_at: datetime
 

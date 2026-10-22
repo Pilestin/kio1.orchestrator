@@ -219,7 +219,7 @@ class PostgresSessionRepository:
                 INSERT INTO sessions (session_id, request_text, status)
                 VALUES (%s, %s, 'pending')
                 RETURNING session_id, request_text, status, workflow_id,
-                          execution_mode, error, created_at, updated_at
+                          execution_mode, error, answer, created_at, updated_at
                 """,
                 (uuid4(), request_text),
             ).fetchone()
@@ -232,7 +232,7 @@ class PostgresSessionRepository:
             session_row = connection.execute(
                 """
                 SELECT session_id, request_text, status, workflow_id,
-                       execution_mode, error, created_at, updated_at
+                       execution_mode, error, answer, created_at, updated_at
                 FROM sessions
                 WHERE session_id = %s
                 """,
@@ -294,7 +294,7 @@ class PostgresSessionRepository:
             rows = connection.execute(
                 """
                 SELECT session_id, request_text, status, workflow_id,
-                       execution_mode, error, created_at, updated_at
+                       execution_mode, error, answer, created_at, updated_at
                 FROM sessions
                 ORDER BY created_at DESC
                 LIMIT %s
@@ -324,7 +324,7 @@ class PostgresSessionRepository:
                 SET {assignments}, updated_at = now()
                 WHERE session_id = %s
                 RETURNING session_id, request_text, status, workflow_id,
-                          execution_mode, error, created_at, updated_at
+                          execution_mode, error, answer, created_at, updated_at
                 """,
                 parameters,
             ).fetchone()
@@ -463,8 +463,9 @@ def _to_session(row: Any) -> Session:
         workflow_id=row[3],
         execution_mode=row[4],
         error=row[5],
-        created_at=row[6],
-        updated_at=row[7],
+        answer=row[6],
+        created_at=row[7],
+        updated_at=row[8],
     )
 
 

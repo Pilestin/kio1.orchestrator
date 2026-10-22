@@ -131,6 +131,24 @@ def test_update_session_applies_only_supplied_fields(
     assert updated.request_text == "Build a scheduling app"
 
 
+def test_a_runs_answer_is_kept_with_it(repository: SessionRepository) -> None:
+    session = repository.create_session("Which python?")
+
+    repository.update_session(
+        session.session_id,
+        UpdateSessionRequest(status="completed", answer="Python 3.11.7 [Deneme]"),
+    )
+
+    detail = repository.get_session(session.session_id)
+    listed = repository.list_sessions(10)
+
+    assert detail is not None
+    assert detail.session.answer == "Python 3.11.7 [Deneme]"
+    assert next(
+        item for item in listed if item.session_id == session.session_id
+    ).answer == "Python 3.11.7 [Deneme]"
+
+
 def test_update_session_returns_none_for_unknown_id(
     repository: SessionRepository,
 ) -> None:

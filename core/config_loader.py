@@ -292,6 +292,61 @@ class DispatchConfig:
     selection: SelectionConfig = field(default_factory=SelectionConfig)
 
 
+@dataclass(frozen=True)
+class OrchestrationConfig:
+    """How a run goes on after its plan has been carried out.
+
+    Attributes:
+        review: Whether the model reads the results, decides whether the
+            request is answered, and writes the answer. Off runs the plan once
+            and stops, as before this existed.
+        max_rounds: Plans a run may make in total, the first included. A
+            review that finds work missing plans again only while rounds are
+            left; the last review always answers.
+        review_prompt_path: The reviewer's system prompt.
+    """
+
+    review: bool = True
+    max_rounds: int = 2
+    review_prompt_path: str = "prompts/kio1_review_prompt.txt"
+
+
+def _load_orchestration_config(data: dict[str, Any]) -> OrchestrationConfig:
+    """Load and validate the optional `orchestration` block.
+
+    Args:
+        data: Complete decoded configuration object.
+
+    Returns:
+        Validated settings; the defaults when the block is absent.
+
+    Raises:
+        ValueError: If a value has the wrong type or range.
+    """
+    block = data.get("orchestration", {})
+
+    if not isinstance(block, dict):
+        raise ValueError("orchestration must be a JSON object.")
+
+    defaults = OrchestrationConfig()
+    review = block.get("review", defaults.review)
+    max_rounds = block.get("max_rounds", defaults.max_rounds)
+    prompt_path = block.get("review_prompt_path", defaults.review_prompt_path)
+
+    if type(review) is not bool:
+        raise ValueError("orchestration.review must be true or false.")
+
+    if type(max_rounds) is not int or not 1 <= max_rounds <= 10:
+        raise ValueError("orchestration.max_rounds must be an integer from 1 to 10.")
+
+    if not isinstance(prompt_path, str) or not prompt_path.strip():
+        raise ValueError("orchestration.review_prompt_path must be a non-empty string.")
+
+    return OrchestrationConfig(
+        review=review, max_rounds=max_rounds, review_prompt_path=prompt_path.strip()
+    )
+
+
 @dataclass
 class Config:
     """Application configuration."""
@@ -308,6 +363,7 @@ class Config:
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     dispatch: DispatchConfig = field(default_factory=DispatchConfig)
     provider_options: dict[str, Any] = field(default_factory=dict)
+    orchestration: OrchestrationConfig = field(default_factory=OrchestrationConfig)
 
 
 def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
@@ -545,6 +601,7 @@ def load_config(path_override: str | None = None) -> Config:
 
     telemetry = _load_telemetry_config(data)
     dispatch = _load_dispatch_config(data)
+    orchestration = _load_orchestration_config(data)
 
     allowed_providers = frozenset(data["allowed_providers"])
     if data["provider"] not in allowed_providers:
@@ -578,4 +635,5 @@ def load_config(path_override: str | None = None) -> Config:
         telemetry=telemetry,
         dispatch=dispatch,
         provider_options=provider_options,
+        orchestration=orchestration,
     )

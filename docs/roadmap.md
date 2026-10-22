@@ -83,8 +83,9 @@ KIO1'in "orkestratör" olarak asıl değeri burada.
 
 - [ ] **Netleştirme**: istek belirsizse (ör. konum verilmemiş bir hava durumu sorusu) KIO1 plan yapmadan önce soru sorar.
 - [ ] **Plan önizleme ve onay**: plan önce kullanıcıya gösterilir; "Çalıştır / Düzenle / İptal". Ayarla otomatik onay açılabilir.
-- [ ] **Değerlendirme turu**: her seviye ya da tüm plan bittikten sonra LLM sonuçları okur ve `done`, `retry_step`, `replan` ya da `ask_user` kararı verir. Tur sayısı, süre ve token bütçeleri vardır.
-- [ ] **Son cevap**: adım çıktılarından kullanıcıya sade, kaynak gösteren bir cevap sentezlenir (hangi bilgi hangi agent'tan geldi).
+- [x] **Değerlendirme turu** — 2026-10-22: tüm plan bittikten sonra model sonuçları okur ve `done` ya da `continue` der; `continue`'da yalnızca eksik iş yeniden planlanır (`orchestration.max_rounds`, varsayılan 2). Değerlendirme başarısız olursa çalışma bozulmaz, cevap sonuçlardan yazılır. *(Kalan: `retry_step`, `ask_user`, süre/token bütçeleri.)*
+- [x] **Son cevap** — 2026-10-22: isteğin dilinde, kaynak gösteren (`[Deneme]`) cevap; oturuma kaydedilir, konsolda en üstte gösterilir. Bkz. `docs/review.md`.
+- [ ] **Rol bazlı model seçimi önce gelmeli**: canlı denemede `ministral-3:3b` değerlendirmede zayıf kaldı (yanlış commit'leri "son" diye seçti, sayı uydurdu). Değerlendirmeyi daha güçlü bir modelle (ör. OpenRouter) yaptırmak en hızlı kalite kazancı.
 - [ ] **İnsan onayı gereken adımlar**: dosya yazan, komut çalıştıran ya da dağıtım yapan adımlar onay bekler (agent ya da capability bazında ayarlanır).
 - [ ] **Olay akışı**: her olay (plan, adım başladı/bitti, değerlendirme, soru) tek bir olay veriyolundan SSE ile konsola akar ve veritabanına yazılır. *(Veriyolu ve SSE hazır; kalan: değerlendirme/soru olayları ve kalıcılık.)*
 - [ ] **İptal**: çalışan bir istek durdurulabilir; MCP ve HTTP çağrılarına iptal iletilir.

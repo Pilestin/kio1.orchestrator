@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     workflow_id    TEXT,
     execution_mode TEXT,
     error          TEXT,
+    answer         TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
@@ -90,7 +91,7 @@ CREATE INDEX IF NOT EXISTS lineage_session_idx ON lineage (session_id);
 
 _SESSION_COLUMNS = (
     "session_id, request_text, status, workflow_id, execution_mode, error, "
-    "created_at, updated_at"
+    "answer, created_at, updated_at"
 )
 
 
@@ -125,8 +126,24 @@ class SqliteSessionRepository:
         # not slow the run down.
         self._connection.execute("PRAGMA journal_mode = WAL")
         self._connection.executescript(_SCHEMA)
+        self._migrate()
 
         logger.info("Session storage: SQLite at %s", path)
+
+    def _migrate(self) -> None:
+        """Bring a database made by an earlier version up to this schema.
+
+        `CREATE TABLE IF NOT EXISTS` leaves an existing table as it was, so
+        a column added later has to be added here. SQLite has no
+        `ADD COLUMN IF NOT EXISTS`; the table's columns are read instead.
+        """
+        columns = {
+            row[1] for row in self._connection.execute("PRAGMA table_info(sessions)")
+        }
+
+        if "answer" not in columns:
+            self._connection.execute("ALTER TABLE sessions ADD COLUMN answer TEXT")
+            logger.info("Session storage migrated: sessions.answer added")
 
     def close(self) -> None:
         """Close the connection."""
@@ -372,8 +389,9 @@ def _to_session(row: Any) -> Session:
         workflow_id=row[3],
         execution_mode=row[4],
         error=row[5],
-        created_at=row[6],
-        updated_at=row[7],
+        answer=row[6],
+        created_at=row[7],
+        updated_at=row[8],
     )
 
 

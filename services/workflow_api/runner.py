@@ -18,6 +18,17 @@ from core.telemetry import trace_gen_ai_request, trace_operation
 from dispatch.agent_registry import AgentRegistry
 from dispatch.agent_transport import AgentTransport
 from dispatch.directory import AgentDirectory
+from dispatch.review import (
+    DECISION_CONTINUE,
+    DECISION_DONE,
+    Review,
+    Round,
+    fallback_answer,
+    follow_up_request,
+    parse_review,
+    prefix_plan,
+    review_request,
+)
 from dispatch.scoreboard import Scoreboard
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_executor import (
@@ -67,6 +78,10 @@ class WorkflowRunner:
     directory: AgentDirectory
     scoreboard: Scoreboard
     events: RunEventBus | None = None
+    # The reviewer's system prompt, catalog placeholder still in it. Empty
+    # turns the review off whatever the configuration says: there is no
+    # prompt to review with.
+    review_template: str = ""
 
     def run(self, session_id: UUID, request_text: str) -> None:
         """Execute one workflow to completion, recording progress as it goes.
@@ -100,23 +115,127 @@ class WorkflowRunner:
                 emit(FINISHED)
 
     def _run(self, session_id: UUID, request_text: str) -> None:
-        """Plan, dispatch, and record one run. See `run`."""
+        """Plan, dispatch, review, and answer one request. See `run`.
+
+        Rounds: a plan is carried out, the reviewer reads the results, and
+        either answers or names what is missing; then only that is planned
+        and carried out, until the reviewer answers or the rounds run out.
+        With review off this is the single plan-and-dispatch it always was.
+        """
         self.recorder.update_session(session_id, status="running")
         emit("status", status="running")
 
+        settings = self.config.orchestration
+        reviewing = settings.review and bool(self.review_template)
+        max_rounds = settings.max_rounds if reviewing else 1
         registry = self.directory.snapshot()
+        rounds: list[Round] = []
+        planning_request = request_text
+        review: Review | None = None
 
+        for number in range(1, max_rounds + 1):
+            if number > 1:
+                emit("round_started", round=number, request=planning_request)
+
+            done = self._carry_out(session_id, number, planning_request, registry)
+
+            if done is None:
+                if not rounds:
+                    return  # the first plan failed; already recorded
+
+                break  # a follow-up failed; answer with what the earlier rounds got
+
+            rounds.append(done)
+
+            if not reviewing:
+                break
+
+            review = self._review(
+                session_id, request_text, rounds, registry, final=number == max_rounds
+            )
+
+            if review.decision != DECISION_CONTINUE:
+                break
+
+            planning_request = follow_up_request(
+                request_text, rounds, review.next_request
+            )
+
+        last = rounds[-1].result
+        # A workflow whose release was refused by a gate did not complete,
+        # whatever the individual calls did. Reporting it as completed puts
+        # the wrong word in the first place anyone looks. Only the last
+        # round counts: an earlier failure a later round put right is not
+        # the run's outcome.
+        outcome = "failed" if last.failed or last.blocked else "completed"
+        answer = None
+
+        if reviewing:
+            # A review cut short by a failed follow-up still has an answer;
+            # a run that never reached one gets it from the results.
+            answer = review.answer if review is not None else fallback_answer(rounds)
+            emit("answer", text=answer)
+
+        self.recorder.update_session(session_id, status=outcome, answer=answer)
+        emit(
+            "status",
+            status=outcome,
+            rounds=len(rounds),
+            steps=[
+                {
+                    "step_id": step.step_id,
+                    "agent_id": step.agent_id,
+                    "status": step.status,
+                    "error": step.error,
+                }
+                for finished in rounds
+                for step in finished.result.results
+            ],
+        )
+        logger.info(
+            "Workflow run finished: session_id=%s rounds=%d ok=%d error=%d",
+            session_id,
+            len(rounds),
+            last.succeeded,
+            last.failed,
+        )
+
+    def _carry_out(
+        self,
+        session_id: UUID,
+        number: int,
+        planning_request: str,
+        registry: AgentRegistry,
+    ) -> Round | None:
+        """Plan and dispatch one round, recording its steps.
+
+        Args:
+            session_id: The run.
+            number: The round, from 1.
+            planning_request: What to plan: the request itself in the first
+                round, the missing work after that.
+            registry: The targets this run plans against.
+
+        Returns:
+            The round, or None when planning or dispatch failed. A first
+            round's failure is the run's and is recorded as such; a later
+            one only ends the rounds early.
+        """
         try:
-            plan = self._build_plan(session_id, request_text, registry)
+            plan = self._build_plan(session_id, planning_request, registry)
         except Exception as error:
-            logger.exception("Planning failed: session_id=%s", session_id)
-            reason = f"{type(error).__name__}: {error}"
-            self.recorder.update_session(session_id, status="failed", error=reason)
-            emit("status", status="failed", error=reason)
-            return
+            logger.exception(
+                "Planning failed: session_id=%s round=%d", session_id, number
+            )
+            self._round_failed(session_id, number, error)
+            return None
+
+        if number > 1:
+            plan = prefix_plan(plan, f"r{number}-")
 
         emit(
             "plan",
+            round=number,
             workflow_id=plan.workflow_id,
             execution_mode=plan.execution_mode,
             explanation=plan.explanation,
@@ -132,11 +251,13 @@ class WorkflowRunner:
                 for step in plan.steps
             ],
         )
-        self.recorder.update_session(
-            session_id,
-            workflow_id=plan.workflow_id,
-            execution_mode=plan.execution_mode,
-        )
+
+        if number == 1:
+            self.recorder.update_session(
+                session_id,
+                workflow_id=plan.workflow_id,
+                execution_mode=plan.execution_mode,
+            )
 
         try:
             result = execute_workflow(
@@ -151,38 +272,85 @@ class WorkflowRunner:
                 scoreboard=self.scoreboard,
             )
         except Exception as error:
-            logger.exception("Dispatch failed: session_id=%s", session_id)
-            reason = f"{type(error).__name__}: {error}"
-            self.recorder.update_session(session_id, status="failed", error=reason)
-            emit("status", status="failed", error=reason)
-            return
+            logger.exception(
+                "Dispatch failed: session_id=%s round=%d", session_id, number
+            )
+            self._round_failed(session_id, number, error)
+            return None
 
         self._record_results(session_id, plan, result)
 
-        # A workflow whose release was refused by a gate did not complete,
-        # whatever the individual calls did. Reporting it as completed puts
-        # the wrong word in the first place anyone looks.
-        outcome = "failed" if result.failed or result.blocked else "completed"
-        self.recorder.update_session(session_id, status=outcome)
+        return Round(number=number, plan=plan, result=result)
+
+    def _round_failed(self, session_id: UUID, number: int, error: Exception) -> None:
+        """Record why a round could not be carried out."""
+        reason = f"{type(error).__name__}: {error}"
+
+        if number == 1:
+            self.recorder.update_session(session_id, status="failed", error=reason)
+            emit("status", status="failed", error=reason)
+        else:
+            emit("round_failed", round=number, error=reason)
+
+    def _review(
+        self,
+        session_id: UUID,
+        request_text: str,
+        rounds: list[Round],
+        registry: AgentRegistry,
+        *,
+        final: bool,
+    ) -> Review:
+        """Have the model read the results, decide, and answer.
+
+        Never raises: a review that fails — the provider times out, the
+        model writes something that is not a review — falls back to an
+        answer written from the results, so the run still ends with one.
+
+        Args:
+            session_id: The run, for trace correlation.
+            request_text: What the person asked for.
+            rounds: Everything carried out so far.
+            registry: The targets, so the reviewer knows what a follow-up
+                could use.
+            final: Whether this review must end the run.
+
+        Returns:
+            The review.
+        """
+        emit("review_started", round=rounds[-1].number, final=final)
+
+        try:
+            content = self._ask_model(
+                session_id,
+                fill_catalog(self.review_template, registry),
+                review_request(request_text, rounds, final=final),
+                turn=len(rounds) * 2,
+            )
+            review = parse_review(parse_response(content), final=final)
+        except Exception as error:  # noqa: BLE001 - any failure falls back to an answer
+            logger.warning(
+                "Review failed, answering from the results: session_id=%s error=%s",
+                session_id,
+                error,
+            )
+            review = Review(
+                decision=DECISION_DONE,
+                answer=fallback_answer(rounds),
+                reason=f"The review could not be used ({type(error).__name__}).",
+                fallback=True,
+            )
+
         emit(
-            "status",
-            status=outcome,
-            steps=[
-                {
-                    "step_id": step.step_id,
-                    "agent_id": step.agent_id,
-                    "status": step.status,
-                    "error": step.error,
-                }
-                for step in result.results
-            ],
+            "review",
+            round=rounds[-1].number,
+            decision=review.decision,
+            reason=review.reason,
+            next_request=review.next_request,
+            fallback=review.fallback,
         )
-        logger.info(
-            "Workflow run finished: session_id=%s ok=%d error=%d",
-            session_id,
-            result.succeeded,
-            result.failed,
-        )
+
+        return review
 
     def _build_plan(
         self, session_id: UUID, request_text: str, registry: AgentRegistry
@@ -191,7 +359,7 @@ class WorkflowRunner:
 
         Args:
             session_id: The session this run belongs to, for trace correlation.
-            request_text: The user request.
+            request_text: What to plan.
             registry: The targets to describe in the prompt's catalog.
 
         Returns:
@@ -200,10 +368,7 @@ class WorkflowRunner:
         Raises:
             Exception: Any provider or validation failure, handled by `run`.
         """
-        messages = [{"role": "user", "content": request_text}]
         system_prompt = fill_catalog(self.prompt_template, registry)
-        streaming = observed() and supports_streaming(self.provider)
-        relay = TokenRelay()
 
         emit(
             "planning_started",
@@ -211,20 +376,43 @@ class WorkflowRunner:
             model=self.config.model,
             targets=sorted(registry.agent_ids()),
             prompt_chars=len(system_prompt),
-            streaming=streaming,
+            streaming=observed() and supports_streaming(self.provider),
         )
+
+        content = self._ask_model(session_id, system_prompt, request_text, turn=1)
+
+        return parse_plan(parse_response(content))
+
+    def _ask_model(
+        self, session_id: UUID, system_prompt: str, message: str, *, turn: int
+    ) -> str:
+        """Send one request to the model and return its text.
+
+        Streamed only when someone can watch: the answer is identical either
+        way, and a provider that cannot stream still answers.
+
+        Args:
+            session_id: The run, for trace correlation.
+            system_prompt: The system prompt.
+            message: The user message.
+            turn: Which model call of the run this is, for tracing.
+
+        Returns:
+            The model's answer.
+        """
+        messages = [{"role": "user", "content": message}]
+        streaming = observed() and supports_streaming(self.provider)
+        relay = TokenRelay()
 
         with trace_gen_ai_request(
             provider=self.config.provider,
             model=self.config.model,
             session_id=str(session_id),
-            turn_number=1,
+            turn_number=turn,
             message_count=len(messages) + 1,
             max_output_tokens=self.config.max_output_tokens,
             temperature=self.config.temperature,
         ):
-            # Streamed only when someone can watch: the answer is identical
-            # either way, and a provider that cannot stream still plans.
             extra = {"on_token": relay} if streaming else {}
 
             try:
@@ -241,7 +429,7 @@ class WorkflowRunner:
         content = self.provider.extract_content(response)
         emit("model_answer", text=content)
 
-        return parse_plan(parse_response(content))
+        return content
 
     def _record_results(
         self,
@@ -292,6 +480,7 @@ def build_runner(
     directory: AgentDirectory | None = None,
     scoreboard: Scoreboard | None = None,
     events: RunEventBus | None = None,
+    review_template: str = "",
 ) -> WorkflowRunner:
     """Assemble a runner with the transport the configuration selects.
 
@@ -311,6 +500,8 @@ def build_runner(
             selection is turned on.
         events: Where a run reports what it is doing while it does it.
             Omitted reports nowhere.
+        review_template: The reviewer's prompt as read from disk. Omitted
+            runs each plan once, without a review or an answer.
 
     Returns:
         A ready runner.
@@ -340,4 +531,5 @@ def build_runner(
             else Scoreboard(config.dispatch.selection)
         ),
         events=events,
+        review_template=review_template,
     )

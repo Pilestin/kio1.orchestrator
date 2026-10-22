@@ -41,6 +41,9 @@ agents, and the console's edits, and git ignores it.
 | `dispatch.discovery` | object | Manifest URLs agents describe themselves through; see [Discovery](discovery.md) |
 | `dispatch.policy` | object | Gates saying what must have passed before a step runs; see [Policy gates](policy-gates.md) |
 | `dispatch.agents` | object | Everything KIO1 can dispatch to, keyed by the id plans use. Each entry has a `type`: `kio` (default, the KIO1-KIO10 protocol), `http` (any REST API), `cli` (a local command), or `mcp` (a Model Context Protocol server, which reports its own tools). See [Workflow Dispatch](workflow-dispatch.md), [Connecting your own module](connecting-a-tool.md), and [Connecting an MCP server](mcp.md) |
+| `orchestration.review` | boolean | Whether the model reads the results and writes an answer, planning again for missing work (default: `true`). See [Reviewing a run](review.md) |
+| `orchestration.max_rounds` | int | Plans per run, the first included, from 1 to 10 (default: `2`) |
+| `orchestration.review_prompt_path` | string | The reviewer's system prompt (default: `prompts/kio1_review_prompt.txt`) |
 | `dispatch.agents.<id>.enabled` | boolean | Whether the planner may use this target (default: `true`). A disabled target keeps its definition and history and its row in the console, but is neither probed nor offered — the console's **Disable** button sets this |
 | `dispatch.workspace.path` | string | Repository root the agents should analyse, as *they* can see it (default: `""`, not sent) |
 | `dispatch.workspace.entry_point` | string | Runnable script reproducing the behaviour, relative to `workspace.path` (default: `""`, not sent) |

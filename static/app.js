@@ -626,6 +626,33 @@ $("detail-id").addEventListener("click", function () {
   copyText(state.selected, "Session id copied.");
 });
 
+/** The run's answer, first thing in its detail. Citations such as [Python]
+ * are shown as small tags so it is clear which target said what. */
+function showAnswer(text) {
+  const box = $("detail-answer");
+
+  if (!text) { box.classList.add("hidden"); return; }
+
+  const html = esc(text).replace(
+    /\[([A-Za-z0-9_.-]{1,40}(?:,\s*[A-Za-z0-9_.-]{1,40})*)\]/g,
+    function (match, names) {
+      return names.split(/,\s*/).map(function (name) {
+        return '<span class="source">' + name + "</span>";
+      }).join("");
+    })
+    // Models write **bold** and `code`; applied after escaping, so only
+    // these two marks become markup.
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>");
+
+  if (box.dataset.text !== text) {
+    box.innerHTML = html;
+    box.dataset.text = text;
+  }
+
+  box.classList.remove("hidden");
+}
+
 function durationOf(session) {
   const ms = new Date(session.updated_at) - new Date(session.created_at);
 
@@ -659,6 +686,7 @@ async function loadDetail() {
       session.workflow_id || "",
       session.execution_mode || "",
     ].filter(Boolean).join(" · ");
+    showAnswer(session.answer);
 
     // A run that never got past planning records its reason here and has no
     // steps at all. Without this the console shows an empty table and no
@@ -720,6 +748,7 @@ async function loadDetail() {
 const LIVE_KINDS = [
   "status", "planning_started", "model_output", "model_answer", "plan",
   "step_started", "step_finished", "log", "finished",
+  "round_started", "round_failed", "review_started", "review", "answer",
 ];
 
 const live = { source: null, session: null, started: 0, streamed: false, timer: null };
@@ -772,6 +801,7 @@ function onLiveEvent(event) {
       break;
 
     case "planning_started":
+      live.phase = "plan";
       live.streamed = data.streaming;
       setLiveState("warn", "planning", data.provider + " · " + data.model);
       startReadingTimer(data.time * 1000);
@@ -781,8 +811,35 @@ function onLiveEvent(event) {
         + (data.streaming ? "" : ". This provider does not stream; the plan appears when it is complete."));
       break;
 
+    case "round_started":
+      appendText("live-model", "\n\n— round " + data.round + " —\n");
+      liveLine("Round " + esc(data.round) + ": planning what is still missing.", "warn");
+      break;
+
+    case "round_failed":
+      liveLine("Round " + esc(data.round) + " failed: " + esc(data.error), "bad");
+      break;
+
+    case "review_started":
+      live.phase = "review";
+      appendText("live-model", "\n\n— review —\n");
+      setLiveState("warn", "reviewing", "");
+      startReadingTimer(data.time * 1000);
+      break;
+
+    case "review":
+      liveLine(data.decision === "continue"
+        ? "Review: more work needed — " + esc(data.next_request)
+        : "Review: done" + (data.fallback ? " (summary written from the results)" : ""),
+        data.decision === "continue" ? "warn" : "ok");
+      break;
+
+    case "answer":
+      showAnswer(data.text);
+      break;
+
     case "model_output":
-      stopReadingTimer("writing the plan");
+      stopReadingTimer(live.phase === "review" ? "writing the answer" : "writing the plan");
       if (data.channel === "thinking") {
         $("live-thinking-box").classList.remove("hidden");
         appendText("live-thinking", data.text);
@@ -793,7 +850,7 @@ function onLiveEvent(event) {
 
     case "model_answer":
       stopReadingTimer("");
-      if (!live.streamed) $("live-model").textContent = data.text;
+      if (!live.streamed) appendText("live-model", data.text);
       liveLine("Model answered (" + esc(data.text.length) + " chars).");
       break;
 
