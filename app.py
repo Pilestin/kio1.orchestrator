@@ -5,6 +5,7 @@ one is how you drive KIO1 from a terminal, the other is how you drive
 it from a browser or another program, and neither is buried.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -267,22 +268,67 @@ def get_state() -> _State:
 
 STATIC_DIR = Path(__file__).with_name("static")
 
+# The console's own assets, versioned in the page by their content.
+_VERSIONED_ASSETS = ("app.css", "app.js")
+
+# Revalidate on every load. Without a Cache-Control header a browser may reuse
+# a stylesheet for hours on its own judgement, and an updated page paired with
+# a stale stylesheet or script looks — and is — broken.
+_NO_CACHE = "no-cache"
+
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 else:  # pragma: no cover - only a trimmed deployment lacks it
     logger.warning("Console assets are missing at %s", STATIC_DIR)
 
 
-@lru_cache(maxsize=1)
-def _console_page() -> str:
-    """Return the console's HTML, read once.
+@app.middleware("http")
+async def _revalidate_console_assets(request: Request, call_next: Any) -> Any:
+    """Make browsers check the console's files rather than guess they are fresh."""
+    response = await call_next(request)
+
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = _NO_CACHE
+
+    return response
+
+
+@lru_cache(maxsize=4)
+def _console_page_for(mtimes: tuple[float, ...]) -> str:
+    """Return the console's HTML with each asset reference versioned.
+
+    Cached per set of modification times, so editing any of the three files
+    is picked up on the next load without restarting the service.
+
+    Args:
+        mtimes: Modification times of the page and its assets; the cache key.
 
     Returns:
-        The page source, or a plain message when the file is missing so a
+        The page, its stylesheet and script referenced as `app.css?v=<hash>`
+        so a changed file is a new address no cache can answer for.
+    """
+    page = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    for name in _VERSIONED_ASSETS:
+        digest = hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:12]
+        page = page.replace(f'"/static/{name}"', f'"/static/{name}?v={digest}"')
+
+    return page
+
+
+def _console_page() -> str:
+    """Return the console's HTML, current with the files on disk.
+
+    Returns:
+        The page source, or a plain message when a file is missing so a
         trimmed deployment answers something readable rather than a traceback.
     """
     try:
-        return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        mtimes = tuple(
+            (STATIC_DIR / name).stat().st_mtime
+            for name in ("index.html", *_VERSIONED_ASSETS)
+        )
+        return _console_page_for(mtimes)
     except OSError:
         logger.warning("Console page is missing in %s", STATIC_DIR)
         return "<h1>KIO1</h1><p>The console page is not installed.</p>"

@@ -15,6 +15,20 @@ Or from source, without containers:
 uvicorn app:app --port 8000
 ```
 
+## Finding your way around
+
+| | |
+|---|---|
+| **Theme** | Light, dark, or *follow the system*, from the switch at the bottom of the menu. Remembered in this browser and applied before the page paints, so there is no white flash in dark mode. |
+| **Menu** | The button beside the logo collapses it to icons; also remembered. |
+| **Ctrl K** | Opens the command palette: go to a page, start a request, add or edit a target, open a recent run, switch theme. Type to filter, arrows to choose, Enter to run. |
+| **Ctrl Enter** | Runs the request in the box. |
+| **Addresses** | Each page has its own — `#/run`, `#/targets`, `#/settings`, `#/help` — so a reload or a shared link opens the same page. |
+| **Copy** | Every code block and output has a copy button on hover; the session id beside a run copies on click. |
+
+Confirmations and results appear as dialogs and short messages in the
+corner, rather than as browser pop-ups.
+
 ## Run
 
 The box here is not a chat with an agent. What you write goes to the planning

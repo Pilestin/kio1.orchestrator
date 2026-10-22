@@ -11,7 +11,7 @@ from core.telemetry import record_gen_ai_response
 
 logger = logging.getLogger(__name__)
 
-DISPLAY_NAME = "Anthropic (Claude)"
+DISPLAY_NAME = "Anthropic — Claude models"
 API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 # Models that reject a custom `temperature` (400 if sent with a non-default value).

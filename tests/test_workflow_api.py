@@ -465,6 +465,67 @@ def test_the_console_fetches_only_from_this_service() -> None:
     assert all("http" not in call for call in requested)
 
 
+def test_the_console_offers_light_dark_and_system_themes() -> None:
+    # Dark must apply both when the system asks for it (unless the reader
+    # chose light) and when the reader chose it; and the choice must be
+    # replayed before the stylesheet paints, or a dark-mode reader sees a
+    # white flash on every load.
+    from pathlib import Path
+
+    css = Path("static/app.css").read_text(encoding="utf-8")
+    page = Path("static/index.html").read_text(encoding="utf-8")
+
+    assert ':root:not([data-theme="light"])' in css
+    assert ':root[data-theme="dark"]' in css
+    assert page.index("kio1.theme") < page.index("/static/app.css")
+    for choice in ("light", "system", "dark"):
+        assert f'data-theme-choice="{choice}"' in page
+
+
+def test_the_console_asks_in_its_own_dialogs() -> None:
+    # window.alert, confirm, and prompt block the page and cannot be styled
+    # or themed; the console has its own dialog and toasts instead.
+    import re
+    from pathlib import Path
+
+    script = Path("static/app.js").read_text(encoding="utf-8")
+
+    assert not re.search(r"window\.(alert|confirm|prompt)\(", script)
+
+
+def test_every_element_the_script_uses_is_on_the_page() -> None:
+    import re
+    from pathlib import Path
+
+    script = Path("static/app.js").read_text(encoding="utf-8")
+    page = Path("static/index.html").read_text(encoding="utf-8")
+    used = set(re.findall(r'\$\("([a-z0-9-]+)"\)', script))
+    present = set(re.findall(r'id="([^"]+)"', page))
+
+    assert used - present == set()
+
+
+def test_a_changed_stylesheet_or_script_is_never_served_from_a_stale_cache() -> None:
+    # A browser left to its own judgement reused an old stylesheet for hours
+    # after an update, pairing the new page with the old styles. The assets
+    # are addressed by content, and everything is revalidated on load.
+    import hashlib
+    import re
+    from pathlib import Path
+
+    client, _ = build_client(FakeSessionClient())
+    page = client.get("/")
+
+    for name in ("app.css", "app.js"):
+        digest = hashlib.sha256(Path("static", name).read_bytes()).hexdigest()[:12]
+        assert f"/static/{name}?v={digest}" in page.text
+
+    assert not re.search(r'"/static/app\.(css|js)"', page.text)
+    assert page.headers["cache-control"] == "no-cache"
+    assert client.get("/static/app.css").headers["cache-control"] == "no-cache"
+    assert "cache-control" not in client.get("/health").headers
+
+
 def test_the_console_stylesheet_and_script_are_served() -> None:
     client, _ = build_client(FakeSessionClient())
 

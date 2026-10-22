@@ -13,7 +13,7 @@ from providers.provider_client import TokenCallback
 
 logger = logging.getLogger(__name__)
 
-DISPLAY_NAME = "OpenAI"
+DISPLAY_NAME = "OpenAI — GPT models"
 API_KEY_ENV = "OPENAI_API_KEY"
 
 

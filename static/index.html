@@ -3,78 +3,218 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>KIO1 Console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235b5bf0'/%3E%3Cstop offset='1' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='13' font-weight='700' fill='white' text-anchor='middle'%3EK1%3C/text%3E%3C/svg%3E">
+<script>
+  // Applied before the stylesheet paints, so a dark-mode reader never sees a
+  // white flash. The choice itself is made in app.js; this only replays it.
+  (function () {
+    try {
+      var theme = localStorage.getItem("kio1.theme");
+      if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      if (localStorage.getItem("kio1.rail") === "collapsed") document.documentElement.dataset.rail = "collapsed";
+    } catch (e) { /* storage blocked: follow the system */ }
+  })();
+</script>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 
+<!-- Icons, drawn here so nothing is fetched from anywhere. -->
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-run" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
+  <symbol id="i-targets" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" class="fill"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.6"/><circle cx="12" cy="16.8" r=".6" class="fill"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-system" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 19 4M16 7l2.5 2.5M14 9l2 2"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></symbol>
+  <symbol id="i-command" viewBox="0 0 24 24"><path d="M9 6.5A2.5 2.5 0 1 0 6.5 9H9zm0 0v11m0-11h6m-6 11A2.5 2.5 0 1 1 6.5 15H9zm0 0h6m0-11A2.5 2.5 0 1 1 17.5 9H15zm0 0v11m0 0a2.5 2.5 0 1 0 2.5-2.5H15"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3.5 13.8 9 19.5 11l-5.7 2-1.8 5.5-1.8-5.5L4.5 11l5.7-2z"/></symbol>
+  <symbol id="i-empty" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M4 10h16M9 14.5h6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z"/><path d="m13.5 6.5 4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12.5h9l1-12.5M9.5 7V4.5h5V7"/></symbol>
+</svg>
+
 <div class="shell">
 
-<aside class="rail">
+<aside class="rail" aria-label="Main navigation">
   <div class="brand">
-    <span class="mark">K1</span>
+    <span class="mark" aria-hidden="true">K1</span>
     <span class="name">KIO1<span class="role">Orchestrator</span></span>
+    <button class="icon-button rail-collapse" id="rail-collapse" title="Collapse the menu" aria-label="Collapse the menu">
+      <svg class="icon"><use href="#i-collapse"/></svg>
+    </button>
   </div>
 
   <nav>
-    <button id="tab-workflows" aria-selected="true"><span class="glyph">▶</span>Run</button>
-    <button id="tab-targets" aria-selected="false"><span class="glyph">◉</span>Targets</button>
-    <button id="tab-settings" aria-selected="false"><span class="glyph">⚙</span>Settings</button>
-    <button id="tab-help" aria-selected="false"><span class="glyph">?</span>How to use</button>
+    <button id="tab-workflows" aria-selected="true" title="Run"><svg class="icon"><use href="#i-run"/></svg><span class="label">Run</span></button>
+    <button id="tab-targets" aria-selected="false" title="Targets"><svg class="icon"><use href="#i-targets"/></svg><span class="label">Targets</span></button>
+    <button id="tab-settings" aria-selected="false" title="Settings"><svg class="icon"><use href="#i-settings"/></svg><span class="label">Settings</span></button>
+    <button id="tab-help" aria-selected="false" title="How to use"><svg class="icon"><use href="#i-help"/></svg><span class="label">How to use</span></button>
   </nav>
 
   <div class="foot">
-    <span id="conn" class="chip idle">connecting</span>
-    <button class="action quiet" id="set-token">Registry token</button>
+    <div class="theme-switch" role="radiogroup" aria-label="Colour theme">
+      <button role="radio" data-theme-choice="light" title="Light" aria-label="Light"><svg class="icon"><use href="#i-sun"/></svg></button>
+      <button role="radio" data-theme-choice="system" title="Follow the system" aria-label="Follow the system"><svg class="icon"><use href="#i-system"/></svg></button>
+      <button role="radio" data-theme-choice="dark" title="Dark" aria-label="Dark"><svg class="icon"><use href="#i-moon"/></svg></button>
+    </div>
+    <button class="rail-link" id="set-token" title="Administration token"><svg class="icon"><use href="#i-key"/></svg><span class="label">Registry token</span></button>
   </div>
 </aside>
 
+<div class="column">
+
+<header class="topbar">
+  <h1 id="page-title" class="page-title">Run</h1>
+  <span class="spacer"></span>
+  <span id="planner-chip" class="chip idle" title="Which model writes the plan">planner</span>
+  <span id="conn" class="chip idle">connecting</span>
+  <button class="palette-button" id="open-palette" title="Commands (Ctrl+K)">
+    <svg class="icon"><use href="#i-search"/></svg><span class="label">Search or jump to…</span><kbd>Ctrl K</kbd>
+  </button>
+</header>
+
 <main>
-  <!-- ── Targets ─────────────────────────────────────────────────────── -->
-  <div id="view-targets" class="stack hidden">
-    <div class="page-head">
-      <div>
-        <h1>Targets</h1>
-        <p>Everything a plan can be dispatched to, and what each is currently
-          answering. The planner is only told about the ones that are usable.</p>
+  <!-- ── Workflows ───────────────────────────────────────────────────── -->
+  <div id="view-workflows" class="view">
+    <p class="lede">What you write goes to the planning model together with the
+      catalog of targets. The model answers with a plan, and KIO1 runs it. You
+      can watch every step as it happens.</p>
+
+    <div class="run-layout">
+      <div class="stack">
+        <section class="card composer">
+          <label for="request" class="card-title">What should be done?</label>
+          <textarea id="request" spellcheck="false" placeholder="Describe the work in plain language — for example: “Run the tests and show me the last commits.”"></textarea>
+          <div class="examples" id="run-examples" aria-label="Examples">
+            <button class="example" data-example="Show me the recent commit history of this repository and which python version is installed.">Commits &amp; Python version</button>
+            <button class="example" data-example="Run the policy gate tests and report what failed.">Run the tests</button>
+            <button class="example" data-example="What is the current weather at latitude 41.01, longitude 28.97 (Istanbul)?">Weather in Istanbul</button>
+            <button class="example" data-example="There is a null pointer exception in the payment module. Diagnose it, fix it, then run the tests.">Diagnose &amp; fix a bug</button>
+          </div>
+          <div class="composer-foot">
+            <span id="run-workspace" class="mono small muted"></span>
+            <span class="spacer"></span>
+            <span id="run-result" class="small"></span>
+            <button class="action primary" id="run"><svg class="icon"><use href="#i-run"/></svg>Run<kbd class="on-accent">Ctrl ↵</kbd></button>
+          </div>
+        </section>
+
+        <section class="card flush">
+          <div class="card-head">
+            <h2>Recent runs</h2>
+            <span id="runs-count" class="muted small"></span>
+            <span class="spacer"></span>
+            <label class="search small">
+              <svg class="icon"><use href="#i-search"/></svg>
+              <input type="search" id="runs-search" placeholder="Filter runs" aria-label="Filter runs">
+            </label>
+          </div>
+          <ol id="runs-body" class="run-list"></ol>
+        </section>
       </div>
+
+      <section class="card detail hidden" id="detail-panel">
+        <div class="detail-head">
+          <div class="detail-title">
+            <span id="detail-status"></span>
+            <p id="detail-request" class="detail-request"></p>
+          </div>
+          <div class="detail-meta">
+            <span id="detail-meta" class="small muted"></span>
+            <button class="copy-chip mono small" id="detail-id" title="Copy the session id"></button>
+          </div>
+        </div>
+
+        <div id="detail-note" class="notice hidden"></div>
+
+        <div id="live" class="live hidden">
+          <div class="live-head">
+            <span id="live-state" class="chip idle">live</span>
+            <span id="live-phase" class="small muted"></span>
+            <span class="spacer"></span>
+            <label class="switch small"><input type="checkbox" id="live-logs" checked><span class="track"></span>Log lines</label>
+          </div>
+          <div class="live-grid">
+            <div class="live-col">
+              <h3>What the model is writing</h3>
+              <details id="live-thinking-box" class="hidden">
+                <summary class="small muted">Thinking</summary>
+                <pre id="live-thinking" class="output live-text muted"></pre>
+              </details>
+              <pre id="live-model" class="output live-text"></pre>
+            </div>
+            <div class="live-col">
+              <h3>Activity</h3>
+              <ol id="live-log" class="live-log"></ol>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="section-label">Steps</h3>
+        <div class="scroll">
+          <table class="steps">
+            <thead>
+              <tr>
+                <th>Step</th><th>Target</th><th>Status</th>
+                <th class="num">Time</th><th>Detail</th>
+              </tr>
+            </thead>
+            <tbody id="steps-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card detail placeholder" id="detail-placeholder">
+        <svg class="icon big"><use href="#i-sparkle"/></svg>
+        <p><strong>Nothing selected.</strong></p>
+        <p class="muted small">Run a request, or pick one from the list, to see
+          its plan, its steps, and what the model wrote — live while it runs.</p>
+      </section>
+    </div>
+  </div>
+
+  <!-- ── Targets ─────────────────────────────────────────────────────── -->
+  <div id="view-targets" class="view hidden">
+    <div class="view-head">
+      <p class="lede">Everything a plan can be sent to, and whether it is
+        answering. Only enabled, reachable targets are shown to the planner.</p>
+      <button class="action primary" id="add-target"><svg class="icon"><use href="#i-plus"/></svg>Add a target</button>
     </div>
 
     <div id="token-warning" class="notice bad hidden"></div>
     <div id="readonly-warning" class="notice warn hidden"></div>
 
-    <section class="panel">
-      <h2>Targets<span class="spacer"></span><span id="targets-count" class="muted small"></span></h2>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Id</th><th>Kind</th><th>Origin</th><th>Status</th>
-              <th>Capabilities</th><th>Recent</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="targets-body"></tbody>
-        </table>
+    <section class="card flush editor hidden" id="editor-panel">
+      <div class="card-head">
+        <h2 id="editor-title">Add a target</h2>
+        <span class="spacer"></span>
+        <span id="save-location" class="muted small mono"></span>
+        <button class="icon-button" id="close-editor" title="Close" aria-label="Close the editor"><svg class="icon"><use href="#i-close"/></svg></button>
       </div>
-    </section>
-
-    <section class="panel" id="editor-panel">
-      <h2><span id="editor-title">Add a target</span><span class="spacer"></span>
-        <span id="save-location" class="muted small mono"></span></h2>
-      <div class="body stack">
+      <div class="card-body stack">
         <p class="hint" id="editor-hint">
-          Paste a manifest — the same document an agent serves at <code>/manifest</code>.
-          It is probed before it is trusted; one that does not answer is recorded as
+          Paste a definition — the same document an agent serves at <code>/manifest</code>.
+          It is tried before it is trusted; one that does not answer is kept as
           <code>unreachable</code> rather than rejected.
           <a href="#" id="to-help">What can go in here?</a>
         </p>
         <textarea id="entry" spellcheck="false"></textarea>
         <div class="row">
-          <button class="action" id="save-entry">Add</button>
-          <button class="action quiet" id="test-entry">Test connection</button>
-          <button class="action quiet hidden" id="cancel-edit">Cancel</button>
-          <label class="row small muted" for="persist">
-            <input type="checkbox" id="persist" checked>
+          <button class="action primary" id="save-entry">Add</button>
+          <button class="action" id="test-entry">Test connection</button>
+          <button class="action ghost hidden" id="cancel-edit">Cancel</button>
+          <label class="switch small" for="persist">
+            <input type="checkbox" id="persist" checked><span class="track"></span>
             Save to the configuration file
           </label>
           <span id="editor-result" class="small"></span>
@@ -82,208 +222,135 @@
         <div id="probe-result" class="notice hidden"></div>
       </div>
     </section>
-  </div>
 
-  <!-- ── Workflows ───────────────────────────────────────────────────── -->
-  <div id="view-workflows" class="stack">
-    <div class="page-head">
-      <div>
-        <h1>Run a workflow</h1>
-        <p>What you write here goes to the planning model together with the
-          catalog of targets. The model answers with a plan; KIO1 dispatches
-          it. Nothing you type reaches an agent directly.</p>
-      </div>
-    </div>
-
-    <section class="panel composer lifted">
-      <h2>Request<span class="spacer"></span><span id="planner-chip" class="chip idle">planner</span></h2>
-      <div class="body stack">
-        <textarea id="request" spellcheck="false" placeholder="Describe what you want done, in plain language. Name the capability you want if you know it &mdash; &ldquo;localize the failure in&nbsp;&hellip;&rdquo; reaches a different step than &ldquo;replay&nbsp;&hellip;&rdquo;."></textarea>
-        <div class="meta">
-          <span id="run-workspace" class="mono small"></span>
-          <span class="spacer"></span>
-          <span id="run-result" class="small"></span>
-          <button class="action" id="run">Run</button>
+    <section class="card flush">
+      <div class="card-head">
+        <h2>Targets</h2>
+        <span id="targets-count" class="muted small"></span>
+        <span class="spacer"></span>
+        <div class="segmented small" id="targets-kind" role="radiogroup" aria-label="Kind">
+          <button data-kind="" aria-checked="true" role="radio">All</button>
+          <button data-kind="kio" aria-checked="false" role="radio">KIO</button>
+          <button data-kind="http" aria-checked="false" role="radio">HTTP</button>
+          <button data-kind="cli" aria-checked="false" role="radio">CLI</button>
+          <button data-kind="mcp" aria-checked="false" role="radio">MCP</button>
         </div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Recent runs<span class="spacer"></span><span id="runs-count" class="muted small"></span></h2>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr><th>Opened</th><th>Status</th><th>Request</th><th>Workflow</th></tr>
-          </thead>
-          <tbody id="runs-body"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel hidden" id="detail-panel">
-      <h2>Steps<span class="spacer"></span><span id="detail-id" class="muted small mono"></span></h2>
-      <div id="detail-note" class="notice hidden"></div>
-      <div id="live" class="live hidden">
-        <div class="live-head">
-          <span id="live-state" class="chip idle">live</span>
-          <span id="live-phase" class="small muted"></span>
-          <span class="spacer"></span>
-          <label class="small muted"><input type="checkbox" id="live-logs" checked> log lines</label>
-        </div>
-        <div class="live-grid">
-          <div class="live-col">
-            <h3>What the model is writing</h3>
-            <details id="live-thinking-box" class="hidden">
-              <summary class="small muted">thinking</summary>
-              <pre id="live-thinking" class="output live-text muted"></pre>
-            </details>
-            <pre id="live-model" class="output live-text"></pre>
-          </div>
-          <div class="live-col">
-            <h3>Activity</h3>
-            <ol id="live-log" class="live-log"></ol>
-          </div>
-        </div>
+        <label class="search small">
+          <svg class="icon"><use href="#i-search"/></svg>
+          <input type="search" id="targets-search" placeholder="Filter targets" aria-label="Filter targets">
+        </label>
       </div>
       <div class="scroll">
         <table>
           <thead>
             <tr>
-              <th>Step</th><th>Target</th><th>Capability</th><th>Status</th>
-              <th class="num">Time</th><th>Detail</th>
+              <th>Target</th><th>Status</th>
+              <th>Capabilities</th><th class="wide-only">Recent</th><th class="num">On</th><th></th>
             </tr>
           </thead>
-          <tbody id="steps-body"></tbody>
+          <tbody id="targets-body"></tbody>
         </table>
       </div>
     </section>
   </div>
 
   <!-- ── Settings ────────────────────────────────────────────── -->
-  <div id="view-settings" class="stack hidden">
-    <div class="page-head">
-      <div>
-        <h1>Settings</h1>
-        <p>The three things a run depends on that are not a target: which model
-          writes the plan, how freely it writes it, and which code the agents
-          are pointed at. Saved to <code id="settings-path" class="mono">config.json</code>,
-          and in force from the next run &mdash; no restart.</p>
-      </div>
-    </div>
+  <div id="view-settings" class="view hidden">
+    <p class="lede">Which model writes the plan, how freely it writes it, and
+      which code the agents work on. Saved to
+      <code id="settings-path" class="mono">config.json</code> and in force from
+      the next run — no restart.</p>
 
     <div id="settings-readonly" class="notice warn hidden"></div>
 
-    <section class="panel">
-      <h2>Planning model</h2>
-      <div class="body stack">
-        <p class="hint">Producing a valid plan means following the rules in the
-          system prompt: pick a registered capability, order the steps, declare
-          what depends on what. That is hard for a small model, and the failure
-          is not an error message &mdash; it is a plausible-looking plan in the
-          wrong order. If a run fails for a reason that reads like a missing
-          prerequisite, try a larger model before changing anything else.</p>
+    <section class="card">
+      <h2 class="card-title">Planning model</h2>
+      <p class="hint">Choose where the model runs. A larger model follows the
+        planning rules more reliably; if plans come out in the wrong order, try
+        one before changing anything else.</p>
 
-        <div class="grid-2">
-          <label class="field">
-            Provider
-            <select id="settings-provider-select"></select>
-            <span class="hint" id="settings-provider-note"></span>
-          </label>
+      <div class="provider-cards" id="provider-cards" role="radiogroup" aria-label="Provider"></div>
+      <select id="settings-provider-select" class="visually-hidden" tabindex="-1" aria-hidden="true"></select>
+      <p class="hint" id="settings-provider-note"></p>
 
-          <label class="field" id="settings-key-field">
-            <span id="settings-key-label">API key</span>
-            <input type="password" id="settings-key" autocomplete="off" spellcheck="false"
-                   placeholder="paste the key here">
-            <span class="hint">Saved to <code>.env</code> beside
-              <code>config.json</code>, which git ignores. Leave empty to keep
-              the key already set.</span>
-          </label>
+      <div class="grid-2">
+        <label class="field" id="settings-key-field">
+          <span id="settings-key-label">API key</span>
+          <input type="password" id="settings-key" autocomplete="off" spellcheck="false"
+                 placeholder="paste the key here">
+          <span class="hint">Tried first, then saved to <code>.env</code>, which
+            git ignores. Leave empty to keep the key already set.</span>
+        </label>
 
-          <label class="field">
-            Model
-            <input type="text" id="settings-model" list="settings-model-list"
-                   class="mono" spellcheck="false" autocomplete="off"
-                   placeholder="type to search">
-            <datalist id="settings-model-list"></datalist>
-            <span class="hint" id="settings-model-note"></span>
-          </label>
+        <label class="field">
+          Model
+          <input type="text" id="settings-model" list="settings-model-list"
+                 class="mono" spellcheck="false" autocomplete="off"
+                 placeholder="type to search">
+          <datalist id="settings-model-list"></datalist>
+          <span class="hint" id="settings-model-note"></span>
+        </label>
 
-          <label class="field">
-            Temperature
-            <input type="number" id="settings-temperature" min="0" max="2" step="0.1">
-            <span class="hint">Lower is more repeatable. Planning wants
-              repeatable, so 0&ndash;0.3 is the useful range.</span>
-          </label>
+        <label class="field">
+          Temperature
+          <input type="number" id="settings-temperature" min="0" max="2" step="0.1">
+          <span class="hint">Lower is more repeatable; 0–0.3 suits planning.</span>
+        </label>
 
-          <label class="field">
-            Planning timeout (seconds)
-            <input type="number" id="settings-timeout" min="5" max="3600" step="5">
-            <span class="hint">How long the model gets to answer. A larger
-              model is slower, so raise this when you pick one &mdash; a run that
-              fails with &ldquo;timed out&rdquo; ran out of this, not of
-              anything the agents did.</span>
-          </label>
-        </div>
+        <label class="field">
+          Planning timeout (seconds)
+          <input type="number" id="settings-timeout" min="5" max="3600" step="5">
+          <span class="hint">How long the model gets to answer. On a computer
+            without a GPU a local model needs 60–300.</span>
+        </label>
+      </div>
 
-        <div class="row">
-          <span class="muted small">In use</span>
-          <span id="settings-provider" class="tag"></span>
-          <span class="muted small">System prompt</span>
-          <span id="settings-prompt" class="tag"></span>
-        </div>
+      <div class="row in-use">
+        <span class="muted small">In use</span>
+        <span id="settings-provider" class="tag"></span>
+        <span class="muted small">System prompt</span>
+        <span id="settings-prompt" class="tag"></span>
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Workspace</h2>
-      <div class="body stack">
-        <p class="hint">The code the agents analyse. It travels in every
-          execution message, so a KIO knows what to run without being told in
-          prose. <strong>This path is resolved by the agent, not by KIO1.</strong>
-          An agent in its own container sees its own filesystem, so
-          <code>E:\projectspp</code> means nothing there even though it is
-          right here &mdash; use the path inside that container, and make sure the
-          code is actually mounted at it.</p>
+    <section class="card">
+      <h2 class="card-title">Workspace</h2>
+      <p class="hint">The code the agents analyse. It travels in every message,
+        and <strong>it is resolved by the agent, not by KIO1</strong>: an agent
+        in its own container needs the path as that container sees it.</p>
 
-        <div class="grid-2">
-          <label class="field">
-            Repository path
-            <input type="text" id="settings-workspace-path" class="mono"
-                   placeholder="/work" spellcheck="false">
-          </label>
+      <div class="grid-2">
+        <label class="field">
+          Repository path
+          <input type="text" id="settings-workspace-path" class="mono"
+                 placeholder="/work" spellcheck="false">
+        </label>
 
-          <label class="field">
-            Entry point
-            <input type="text" id="settings-workspace-entry" class="mono"
-                   placeholder="main.py" spellcheck="false">
-            <span class="hint">The runnable script, relative to the path above.
-              An agent that records a real execution needs to know what to
-              run.</span>
-          </label>
-        </div>
+        <label class="field">
+          Entry point
+          <input type="text" id="settings-workspace-entry" class="mono"
+                 placeholder="main.py" spellcheck="false">
+          <span class="hint">The runnable script, relative to the path above.</span>
+        </label>
       </div>
     </section>
 
-    <div class="row">
-      <button class="action" id="settings-save">Save</button>
-      <button class="action quiet" id="settings-reload">Discard changes</button>
+    <div class="save-bar">
       <span id="settings-result" class="small"></span>
+      <span class="spacer"></span>
+      <button class="action ghost" id="settings-reload">Discard changes</button>
+      <button class="action primary" id="settings-save">Save</button>
     </div>
   </div>
 
   <!-- ── How to use ──────────────────────────────────────────────────── -->
-  <div id="view-help" class="stack hidden">
-    <div class="page-head">
-      <div>
-        <h1>How to use</h1>
-        <p>What a target is, how a request becomes a plan, and what to write in
-          the box on the Targets tab.</p>
-      </div>
-    </div>
+  <div id="view-help" class="view hidden">
+    <p class="lede">What a target is, how a request becomes a plan, and what
+      to write on the Targets tab.</p>
 
-    <section class="panel">
-      <h2>How a request becomes a plan</h2>
-      <div class="body prose">
+    <section class="card">
+      <h2 class="card-title">How a request becomes a plan</h2>
+      <div class="prose">
         <p>The box on the <strong>Run</strong> tab is not a chat with an agent.
           What you write goes to the planning model, once, together with a
           generated catalog of every usable target and the rules in the system
@@ -315,9 +382,9 @@
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Plugging in your own agent</h2>
-      <div class="body prose">
+    <section class="card">
+      <h2 class="card-title">Plugging in your own agent</h2>
+      <div class="prose">
         <p>KIO1 dispatches to <em>targets</em>. A target is anything that can carry
           out a step: a KIO agent, an ordinary REST API of yours, or a program on
           the machine this service runs on. It does not have to know KIO1 exists.</p>
@@ -334,9 +401,9 @@
       </div>
     </section>
 
-    <section class="panel">
-      <h2>The three kinds</h2>
-      <div class="body stack">
+    <section class="card">
+      <h2 class="card-title">The three kinds</h2>
+      <div class="stack">
 
         <div class="kind">
           <h3><code>kio</code> — a service speaking the KIO1–KIO10 protocol</h3>
@@ -349,7 +416,7 @@
   "path": "/execute",
   "capabilities": ["code_generation", "code_understanding"]
 }</pre>
-          <button class="action quiet use-sample" data-for="kio">Put this in the form</button>
+          <button class="action use-sample" data-for="kio">Put this in the form</button>
         </div>
 
         <div class="kind">
@@ -371,7 +438,7 @@
   "health_url": "https://logs.internal/healthz",
   "capabilities": ["log_search"]
 }</pre>
-          <button class="action quiet use-sample" data-for="http">Put this in the form</button>
+          <button class="action use-sample" data-for="http">Put this in the form</button>
         </div>
 
         <div class="kind">
@@ -389,7 +456,7 @@
   "cwd": "",
   "capabilities": ["test_execution"]
 }</pre>
-          <button class="action quiet use-sample" data-for="cli">Put this in the form</button>
+          <button class="action use-sample" data-for="cli">Put this in the form</button>
         </div>
 
         <div class="kind">
@@ -407,7 +474,7 @@
   "description": "Reads and writes files in the workspace.",
   "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/work"]
 }</pre>
-          <button class="action quiet use-sample" data-for="mcp">Put this in the form</button>
+          <button class="action use-sample" data-for="mcp">Put this in the form</button>
           <p class="hint">Use <code>command</code> for a server KIO1 starts here, or
             <code>url</code> (with <code>headers</code>) for a remote one — one or
             the other, never both. On Windows an npm-published server needs
@@ -428,9 +495,9 @@
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Placeholders</h2>
-      <div class="body stack">
+    <section class="card">
+      <h2 class="card-title">Placeholders</h2>
+      <div class="stack">
         <p class="hint">Anything in <code>url</code>, <code>headers</code>,
           <code>body</code>, <code>command</code> and <code>env</code> can carry
           these. A string that is <em>exactly</em> one placeholder keeps the value's
@@ -454,9 +521,9 @@
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Letting an agent register itself</h2>
-      <div class="body prose">
+    <section class="card">
+      <h2 class="card-title">Letting an agent register itself</h2>
+      <div class="prose">
         <p>Pasting a definition is the manual path. If your service can serve one
           more URL, it can describe itself and skip this form entirely — publish a
           manifest and point KIO1 at it, or push it to the registry API:</p>
@@ -474,9 +541,9 @@
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Before you add it: Test connection</h2>
-      <div class="body stack">
+    <section class="card">
+      <h2 class="card-title">Before you add it: Test connection</h2>
+      <div class="stack">
         <p><strong>Test connection</strong> checks an entry without adding it.
           It tells you what it understood, <strong>which address it actually
           dialled</strong>, and whether that address answered.</p>
@@ -500,9 +567,9 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
       </div>
     </section>
 
-    <section class="panel">
-      <h2>What the statuses mean</h2>
-      <div class="body stack">
+    <section class="card">
+      <h2 class="card-title">What the statuses mean</h2>
+      <div class="stack">
         <div class="scroll">
           <table>
             <thead><tr><th>Shows as</th><th>Means</th></tr></thead>
@@ -525,9 +592,9 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Where changes are saved</h2>
-      <div class="body prose">
+    <section class="card">
+      <h2 class="card-title">Where changes are saved</h2>
+      <div class="prose">
         <p id="help-save-location">Adding, editing, or removing a target here
           rewrites the <code>dispatch.agents</code> section of the configuration
           file. Nothing else in it is touched, the write is atomic, and the previous
@@ -540,9 +607,36 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
     </section>
 
   </div>
-</main>
 
+</main>
 </div>
+</div>
+
+<!-- Transient messages: saved, failed, copied. -->
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<!-- Ctrl+K: jump anywhere, or act, without hunting for the button. -->
+<dialog class="palette" id="palette" aria-label="Commands">
+  <label class="palette-input">
+    <svg class="icon"><use href="#i-search"/></svg>
+    <input type="text" id="palette-input" placeholder="Type a command or a target…" autocomplete="off" spellcheck="false">
+    <kbd>Esc</kbd>
+  </label>
+  <ol id="palette-list" class="palette-list" role="listbox"></ol>
+</dialog>
+
+<!-- Questions the page asks: replaces window.prompt and window.confirm. -->
+<dialog class="ask" id="ask">
+  <form method="dialog">
+    <h2 id="ask-title"></h2>
+    <p id="ask-text" class="muted"></p>
+    <input type="password" id="ask-input" class="hidden" autocomplete="off" spellcheck="false">
+    <div class="row end">
+      <button class="action ghost" value="cancel">Cancel</button>
+      <button class="action primary" id="ask-ok" value="ok">OK</button>
+    </div>
+  </form>
+</dialog>
 
 <script src="/static/app.js"></script>
 </body>

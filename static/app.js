@@ -74,7 +74,12 @@ function token() {
   if (!match) return;
 
   try { sessionStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1])); } catch { /* private mode */ }
-  history.replaceState(null, "", window.location.pathname + window.location.search);
+
+  // Only the token is removed: `#/settings&token=…` still opens Settings.
+  const rest = window.location.hash.slice(1).split("&")
+    .filter(function (part) { return part && part.indexOf("token=") !== 0; }).join("&");
+  history.replaceState(null, "", window.location.pathname + window.location.search
+    + (rest ? "#" + rest : ""));
 })();
 
 async function api(path, options) {
@@ -132,28 +137,87 @@ function targetRow(agent) {
   const caps = (agent.capabilities || [])
     .map(function (c) { return '<span class="cap">' + esc(c) + "</span>"; }).join("");
   const id = esc(agent.agent_id);
+  const off = agent.enabled === false;
 
-  return "<tr>"
-    + "<td><strong>" + id + "</strong>"
-      + (agent.description ? '<div class="muted small">' + esc(agent.description) + "</div>" : "")
+  return '<tr class="' + (off ? "is-off" : "") + '">'
+    + '<td class="target-cell"><span class="target-name">' + id + "</span>"
+      + '<span class="kind-tag ' + esc(agent.kind) + '">' + esc(agent.kind) + "</span>"
+      + '<span class="target-origin muted small" title="Where this target came from">'
+      + esc(agent.origin) + "</span>"
+      + (agent.description ? '<div class="muted small description">' + esc(agent.description) + "</div>" : "")
     + "</td>"
-    + '<td class="small mono">' + esc(agent.kind) + "</td>"
-    + '<td class="small mono">' + esc(agent.origin) + "</td>"
-    + "<td>" + (agent.enabled === false ? statusChip("disabled") : statusChip(agent.status))
-      + (agent.enabled !== false && agent.last_error
-        ? '<div class="reason">' + esc(agent.last_error) + "</div>" : "")
+    + "<td>" + (off ? statusChip("disabled") : statusChip(agent.status))
+      // An error under a target that is still offered is a warning — one
+      // failed check is not withdrawal — and reads as one.
+      + (!off && agent.last_error
+        ? '<div class="reason' + (agent.status === "unreachable" ? "" : " soft") + '" title="'
+          + esc(agent.last_error) + '">'
+          + (agent.status === "unreachable" ? "" : "Last check failed: ")
+          + esc(agent.last_error) + "</div>"
+        : "")
     + "</td>"
     + '<td><div class="caps">' + caps + "</div></td>"
-    + "<td>" + renderHistory(agent.history) + "</td>"
+    + '<td class="wide-only">' + renderHistory(agent.history) + "</td>"
+    + '<td class="toggle"><label class="switch" title="' + (off ? "Enable" : "Disable") + " " + id + '">'
+      + '<input type="checkbox" data-toggle="' + id + '"' + (off ? "" : " checked")
+      + ' aria-label="Use ' + id + '"><span class="track"></span></label></td>'
+    // Icons rather than words: the actions column has to fit a laptop screen
+    // beside the capabilities, and the titles still say what each does.
     + '<td class="actions">'
-      + '<button class="action quiet" data-toggle="' + id + '">'
-        + (agent.enabled === false ? "Enable" : "Disable") + "</button>"
-      + '<button class="action quiet" data-edit="' + id + '">Edit</button>'
-      + '<button class="action danger" data-remove="' + id + '">Remove</button>'
+      + '<button class="icon-button" data-edit="' + id + '" title="Edit ' + id
+        + '" aria-label="Edit ' + id + '"><svg class="icon"><use href="#i-edit"/></svg></button>'
+      + '<button class="icon-button danger" data-remove="' + id + '" title="Remove ' + id
+        + '" aria-label="Remove ' + id + '"><svg class="icon"><use href="#i-trash"/></svg></button>'
     + "</td></tr>";
 }
 
 let lastAgents = [];
+const targetFilter = { text: "", kind: "" };
+
+/** The targets the search box and kind filter leave visible. */
+function visibleAgents() {
+  const text = targetFilter.text.toLowerCase();
+
+  return lastAgents.filter(function (agent) {
+    if (targetFilter.kind && agent.kind !== targetFilter.kind) return false;
+    if (!text) return true;
+
+    return [agent.agent_id, agent.description, (agent.capabilities || []).join(" ")]
+      .join(" ").toLowerCase().indexOf(text) !== -1;
+  });
+}
+
+function renderTargets() {
+  const shown = visibleAgents();
+  const empty = lastAgents.length
+    ? "Nothing matches the filter."
+    : "No targets yet. Use “Add a target” to register one.";
+
+  setRows($("targets-body"), shown.map(targetRow).join("")
+    || '<tr><td colspan="6"><div class="empty-state"><svg class="icon"><use href="#i-empty"/></svg>'
+      + esc(empty) + "</div></td></tr>");
+
+  const usable = lastAgents.filter(function (a) {
+    return a.enabled !== false && a.status !== "unreachable";
+  }).length;
+  $("targets-count").textContent = lastAgents.length + " known · " + usable + " usable";
+}
+
+$("targets-search").addEventListener("input", function () {
+  targetFilter.text = $("targets-search").value.trim();
+  renderTargets();
+});
+
+$("targets-kind").addEventListener("click", function (event) {
+  const button = event.target.closest("button[data-kind]");
+  if (!button) return;
+
+  targetFilter.kind = button.dataset.kind;
+  $("targets-kind").querySelectorAll("button").forEach(function (candidate) {
+    candidate.setAttribute("aria-checked", String(candidate === button));
+  });
+  renderTargets();
+});
 
 async function loadTargets() {
   const warning = $("token-warning");
@@ -163,11 +227,7 @@ async function loadTargets() {
     lastAgents = data.agents || [];
     warning.classList.add("hidden");
     setConnection("ok", "connected");
-
-    setRows($("targets-body"),
-      lastAgents.map(targetRow).join("")
-      || '<tr><td colspan="7" class="muted small">No targets yet. Add one below.</td></tr>');
-    $("targets-count").textContent = lastAgents.length + " known";
+    renderTargets();
   } catch (error) {
     setConnection("bad", "error");
     warning.textContent = error.status === 503 || error.status === 401
@@ -216,6 +276,17 @@ async function loadSaveLocation() {
 
 // ── the editor ──────────────────────────────────────────────────────────────
 
+function openEditor() {
+  $("editor-panel").classList.remove("hidden");
+  $("editor-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("entry").focus({ preventScroll: true });
+}
+
+function closeEditor() {
+  $("editor-panel").classList.add("hidden");
+  startAdding();
+}
+
 function startAdding() {
   state.editing = null;
   $("editor-title").textContent = "Add a target";
@@ -247,7 +318,7 @@ function startEditing(agentId) {
   $("entry").value = JSON.stringify(definition, null, 2);
   $("editor-result").textContent = "";
   $("probe-result").className = "notice hidden";
-  $("editor-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  openEditor();
 }
 
 async function saveEntry() {
@@ -262,6 +333,11 @@ async function saveEntry() {
     result.textContent = "That is not valid JSON: " + error.message;
     return;
   }
+
+  const button = $("save-entry");
+  button.disabled = true;
+  result.className = "small muted";
+  result.textContent = "Trying it…";
 
   try {
     let message;
@@ -283,13 +359,14 @@ async function saveEntry() {
         .map(function (a) { return a.agent_id + " → " + a.status; }).join(", ");
     }
 
-    result.className = "small muted";
-    result.textContent = message + (persist ? " · saved" : " · this session only");
-    startAdding();
+    toast(message + (persist ? " · saved" : " · this session only"), "ok");
+    closeEditor();
     loadTargets();
   } catch (error) {
     result.className = "small reason";
     result.textContent = error.message;
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -303,48 +380,66 @@ async function toggleEnabled(agentId) {
   const agent = lastAgents.find(function (item) { return item.agent_id === agentId; });
 
   if (!agent || !agent.source || !Object.keys(agent.source).length) {
-    window.alert(agentId + " has no saved definition to change; edit it instead.");
+    toast(agentId + " has no saved definition to change; edit it instead.", "warn");
+    renderTargets();
     return;
   }
 
-  const entry = Object.assign({}, agent.source, { enabled: agent.enabled === false });
+  const enabling = agent.enabled === false;
+  const entry = Object.assign({}, agent.source, { enabled: enabling });
 
   try {
     await api("/registry/agents/" + encodeURIComponent(agentId), {
       method: "PUT",
       body: JSON.stringify({ entry: entry, persist: state.writable }),
     });
+    toast(agentId + (enabling ? " is back in the catalog." : " is switched off."), "ok");
   } catch (error) {
-    window.alert(error.message);
+    toast(error.message, "bad");
   }
 
   loadTargets();
 }
 
-document.addEventListener("click", async function (event) {
+async function removeTarget(agentId) {
+  const sure = await ask({
+    title: "Remove " + agentId + "?",
+    text: "If it is in the configuration file, it is taken out of there too. "
+      + "Switching it off instead keeps its definition.",
+    ok: "Remove",
+    danger: true,
+  });
+
+  if (sure === null) return;
+
+  try {
+    await api("/registry/agents/" + encodeURIComponent(agentId), { method: "DELETE" });
+    toast(agentId + " removed.", "ok");
+  } catch (error) {
+    toast(error.message, "bad");
+  }
+
+  loadTargets();
+}
+
+document.addEventListener("click", function (event) {
   const target = event.target;
   if (!target.getAttribute) return;
 
   const editId = target.getAttribute("data-edit");
   if (editId) { startEditing(editId); return; }
 
-  const toggleId = target.getAttribute("data-toggle");
-  if (toggleId) { toggleEnabled(toggleId); return; }
-
   const removeId = target.getAttribute("data-remove");
-  if (!removeId) return;
-
-  if (!window.confirm("Remove " + removeId + "?\nIf it is in the configuration "
-      + "file, it is taken out of there too.")) return;
-
-  try {
-    await api("/registry/agents/" + encodeURIComponent(removeId), { method: "DELETE" });
-  } catch (error) {
-    window.alert(error.message);
-  }
-
-  loadTargets();
+  if (removeId) removeTarget(removeId);
 });
+
+document.addEventListener("change", function (event) {
+  const toggleId = event.target.getAttribute && event.target.getAttribute("data-toggle");
+  if (toggleId) toggleEnabled(toggleId);
+});
+
+$("add-target").addEventListener("click", function () { startAdding(); openEditor(); });
+$("close-editor").addEventListener("click", closeEditor);
 
 /** Try the definition in the box without saving it. */
 async function testEntry() {
@@ -445,52 +540,125 @@ $("cancel-edit").addEventListener("click", startAdding);
 
 // ── workflows ───────────────────────────────────────────────────────────────
 
+let lastRuns = [];
+
+/** "3 min ago" for recent times, the date for older ones. */
+function relativeTime(value) {
+  const then = new Date(value);
+  const seconds = Math.round((Date.now() - then.getTime()) / 1000);
+
+  if (isNaN(seconds)) return "";
+  if (seconds < 45) return "just now";
+  if (seconds < 3600) return Math.round(seconds / 60) + " min ago";
+  if (seconds < 86400) return Math.round(seconds / 3600) + " h ago";
+  if (seconds < 7 * 86400) return Math.round(seconds / 86400) + " d ago";
+
+  return then.toLocaleDateString();
+}
+
+function runItem(run) {
+  const selected = run.session_id === state.selected ? " selected" : "";
+
+  return '<li class="run-item' + selected + '" data-session="' + esc(run.session_id)
+    + '" tabindex="0" title="' + esc(run.request_text || "") + '">'
+    + '<span class="request">' + esc(run.request_text || "(empty request)") + "</span>"
+    + statusChip(run.status)
+    + '<span class="when" title="' + esc(new Date(run.created_at).toLocaleString()) + '">'
+      + esc(relativeTime(run.created_at))
+      + (run.workflow_id ? " · " + esc(run.workflow_id) : "") + "</span>"
+    + "</li>";
+}
+
+function renderRuns() {
+  const text = $("runs-search").value.trim().toLowerCase();
+  const shown = lastRuns.filter(function (run) {
+    return !text || [run.request_text, run.workflow_id, run.status].join(" ")
+      .toLowerCase().indexOf(text) !== -1;
+  });
+
+  setRows($("runs-body"), shown.map(runItem).join("")
+    || '<li class="empty-state"><svg class="icon"><use href="#i-empty"/></svg>'
+      + (lastRuns.length ? "Nothing matches the filter." : "Nothing has run yet. Try an example above.")
+      + "</li>");
+
+  $("runs-count").textContent = lastRuns.length ? String(lastRuns.length) : "";
+}
+
 async function loadRuns() {
   try {
-    const data = await api("/workflows?limit=25");
-    const runs = data.workflows || [];
-
-    setRows($("runs-body"),
-      runs.map(function (run) {
-      const selected = run.session_id === state.selected ? " selected" : "";
-      return '<tr class="clickable' + selected + '" data-session="' + esc(run.session_id) + '">'
-        + '<td class="small mono">' + esc(new Date(run.created_at).toLocaleString()) + "</td>"
-        + "<td>" + statusChip(run.status) + "</td>"
-        + '<td class="small">' + esc((run.request_text || "").slice(0, 90)) + "</td>"
-        + '<td class="small mono">' + esc(run.workflow_id || "—") + "</td>"
-        + "</tr>";
-      }).join("") || '<tr><td colspan="4" class="muted small">Nothing has run yet.</td></tr>');
-
-    $("runs-count").textContent = runs.length + " shown";
+    const data = await api("/workflows?limit=50");
+    lastRuns = data.workflows || [];
+    renderRuns();
   } catch (error) {
-    setRows(
-      $("runs-body"),
-      '<tr><td colspan="4" class="reason">' + esc(error.message) + "</td></tr>"
-    );
+    setRows($("runs-body"), '<li class="empty-state reason">' + esc(error.message) + "</li>");
   }
 }
 
-$("runs-body").addEventListener("click", function (event) {
-  const row = event.target.closest("tr[data-session]");
-  if (!row) return;
-  state.selected = row.getAttribute("data-session");
-  loadRuns();
+function selectRun(sessionId) {
+  state.selected = sessionId;
+  renderRuns();
   loadDetail();
-  followRun(state.selected);
+  followRun(sessionId);
+
+  // Below the two-column width the detail sits under the list, where a
+  // selection would otherwise change nothing the reader can see.
+  if (!window.matchMedia("(min-width: 1180px)").matches) {
+    $("detail-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+$("runs-search").addEventListener("input", renderRuns);
+
+$("runs-body").addEventListener("click", function (event) {
+  const item = event.target.closest("[data-session]");
+  if (item) selectRun(item.getAttribute("data-session"));
 });
+
+$("runs-body").addEventListener("keydown", function (event) {
+  const item = event.target.closest("[data-session]");
+  if (item && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    selectRun(item.getAttribute("data-session"));
+  }
+});
+
+$("detail-id").addEventListener("click", function () {
+  copyText(state.selected, "Session id copied.");
+});
+
+function durationOf(session) {
+  const ms = new Date(session.updated_at) - new Date(session.created_at);
+
+  if (!isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return ms + " ms";
+  if (ms < 120000) return (ms / 1000).toFixed(1) + " s";
+
+  return Math.round(ms / 60000) + " min";
+}
 
 async function loadDetail() {
   const panel = $("detail-panel");
 
+  $("detail-placeholder").classList.toggle("hidden", Boolean(state.selected));
+
   if (!state.selected) { panel.classList.add("hidden"); return; }
 
   panel.classList.remove("hidden");
-  $("detail-id").textContent = state.selected;
+  $("detail-id").textContent = state.selected.slice(0, 8) + "…";
 
   try {
     const detail = await api("/workflow/" + encodeURIComponent(state.selected));
     const session = detail.session || {};
     const steps = detail.steps || [];
+
+    $("detail-status").innerHTML = statusChip(session.status);
+    $("detail-request").textContent = session.request_text || "";
+    $("detail-meta").textContent = [
+      relativeTime(session.created_at),
+      session.status === "running" || session.status === "pending" ? "" : durationOf(session),
+      session.workflow_id || "",
+      session.execution_mode || "",
+    ].filter(Boolean).join(" · ");
 
     // A run that never got past planning records its reason here and has no
     // steps at all. Without this the console shows an empty table and no
@@ -520,23 +688,25 @@ async function loadDetail() {
     setRows($("steps-body"),
       steps.map(function (step) {
       const output = step.output
-        ? '<details><summary>output</summary><pre class="output">'
+        ? '<details><summary>Output</summary><pre class="output">'
           + esc(JSON.stringify(step.output, null, 2)) + "</pre></details>"
         : "";
       return "<tr>"
         + '<td class="mono small">' + esc(step.step_id) + "</td>"
-        + "<td><strong>" + esc(step.agent_id) + "</strong></td>"
-        + '<td class="mono small">' + esc(step.capability) + "</td>"
+        + '<td><span class="target-name">' + esc(step.agent_id) + "</span>"
+          + '<div class="mono small muted">' + esc(step.capability) + "</div></td>"
         + "<td>" + statusChip(step.status) + "</td>"
         + '<td class="num small">' + esc(step.duration_ms) + " ms</td>"
         + "<td>" + (step.error ? '<div class="reason">' + esc(step.error) + "</div>" : "")
           + output + "</td>"
         + "</tr>";
-      }).join("") || '<tr><td colspan="6" class="muted small">No steps recorded yet.</td></tr>');
+      }).join("") || '<tr><td colspan="5" class="muted small">No steps recorded yet.</td></tr>');
+
+    addCopyButtons($("steps-body"));
   } catch (error) {
     setRows(
       $("steps-body"),
-      '<tr><td colspan="6" class="reason">' + esc(error.message) + "</td></tr>"
+      '<tr><td colspan="5" class="reason">' + esc(error.message) + "</td></tr>"
     );
   }
 }
@@ -565,6 +735,7 @@ function liveLine(html, className, isLog) {
   // Follow the bottom only if the reader is already there.
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 30;
   list.appendChild(item);
+  addCopyButtons(item);
   if (atBottom) list.scrollTop = list.scrollHeight;
 }
 
@@ -758,17 +929,31 @@ $("run").addEventListener("click", async function () {
       method: "POST",
       body: JSON.stringify({ request: request }),
     });
-    state.selected = data.session_id;
-    result.textContent = "Accepted — follow it below.";
+    result.textContent = "";
+    toast("Accepted. Follow it on the right as it runs.", "ok");
     loadRuns();
-    loadDetail();
-    followRun(data.session_id);
+    selectRun(data.session_id);
   } catch (error) {
     result.className = "small reason";
     result.textContent = error.message;
   } finally {
     button.disabled = false;
   }
+});
+
+$("request").addEventListener("keydown", function (event) {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    $("run").click();
+  }
+});
+
+$("run-examples").addEventListener("click", function (event) {
+  const example = event.target.closest("[data-example]");
+  if (!example) return;
+
+  $("request").value = example.dataset.example;
+  $("request").focus();
 });
 
 // ── help ────────────────────────────────────────────────────────────────────
@@ -780,7 +965,7 @@ document.querySelectorAll(".use-sample").forEach(function (button) {
     startAdding();
     $("entry").value = sample.textContent;
     showTab("targets");
-    $("editor-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    openEditor();
   });
 });
 
@@ -842,7 +1027,49 @@ function renderProviders(settings) {
 
   select.value = settings.provider;
   renderProviderNeeds(settings.provider);
+  renderProviderCards(settings.providers || [], settings.provider);
 }
+
+/** The provider choice as cards: what each is and what it still needs, at a
+ * glance, which a drop-down cannot say. The hidden select stays the source
+ * of truth, so the rest of the form reads it exactly as before. */
+function renderProviderCards(providers, chosen) {
+  setRows($("provider-cards"), providers.map(function (info) {
+    const [title, detail] = String(info.label).split(" — ");
+    let needs = "No key needed";
+    let tone = "ok";
+
+    if (!info.available) {
+      needs = "Not installed";
+      tone = "warn";
+    } else if (info.key_env) {
+      needs = info.key_set ? "Key set" : "Needs " + info.key_env;
+      tone = info.key_set ? "ok" : "warn";
+    }
+
+    return '<button type="button" class="provider-card" role="radio" data-provider="'
+      + esc(info.name) + '" aria-checked="' + String(info.name === chosen) + '"'
+      + (info.available ? "" : " disabled") + ">"
+      + '<span class="name">' + esc(title) + "</span>"
+      + (detail ? '<span class="small muted">' + esc(detail) + "</span>" : "")
+      + '<span class="needs ' + tone + '">' + esc(needs) + "</span>"
+      + "</button>";
+  }).join(""));
+}
+
+$("provider-cards").addEventListener("click", function (event) {
+  const card = event.target.closest("[data-provider]");
+  if (!card || card.disabled) return;
+
+  const select = $("settings-provider-select");
+  select.value = card.dataset.provider;
+  $("provider-cards").querySelectorAll("[data-provider]").forEach(function (candidate) {
+    candidate.setAttribute("aria-checked", String(candidate === card));
+  });
+  // The change handler below asks the provider for its models; `bubbles` so
+  // the form also notices it has unsaved changes.
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+});
 
 function renderModels(settings) {
   renderProviders(settings);
@@ -962,16 +1189,16 @@ async function saveSettings() {
     $("settings-key").value = "";
     renderModels(settings);
     renderPlannerSummary(settings);
-    result.textContent = "Saved to " + settings.config_path
-      + " · in force from the next run";
+    result.textContent = "";
 
     // A local model is being read into memory right now if it changed, and a
     // run started before that finishes waits for it.
-    if (previousModel !== settings.model) {
-      result.textContent += " · loading " + settings.model + "…";
-    }
+    toast("Saved — in force from the next run."
+      + (previousModel !== settings.model ? "\nLoading " + settings.model + "…" : ""), "ok");
   } catch (error) {
+    result.className = "small reason";
     result.textContent = error.message;
+    toast(error.message, "bad");
   } finally {
     button.disabled = !(state.settings && state.settings.writable);
   }
@@ -995,8 +1222,12 @@ $("settings-reload").addEventListener("click", function () {
 // ── shell ───────────────────────────────────────────────────────────────────
 
 const TABS = ["workflows", "targets", "settings", "help"];
+const TITLES = { workflows: "Run", targets: "Targets", settings: "Settings", help: "How to use" };
+// The address names the page, so a reload or a shared link lands where it was.
+const ROUTES = { workflows: "run", targets: "targets", settings: "settings", help: "help" };
 
-function showTab(name) {
+function showTab(name, options) {
+  if (TABS.indexOf(name) === -1) name = "workflows";
   state.tab = name;
 
   TABS.forEach(function (candidate) {
@@ -1004,26 +1235,295 @@ function showTab(name) {
     $("tab-" + candidate).setAttribute("aria-selected", String(candidate === name));
   });
 
+  $("page-title").textContent = TITLES[name];
+  document.title = TITLES[name] + " · KIO1 Console";
+
+  if (!(options && options.fromAddress)) {
+    history.replaceState(null, "", "#/" + ROUTES[name]);
+  }
+
   refresh();
+}
+
+function tabFromAddress() {
+  const route = window.location.hash.replace(/^#\/?/, "");
+  return TABS.find(function (name) { return ROUTES[name] === route; }) || "workflows";
 }
 
 TABS.forEach(function (name) {
   $("tab-" + name).addEventListener("click", function () { showTab(name); });
 });
 
-$("set-token").addEventListener("click", function () {
-  const value = window.prompt(
-    "Registry token (KIO1_REGISTRY_TOKEN on the server).\n"
-    + "Kept in this browser tab only, never stored on disk.",
-    token()
-  );
+window.addEventListener("hashchange", function () {
+  showTab(tabFromAddress(), { fromAddress: true });
+});
+
+// ── theme ───────────────────────────────────────────────────────────────────
+
+const THEME_KEY = "kio1.theme";
+
+function storedTheme() {
+  try { return localStorage.getItem(THEME_KEY) || "system"; } catch { return "system"; }
+}
+
+/** Light, dark, or whatever the system says — remembered in this browser. */
+function applyTheme(choice) {
+  const root = document.documentElement;
+
+  if (choice === "light" || choice === "dark") {
+    root.dataset.theme = choice;
+  } else {
+    delete root.dataset.theme;
+    choice = "system";
+  }
+
+  try { localStorage.setItem(THEME_KEY, choice); } catch { /* storage blocked */ }
+
+  document.querySelectorAll("[data-theme-choice]").forEach(function (button) {
+    button.setAttribute("aria-checked", String(button.dataset.themeChoice === choice));
+  });
+}
+
+document.querySelectorAll("[data-theme-choice]").forEach(function (button) {
+  button.addEventListener("click", function () { applyTheme(button.dataset.themeChoice); });
+});
+
+function isDark() {
+  const chosen = document.documentElement.dataset.theme;
+  if (chosen) return chosen === "dark";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+// ── the menu ────────────────────────────────────────────────────────────────
+
+function setRailCollapsed(collapsed) {
+  const root = document.documentElement;
+
+  if (collapsed) root.dataset.rail = "collapsed"; else delete root.dataset.rail;
+  try { localStorage.setItem("kio1.rail", collapsed ? "collapsed" : "open"); } catch { /* ignore */ }
+
+  const label = collapsed ? "Expand the menu" : "Collapse the menu";
+  $("rail-collapse").title = label;
+  $("rail-collapse").setAttribute("aria-label", label);
+}
+
+$("rail-collapse").addEventListener("click", function () {
+  setRailCollapsed(document.documentElement.dataset.rail !== "collapsed");
+});
+
+// ── toasts ──────────────────────────────────────────────────────────────────
+
+/** A short message in the corner that goes away on its own. */
+function toast(message, kind) {
+  const item = document.createElement("div");
+  item.className = "toast " + (kind || "");
+  item.textContent = message;
+  $("toasts").appendChild(item);
+
+  const linger = kind === "bad" ? 7000 : 3600;
+
+  window.setTimeout(function () {
+    item.classList.add("leaving");
+    window.setTimeout(function () { item.remove(); }, 250);
+  }, linger);
+}
+
+// ── questions ───────────────────────────────────────────────────────────────
+
+/** Ask something in a dialog instead of window.prompt or window.confirm.
+ *
+ * Resolves to the typed value (or "" when there is no input), or null when
+ * the reader cancels. */
+function ask(options) {
+  const dialog = $("ask");
+  const input = $("ask-input");
+
+  $("ask-title").textContent = options.title || "";
+  $("ask-text").textContent = options.text || "";
+  $("ask-ok").textContent = options.ok || "OK";
+  $("ask-ok").classList.toggle("danger", Boolean(options.danger));
+  $("ask-ok").classList.toggle("primary", !options.danger);
+  input.classList.toggle("hidden", !options.input);
+  input.value = options.value || "";
+  input.placeholder = options.placeholder || "";
+
+  return new Promise(function (resolve) {
+    dialog.addEventListener("close", function onClose() {
+      dialog.removeEventListener("close", onClose);
+      resolve(dialog.returnValue === "ok" ? (options.input ? input.value : "") : null);
+    });
+
+    dialog.returnValue = "";
+    dialog.showModal();
+    (options.input ? input : $("ask-ok")).focus();
+  });
+}
+
+$("set-token").addEventListener("click", async function () {
+  const value = await ask({
+    title: "Administration token",
+    text: "The value of KIO1_REGISTRY_TOKEN on the server. start.py opens the "
+      + "console with it already filled in. Kept in this browser tab only.",
+    input: true,
+    value: token(),
+    placeholder: "paste the token",
+    ok: "Use this token",
+  });
 
   if (value === null) return;
 
   try { sessionStorage.setItem(TOKEN_KEY, value.trim()); } catch { /* private mode */ }
 
+  toast("Token updated.", "ok");
   refresh();
 });
+
+// ── copying ─────────────────────────────────────────────────────────────────
+
+async function copyText(text, message) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(message || "Copied.", "ok");
+  } catch {
+    toast("This browser did not allow copying.", "warn");
+  }
+}
+
+/** Give every code block under `root` a copy button, once. */
+function addCopyButtons(root) {
+  (root || document).querySelectorAll("pre").forEach(function (pre) {
+    if (pre.parentElement.classList.contains("copyable")) return;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "copyable";
+    pre.parentElement.insertBefore(wrapper, pre);
+    wrapper.appendChild(pre);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-button";
+    button.title = "Copy";
+    button.setAttribute("aria-label", "Copy");
+    button.innerHTML = '<svg class="icon"><use href="#i-copy"/></svg>';
+    button.addEventListener("click", function () { copyText(pre.textContent); });
+    wrapper.appendChild(button);
+  });
+}
+
+// ── command palette ─────────────────────────────────────────────────────────
+
+/** Everything the palette can do, built fresh each time it opens so it
+ * includes the targets and runs known right now. */
+function paletteCommands() {
+  const commands = [
+    { label: "Go to Run", hint: "page", run: function () { showTab("workflows"); } },
+    { label: "Go to Targets", hint: "page", run: function () { showTab("targets"); } },
+    { label: "Go to Settings", hint: "page", run: function () { showTab("settings"); } },
+    { label: "Go to How to use", hint: "page", run: function () { showTab("help"); } },
+    { label: "New request", hint: "run", run: function () { showTab("workflows"); $("request").focus(); } },
+    { label: "Add a target", hint: "targets", run: function () { showTab("targets"); startAdding(); openEditor(); } },
+    { label: "Change the model", hint: "settings", run: function () { showTab("settings"); } },
+    { label: "Switch to " + (isDark() ? "light" : "dark") + " theme", hint: "theme",
+      run: function () { applyTheme(isDark() ? "light" : "dark"); } },
+    { label: "Follow the system theme", hint: "theme", run: function () { applyTheme("system"); } },
+    { label: "Set the administration token", hint: "access", run: function () { $("set-token").click(); } },
+  ];
+
+  lastAgents.forEach(function (agent) {
+    commands.push({
+      label: "Edit target " + agent.agent_id,
+      hint: agent.kind,
+      run: function () { showTab("targets"); startEditing(agent.agent_id); },
+    });
+  });
+
+  lastRuns.slice(0, 15).forEach(function (run) {
+    commands.push({
+      label: "Open run: " + (run.request_text || "").slice(0, 60),
+      hint: run.status,
+      run: function () { showTab("workflows"); selectRun(run.session_id); },
+    });
+  });
+
+  return commands;
+}
+
+const palette = { commands: [], shown: [], index: 0 };
+
+function renderPalette() {
+  const text = $("palette-input").value.trim().toLowerCase();
+  const words = text.split(/\s+/).filter(Boolean);
+
+  palette.shown = palette.commands.filter(function (command) {
+    const haystack = (command.label + " " + command.hint).toLowerCase();
+    return words.every(function (word) { return haystack.indexOf(word) !== -1; });
+  }).slice(0, 40);
+
+  palette.index = Math.min(palette.index, Math.max(palette.shown.length - 1, 0));
+
+  $("palette-list").innerHTML = palette.shown.map(function (command, index) {
+    return '<li role="option" data-index="' + index + '" aria-selected="'
+      + String(index === palette.index) + '">' + esc(command.label)
+      + '<span class="hint">' + esc(command.hint) + "</span></li>";
+  }).join("") || '<li class="empty">Nothing matches.</li>';
+
+  const selected = $("palette-list").querySelector('[aria-selected="true"]');
+  if (selected) selected.scrollIntoView({ block: "nearest" });
+}
+
+function openPalette() {
+  palette.commands = paletteCommands();
+  palette.index = 0;
+  $("palette-input").value = "";
+  renderPalette();
+  $("palette").showModal();
+  $("palette-input").focus();
+}
+
+function runPaletteCommand(index) {
+  const command = palette.shown[index];
+  if (!command) return;
+
+  $("palette").close();
+  command.run();
+}
+
+$("open-palette").addEventListener("click", openPalette);
+$("palette-input").addEventListener("input", function () { palette.index = 0; renderPalette(); });
+
+$("palette-input").addEventListener("keydown", function (event) {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    const count = palette.shown.length || 1;
+    palette.index = (palette.index + step + count) % count;
+    renderPalette();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    runPaletteCommand(palette.index);
+  }
+});
+
+$("palette-list").addEventListener("click", function (event) {
+  const item = event.target.closest("[data-index]");
+  if (item) runPaletteCommand(Number(item.dataset.index));
+});
+
+// Clicking the dimmed backdrop closes either dialog.
+["palette", "ask"].forEach(function (id) {
+  $(id).addEventListener("click", function (event) {
+    if (event.target === $(id)) $(id).close("cancel");
+  });
+});
+
+document.addEventListener("keydown", function (event) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if ($("palette").open) $("palette").close(); else openPalette();
+  }
+});
+
+// ── refreshing ──────────────────────────────────────────────────────────────
 
 function refresh() {
   if (state.tab === "targets") {
@@ -1032,15 +1532,18 @@ function refresh() {
   } else if (state.tab === "workflows") {
     loadRuns();
     loadDetail();
-    // The Run page shows which model will write the plan and which code the
-    // agents will be pointed at. Both are the settings a run goes wrong on,
-    // and both are worth seeing before pressing the button rather than after.
-    loadSettings({ quiet: true });
   } else if (state.tab === "settings") {
     loadSettings({ quiet: true });
   }
+
+  // The top bar shows which model will write the plan on every page: it is
+  // the setting a run most often goes wrong on.
+  if (state.tab !== "settings") loadSettings({ quiet: true });
 }
 
+applyTheme(storedTheme());
+setRailCollapsed(document.documentElement.dataset.rail === "collapsed");
 startAdding();
-refresh();
+addCopyButtons($("view-help"));
+showTab(tabFromAddress(), { fromAddress: true });
 window.setInterval(refresh, REFRESH_MS);
