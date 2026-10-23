@@ -52,6 +52,22 @@ is in [review.md](review.md#follow-up-requests).
 
 Below an answer: copy it, ask the same again, or open the run details.
 
+### Choosing targets and attaching files
+
+Type `@` (or press the @ button) for a list of the enabled targets; arrows
+and Enter pick one. The name stays in the message as plain text —
+`@CodeReviewer what does this do?` — and KIO1 tells the planner to use the
+targets named that way, whatever their case. An `@` in an earlier message or
+inside an attached file chooses nothing.
+
+The paperclip, or dropping files on the conversation, attaches them (2 MB
+each, up to 8 per message). They are stored under `data/attachments/`, and
+every step is told where in `data.attachments`, for targets that read files.
+A text file's content also goes into what the planner reads — up to 12 000
+characters in all, smallest files first — so it can copy the code a target
+needs into the target's task; a target that only reads text, such as an LLM
+agent, would otherwise never see the file.
+
 Three things are still where most failed runs come from:
 
 - A capability the catalog does not list cannot be asked for.
@@ -289,7 +305,8 @@ All of them are ordinary API endpoints; the console is just one caller.
 | `PUT /registry/agents/{id}` | Replace one target's definition |
 | `DELETE /registry/agents/{id}` | Remove it, from the file too when it is in there |
 | `GET /registry/config` | Which file saves go to, and whether they can |
-| `POST /workflow/run` | Send a message; `conversation_id` continues a conversation, without it a new one starts |
+| `POST /workflow/run` | Send a message; `conversation_id` continues a conversation, without it a new one starts; `attachments` names uploaded files |
+| `POST /files` | Upload a file to attach, as `{name, content_base64}`; answers with its `attachment_id` |
 | `GET /workflow/{session_id}/waiting`, `POST …/approval`, `POST …/answer` | What a run waits for, and the reply |
 | `POST /conversations` | Open an empty conversation (New chat) |
 | `GET /conversations?limit=N` | Conversations, the one last written to first |

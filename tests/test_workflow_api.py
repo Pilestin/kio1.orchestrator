@@ -316,10 +316,18 @@ class SpyRunner:
     def __init__(self) -> None:
         self.runs: list[tuple[UUID, str]] = []
         self.earlier: list[str] = []
+        self.attachments: list[list[Any]] = []
 
-    def run(self, session_id: UUID, request_text: str, earlier: str = "") -> None:
+    def run(
+        self,
+        session_id: UUID,
+        request_text: str,
+        earlier: str = "",
+        attachments: list[Any] | None = None,
+    ) -> None:
         self.runs.append((session_id, request_text))
         self.earlier.append(earlier)
+        self.attachments.append(list(attachments or []))
 
 
 def build_client(

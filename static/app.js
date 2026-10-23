@@ -4,6 +4,7 @@
 //   js/core.js      talking to the service, escaping, toasts, the dialog
 //   js/shell.js     the menu, tabs and address, theme, token
 //   js/chat.js      the Run page: conversations
+//   js/composer.js  the message box: @Name and attached files
 //   js/live.js      the run details drawer and the event stream
 //   js/targets.js   the Targets page, and the samples on How to use
 //   js/settings.js  the Settings page

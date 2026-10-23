@@ -37,6 +37,7 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS answer TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS conversation_id UUID
     REFERENCES conversations (conversation_id) ON DELETE CASCADE;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS clarifications JSONB;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS attachments JSONB;
 
 CREATE INDEX IF NOT EXISTS sessions_conversation_idx
     ON sessions (conversation_id, created_at);

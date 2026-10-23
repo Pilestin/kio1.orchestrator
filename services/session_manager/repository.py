@@ -28,7 +28,7 @@ _ORDERED_EXECUTION_MODES = frozenset({"sequential", "mixed"})
 
 _SESSION_COLUMNS = (
     "session_id, request_text, status, workflow_id, execution_mode, error, "
-    "answer, conversation_id, clarifications, created_at, updated_at"
+    "answer, conversation_id, clarifications, attachments, created_at, updated_at"
 )
 
 _CONVERSATION_COLUMNS = "conversation_id, title, created_at, updated_at"
@@ -238,6 +238,9 @@ class InMemorySessionRepository:
         # `model_copy` does not validate, so the models go in, not their dumps.
         if update.clarifications is not None:
             changes["clarifications"] = list(update.clarifications)
+
+        if update.attachments is not None:
+            changes["attachments"] = list(update.attachments)
 
         updated = session.model_copy(
             update={**changes, "updated_at": datetime.now(timezone.utc)}
@@ -713,14 +716,15 @@ def _last_step_with_output(steps: list[Step]) -> Step | None:
 def storable_changes(update: UpdateSessionRequest) -> dict[str, Any]:
     """Return an update's non-null fields as column values.
 
-    The questions and answers are one JSON column, so they go in as JSON
-    text; every other field is stored as it is. Shared with the SQLite
-    repository, whose column holds the same text.
+    The questions and answers, and the attached files, are JSON columns,
+    so they go in as JSON text; every other field is stored as it is.
+    Shared with the SQLite repository, whose columns hold the same text.
     """
     changes = update.model_dump(exclude_none=True)
 
-    if "clarifications" in changes:
-        changes["clarifications"] = json.dumps(changes["clarifications"])
+    for column in ("clarifications", "attachments"):
+        if column in changes:
+            changes[column] = json.dumps(changes[column])
 
     return changes
 
@@ -737,8 +741,9 @@ def _to_session(row: Any) -> Session:
         answer=row[6],
         conversation_id=row[7],
         clarifications=row[8] or [],
-        created_at=row[9],
-        updated_at=row[10],
+        attachments=row[9] or [],
+        created_at=row[10],
+        updated_at=row[11],
     )
 
 

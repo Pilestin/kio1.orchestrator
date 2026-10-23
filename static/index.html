@@ -44,6 +44,8 @@
   <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></symbol>
   <symbol id="i-retry" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h10"/></symbol>
+  <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="m20 11.5-8.5 8.5a5 5 0 0 1-7-7L13 4.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L14.5 7.5"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12.5h9l1-12.5M9.5 7V4.5h5V7"/></symbol>
 </svg>
 
@@ -136,9 +138,14 @@
 
       <div class="composer-bar">
         <div class="lane">
-          <div class="composer-box">
+          <div class="composer-box" id="composer">
+            <ol id="mention-list" class="mention-list hidden" role="listbox" aria-label="Targets"></ol>
+            <div id="attachment-chips" class="attachment-chips hidden"></div>
             <textarea id="request" rows="1" placeholder="Ask KIO1…" aria-label="Message"></textarea>
             <div class="composer-row">
+              <button class="icon-button" id="mention-button" title="Choose a target" aria-label="Choose a target"><svg class="icon"><use href="#i-at"/></svg></button>
+              <button class="icon-button" id="attach-button" title="Attach a file" aria-label="Attach a file"><svg class="icon"><use href="#i-clip"/></svg></button>
+              <input type="file" id="attach-input" class="hidden" multiple>
               <span id="run-result" class="small"></span>
               <span class="spacer"></span>
               <button class="action primary" id="run"><svg class="icon"><use href="#i-run"/></svg>Send</button>

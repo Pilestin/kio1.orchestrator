@@ -5,6 +5,7 @@
 // "now add type hints" is understood. What the model writes and the log lines
 // stay in the run details drawer; the chat keeps only what a person needs.
 
+import { attachmentIds, clearAttachments, uploading } from "./composer.js";
 import { $, api, ask, copyText, esc, hooks, relativeTime, setRows, state, statusChip, toast } from "./core.js";
 import { followRun, live, loadSteps, setDrawer, subscribe } from "./live.js";
 import { addressDetail, setAddress, setTitle, showTab } from "./shell.js";
@@ -213,7 +214,7 @@ function turnHtml(item, isLast) {
     + '<button class="icon-button" data-details="' + id + '" title="Run details" aria-label="Run details"><svg class="icon"><use href="#i-panel"/></svg></button>'
     + "</div>";
 
-  return '<div class="msg-user">' + esc(session.request_text) + "</div>"
+  return userMessage(session.request_text, session.attachments)
     + '<div class="msg-kio">'
       + '<div class="who"><span class="mark">K1</span>KIO1</div>'
       + planCard(item, isLast)
@@ -223,8 +224,25 @@ function turnHtml(item, isLast) {
     + "</div>";
 }
 
+/** What the person wrote, its @Name choices marked, and the files they
+ * attached below it. An address like a@b.org is not a choice: a name only
+ * counts at the start of a word, as the service reads it. */
+function userMessage(text, files) {
+  const marked = esc(text).replace(/(^|\s)@([\w.-]+)/g, function (match, space, name) {
+    return space + '<span class="mention">@' + name + "</span>";
+  });
+
+  return '<div class="msg-user">' + marked + "</div>"
+    + ((files || []).length
+      ? '<div class="msg-files">' + files.map(function (file) {
+          return '<span class="file-chip"><svg class="icon"><use href="#i-clip"/></svg>'
+            + '<span class="name">' + esc(file.name) + "</span></span>";
+        }).join("") + "</div>"
+      : "");
+}
+
 function pendingHtml(request) {
-  return '<div class="msg-user">' + esc(request) + "</div>"
+  return userMessage(request)
     + '<div class="msg-kio"><div class="who"><span class="mark">K1</span>KIO1</div>'
     + '<div class="plan-card"><div class="summary">' + statusChip("pending")
     + '<span class="small muted">sending…</span></div></div></div>';
@@ -372,30 +390,47 @@ async function loadConversation(options) {
   renderTurns();
 }
 
-/** Send a request: the composer's, or the one given. */
-export async function send(text) {
-  const request = (text === undefined ? $("request").value : text).trim();
+/** Send a request: the composer's with its files, or the one given with
+ * the files given — "ask again" sends a turn's own. The composer is only
+ * emptied when it is what was sent. */
+export async function send(text, files) {
+  const composing = text === undefined;
+  const request = (composing ? $("request").value : text).trim();
   if (!request || chat.sending) return;
+
+  if (composing && uploading()) {
+    $("run-result").className = "small muted";
+    $("run-result").textContent = "Waiting for the file to upload…";
+    return;
+  }
+
+  const attachments = composing ? attachmentIds() : files || [];
 
   chat.sending = true;
   chat.pending = request;
   $("run").disabled = true;
   $("run-result").textContent = "";
-  $("request").value = "";
-  autoGrow();
+  if (composing) {
+    $("request").value = "";
+    autoGrow();
+  }
   renderTurns();
 
   try {
     const body = { request: request };
     if (chat.current) body.conversation_id = chat.current;
+    if (attachments.length) body.attachments = attachments;
 
     const data = await api("/workflow/run", { method: "POST", body: JSON.stringify(body) });
+    if (composing) clearAttachments();
     chat.current = data.conversation_id;
     select(data.session_id);
     await loadConversation({ sent: true });
   } catch (error) {
-    $("request").value = request;
-    autoGrow();
+    if (composing) {
+      $("request").value = request;
+      autoGrow();
+    }
     $("run-result").className = "small reason";
     $("run-result").textContent = error.message;
   } finally {
@@ -687,7 +722,11 @@ $("turns").addEventListener("click", function (event) {
   if (!item) return;
 
   if (button.dataset.copy) copyText(item.session.answer, "Answer copied.");
-  if (button.dataset.retry) send(item.session.request_text);
+  if (button.dataset.retry) {
+    send(item.session.request_text, (item.session.attachments || []).map(function (file) {
+      return file.attachment_id;
+    }));
+  }
   if (button.dataset.details) {
     select(item.session.session_id);
     setDrawer(true);

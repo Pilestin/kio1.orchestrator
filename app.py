@@ -5,6 +5,8 @@ one is how you drive KIO1 from a terminal, the other is how you drive
 it from a browser or another program, and neither is buried.
 """
 
+import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -34,6 +36,7 @@ from core.agent_store import (
     registry_from,
 )
 from core.approvals import ApprovalDesk
+from core.attachments import AttachmentError, AttachmentStore
 from core.config_loader import Config, Workspace, load_config, rehost_entry
 from core.config_writer import (
     ConfigWriteError,
@@ -93,6 +96,15 @@ class RunWorkflowRequest(BaseModel):
 
     request: str = Field(min_length=1, max_length=100_000)
     conversation_id: UUID | None = None
+    # Files uploaded with `POST /files`, by the id it returned.
+    attachments: list[str] = Field(default_factory=list, max_length=8)
+
+
+class UploadFileRequest(BaseModel):
+    """A file to attach, as base64: no multipart parser to install."""
+
+    name: str = Field(min_length=1, max_length=200)
+    content_base64: str = Field(min_length=1)
 
 
 class RunWorkflowResponse(BaseModel):
@@ -149,6 +161,7 @@ class _State:
     events: RunEventBus = field(default_factory=RunEventBus)
     approvals: ApprovalDesk = field(default_factory=ApprovalDesk)
     store: AgentStore = field(default_factory=FileAgentStore)
+    attachments: AttachmentStore = field(default_factory=AttachmentStore)
     pulls: PullManager = field(default_factory=PullManager)
 
 
@@ -449,6 +462,18 @@ def run_workflow(
             session could not be opened.
     """
     conversation_id = body.conversation_id
+    attached = []
+
+    for attachment_id in dict.fromkeys(body.attachments):
+        found = state.attachments.get(attachment_id)
+
+        if found is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No attached file {attachment_id}; upload it again.",
+            )
+
+        attached.append(found)
 
     try:
         # Opened here rather than left to the Session Manager, so its
@@ -485,8 +510,25 @@ def run_workflow(
         except SessionClientError as error:
             logger.warning("Could not read the conversation so far: %s", error)
 
+    if attached:
+        # Kept with the session, so the conversation shows what was attached
+        # when it is opened again.
+        state.session_client.update_session(
+            session_id,
+            attachments=[
+                {
+                    "attachment_id": item.attachment_id,
+                    "name": item.name,
+                    "size": item.size,
+                }
+                for item in attached
+            ],
+        )
+
     state.events.publish(str(session_id), "status", status="pending")
-    background_tasks.add_task(state.runner.run, session_id, body.request, earlier)
+    background_tasks.add_task(
+        state.runner.run, session_id, body.request, earlier, attached
+    )
 
     logger.info("Workflow accepted: session_id=%s", session_id)
 
@@ -551,6 +593,45 @@ def get_workflow(
         ) from error
 
     return JSONResponse(content=detail)
+
+
+@app.post("/files", status_code=status.HTTP_201_CREATED)
+def upload_file(
+    body: UploadFileRequest, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Store a file to attach to a request.
+
+    Open like `/workflow/run`, which it serves: what a person may ask KIO1 to
+    do, they may give it a file for. The size limit is what keeps it from
+    being a way to fill the disk.
+
+    Returns:
+        The id to name in `attachments`, with the stored name and size.
+
+    Raises:
+        HTTPException: 400 when the content is not base64, 413 when the file
+            is empty or too large.
+    """
+    try:
+        content = base64.b64decode(body.content_base64, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="content_base64 is not base64.",
+        ) from error
+
+    try:
+        stored = state.attachments.save(body.name, content)
+    except AttachmentError as error:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(error)
+        ) from error
+
+    return {
+        "attachment_id": stored.attachment_id,
+        "name": stored.name,
+        "size": stored.size,
+    }
 
 
 @app.post("/conversations", status_code=status.HTTP_201_CREATED)

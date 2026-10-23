@@ -1,9 +1,11 @@
 import logging
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from uuid import UUID
 
 from core.approvals import ApprovalDesk
+from core.attachments import Attachment, describe
 from core.config_loader import APPROVAL_AUTO, APPROVAL_NEVER, Config
 from core.formatter import parse_response
 from core.prompt_loader import fill_catalog
@@ -155,6 +157,31 @@ def _joined(entries: list[str]) -> str:
     return "\n".join([_CONTEXT_HEADING, *entries])
 
 
+_MENTION = re.compile(r"(?<![\w@])@([A-Za-z0-9_.-]+)")
+
+
+def mentioned_targets(request_text: str, registry: AgentRegistry) -> list[str]:
+    """Return the targets a request names with `@Name`, as the registry spells them.
+
+    Case does not matter, so `@codereviewer` finds CodeReviewer. A name that
+    is not a target — an e-mail address, a decorator in pasted code — is
+    left alone.
+
+    Returns:
+        The targets in the order they were named, each once.
+    """
+    known = {agent_id.lower(): agent_id for agent_id in registry.agent_ids()}
+    chosen: list[str] = []
+
+    for name in _MENTION.findall(request_text):
+        agent_id = known.get(name.rstrip(".").lower())
+
+        if agent_id and agent_id not in chosen:
+            chosen.append(agent_id)
+
+    return chosen
+
+
 def guarded_targets(
     plan: WorkflowPlan, registry: AgentRegistry, failover: FailoverConfig
 ) -> list[str]:
@@ -250,7 +277,13 @@ class WorkflowRunner:
     # without asking — the terminal application and most tests.
     approvals: ApprovalDesk | None = None
 
-    def run(self, session_id: UUID, request_text: str, earlier: str = "") -> None:
+    def run(
+        self,
+        session_id: UUID,
+        request_text: str,
+        earlier: str = "",
+        attachments: list[Attachment] | None = None,
+    ) -> None:
         """Execute one workflow to completion, recording progress as it goes.
 
         Failures are recorded against the session and swallowed: this runs
@@ -262,6 +295,7 @@ class WorkflowRunner:
             request_text: The user request to plan and execute.
             earlier: What came before it in its conversation, from
                 `conversation_context`; empty for a first request.
+            attachments: Files attached to the request.
 
         Returns:
             None.
@@ -277,13 +311,19 @@ class WorkflowRunner:
             observing(self.events, str(session_id)),
         ):
             try:
-                self._run(session_id, request_text, earlier)
+                self._run(session_id, request_text, earlier, attachments or [])
             finally:
                 # Always the last event, whatever happened, so a reader knows
                 # the stream is over and stops waiting for more.
                 emit(FINISHED)
 
-    def _run(self, session_id: UUID, request_text: str, earlier: str) -> None:
+    def _run(
+        self,
+        session_id: UUID,
+        request_text: str,
+        earlier: str,
+        attachments: list[Attachment],
+    ) -> None:
         """Plan, dispatch, review, and answer one request. See `run`.
 
         Rounds: a plan is carried out, the reviewer reads the results, and
@@ -291,13 +331,31 @@ class WorkflowRunner:
         and carried out, until the reviewer answers or the rounds run out.
         With review off this is the single plan-and-dispatch it always was.
 
-        The conversation so far goes into the request, so the planner and
-        the reviewer both read it — before the request, not after: a small
-        model plans whatever it read last, and with the context last that
-        was the previous request.
+        The conversation so far and the attached files go into the request,
+        so the planner and the reviewer both read them — before the request,
+        not after: a small model plans whatever it read last, and with the
+        context last that was the previous request.
         """
-        if earlier:
-            request_text = f"{earlier}\n\nRequest now: {request_text}"
+        registry = self.directory.snapshot()
+        # Only this request's own words choose targets: an `@Name` in an
+        # earlier turn or inside an attached file is not a choice made now.
+        chosen = mentioned_targets(request_text, registry)
+        context = [part for part in (earlier, describe(attachments)) if part]
+
+        if context:
+            request_text = "\n\n".join([*context, f"Request now: {request_text}"])
+
+        if chosen:
+            request_text += (
+                f"\n\nUse these targets for this request: {', '.join(chosen)}."
+            )
+
+        # Every step is told where the attached files are; a target that
+        # reads files reads them there.
+        step_data = self.config.dispatch.workspace.to_data()
+
+        if attachments:
+            step_data["attachments"] = [item.to_dict() for item in attachments]
 
         self.recorder.update_session(session_id, status="running")
         emit("status", status="running")
@@ -305,7 +363,6 @@ class WorkflowRunner:
         settings = self.config.orchestration
         reviewing = settings.review and bool(self.review_template)
         max_rounds = settings.max_rounds if reviewing else 1
-        registry = self.directory.snapshot()
         rounds: list[Round] = []
         clarified = Clarifications()
         planning_request = request_text
@@ -317,7 +374,7 @@ class WorkflowRunner:
 
             try:
                 done = self._carry_out(
-                    session_id, number, planning_request, registry, clarified
+                    session_id, number, planning_request, registry, clarified, step_data
                 )
             except PlanRejected:
                 if not rounds:
@@ -402,6 +459,7 @@ class WorkflowRunner:
         planning_request: str,
         registry: AgentRegistry,
         clarified: Clarifications,
+        step_data: dict[str, Any],
     ) -> Round | None:
         """Plan and dispatch one round, recording its steps.
 
@@ -413,6 +471,8 @@ class WorkflowRunner:
             registry: The targets this run plans against.
             clarified: The run's questions and answers so far; a question the
                 planner asks in this round is added to it.
+            step_data: What every step's `data` carries: the workspace, and
+                the files attached to the request.
 
         Returns:
             The round, or None when planning or dispatch failed. A first
@@ -469,7 +529,7 @@ class WorkflowRunner:
                 self.transport,
                 timeout=self.config.dispatch.request_timeout,
                 max_parallel_steps=self.config.dispatch.max_parallel_steps,
-                workspace_data=self.config.dispatch.workspace.to_data(),
+                workspace_data=step_data,
                 policy=self.config.dispatch.policy,
                 failover=self.config.dispatch.failover,
                 scoreboard=self.scoreboard,

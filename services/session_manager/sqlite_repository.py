@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     answer          TEXT,
     conversation_id TEXT REFERENCES conversations (conversation_id) ON DELETE CASCADE,
     clarifications  TEXT,
+    attachments     TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -110,7 +111,7 @@ CREATE INDEX IF NOT EXISTS lineage_session_idx ON lineage (session_id);
 
 _SESSION_COLUMNS = (
     "session_id, request_text, status, workflow_id, execution_mode, error, "
-    "answer, conversation_id, clarifications, created_at, updated_at"
+    "answer, conversation_id, clarifications, attachments, created_at, updated_at"
 )
 
 _CONVERSATION_COLUMNS = "conversation_id, title, created_at, updated_at"
@@ -183,6 +184,7 @@ class SqliteSessionRepository:
             "conversation_id": "conversation_id TEXT "
             "REFERENCES conversations (conversation_id) ON DELETE CASCADE",
             "clarifications": "clarifications TEXT",
+            "attachments": "attachments TEXT",
         }
 
         for column, definition in added.items():
@@ -575,8 +577,9 @@ def _to_session(row: Any) -> Session:
         answer=row[6],
         conversation_id=UUID(row[7]) if row[7] is not None else None,
         clarifications=json.loads(row[8]) if row[8] is not None else [],
-        created_at=row[9],
-        updated_at=row[10],
+        attachments=json.loads(row[9]) if row[9] is not None else [],
+        created_at=row[10],
+        updated_at=row[11],
     )
 
 

@@ -47,6 +47,14 @@ class Clarification(BaseModel):
     answer: str = Field(max_length=4_000)
 
 
+class AttachedFile(BaseModel):
+    """A file attached to a request: enough to show it, not its content."""
+
+    attachment_id: str = Field(max_length=64)
+    name: str = Field(max_length=200)
+    size: int = Field(ge=0)
+
+
 class CreateSessionRequest(BaseModel):
     """Opens a session for one workflow run.
 
@@ -75,6 +83,7 @@ class UpdateSessionRequest(BaseModel):
     # Replaces the whole list: a run sends everything asked so far, so a
     # lost update is made good by the next one.
     clarifications: list[Clarification] | None = Field(default=None, max_length=32)
+    attachments: list[AttachedFile] | None = Field(default=None, max_length=16)
 
 
 class RecordStepRequest(BaseModel):
@@ -111,6 +120,7 @@ class Session(BaseModel):
     answer: str | None = None
     conversation_id: UUID | None = None
     clarifications: list[Clarification] = Field(default_factory=list)
+    attachments: list[AttachedFile] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
