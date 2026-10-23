@@ -21,60 +21,80 @@ uvicorn app:app --port 8000
 |---|---|
 | **Theme** | Light, dark, or *follow the system*, from the switch at the bottom of the menu. Remembered in this browser and applied before the page paints, so there is no white flash in dark mode. |
 | **Menu** | The button beside the logo collapses it to icons; also remembered. |
-| **Ctrl K** | Opens the command palette: go to a page, start a request, add or edit a target, open a recent run, switch theme. Type to filter, arrows to choose, Enter to run. |
-| **Ctrl Enter** | Runs the request in the box. |
-| **Addresses** | Each page has its own — `#/run`, `#/targets`, `#/settings`, `#/help` — so a reload or a shared link opens the same page. |
-| **Copy** | Every code block and output has a copy button on hover; the session id beside a run copies on click. |
+| **Ctrl K** | Opens the command palette: go to a page, start a new chat, open a conversation, add or edit a target, switch theme. Type to filter, arrows to choose, Enter to run. |
+| **Enter** | Sends the message; Shift+Enter starts a new line. |
+| **Addresses** | Each page has its own — `#/run`, `#/targets`, `#/settings`, `#/help` — and an open conversation adds its id, `#/run/<id>`, so a reload or a shared link opens the same place. |
+| **Copy** | Every code block and output has a copy button on hover; an answer has one below it; the session id in the run details copies on click. |
 
 Confirmations and results appear as dialogs and short messages in the
 corner, rather than as browser pop-ups.
 
 ## Run
 
-The box here is not a chat with an agent. What you write goes to the planning
-model **once**, together with a generated catalog of the usable targets and the
-rules in the system prompt. The model answers with a plan — a list of steps,
-each naming a target and one of its capabilities — and KIO1 dispatches that.
-Your words are never read again.
+A chat. The conversations are on the left, newest first; **New chat** starts
+one. On a narrow screen the list is behind the button at the top left.
 
-Three things follow, and they are where most failed runs come from:
+Each message is one run. What you write goes to the planning model together
+with a generated catalog of the usable targets and the rules in the system
+prompt. The model answers with a plan — steps, each naming a target and one of
+its capabilities — and KIO1 dispatches it. Under your message:
+
+- **The plan card** — the run's status, its steps as they start and finish,
+  and what it is doing meanwhile ("reading the request · 23 s", "waiting for
+  your approval"). Older cards fold; click one to open it.
+- **Approve this plan?** or **a question**, when the run needs you. They
+  appear below the last message, and the run waits for them.
+- **The answer**, with the targets it came from as small tags.
+
+A later message continues the conversation: the last three runs go with it,
+so "now add type hints" knows which function. How much goes along, and why,
+is in [review.md](review.md#follow-up-requests).
+
+Below an answer: copy it, ask the same again, or open the run details.
+
+Three things are still where most failed runs come from:
 
 - A capability the catalog does not list cannot be asked for.
 - The model decides the order, including which step consumes which. A step
   that needs an earlier step's output has to say so, and a small model
   routinely does not.
-- **Code pasted into the box is not sent to an agent.** It is part of the
-  request the model reads. The code agents analyse comes from the workspace on
-  the Settings tab.
+- **Code pasted into a message is not sent to an agent as a file.** It is part
+  of the request the model reads, and the model copies what a target needs
+  into that target's task. The code agents analyse on disk comes from the
+  workspace on the Settings tab.
 
-So name the work in the catalog's own words rather than describing the output
-you want: ask to *localize the failure in `x.py`* rather than to *get the trace
-file*, when localization is the capability that produces a trace.
+The header shows which model will write the plan; its tooltip names the
+workspace the agents will be pointed at.
 
-The header shows which model will write the plan and which workspace the
-agents will be pointed at, because those are the two settings a run goes wrong
-on.
+### Run details
 
-### Watching a run
-
-A run opens a live panel above its steps, fed by
-`GET /workflow/{session_id}/events` (Server-Sent Events):
+The panel button at the top right opens a drawer with everything the chat
+leaves out, fed by `GET /workflow/{session_id}/events` (Server-Sent Events):
 
 - **What the model is writing** — the plan, token by token, as the model
-  produces it. A reasoning model's thinking, when it is allowed to think, is
-  in a collapsed section above it.
+  produces it, then the answer. A reasoning model's thinking, when it is
+  allowed to think, is in a collapsed section above it.
 - **Activity** — the catalog it was given, the plan once parsed (with each
   step's target, dependencies, and arguments), every step starting and
   finishing with its output, and KIO1's own log lines for the run. Untick
   *log lines* to hide those.
+- **Steps** — what was recorded for each step, with its output.
 
 A local model reads the whole prompt before it writes a word; on a computer
-without a GPU that is 30–60 silent seconds. The panel counts them, so a slow
-start is not mistaken for a hang.
+without a GPU that is 30–60 silent seconds. The plan card counts them, so a
+slow start is not mistaken for a hang.
 
-Clicking a recent run replays its stream from the start. Only runs of the
+The drawer shows the conversation's latest run, or the one whose details
+button was clicked, and replays its stream from the start. Only runs of the
 current process are held, the latest 50; a run from before a restart has no
-live record, and its outcome is in the steps table as before.
+live record, and its outcome is in the steps table.
+
+### How the page is built
+
+`static/app.js` loads ES modules from `static/js/` — no build step, what is on
+disk is what runs: `chat.js` (this page), `live.js` (the drawer and the
+stream), `targets.js`, `settings.js`, `setup.js`, `palette.js`, `shell.js`
+(menu, tabs, theme), and `core.js` (requests, escaping, toasts, dialogs).
 
 ## Targets
 
@@ -269,7 +289,8 @@ All of them are ordinary API endpoints; the console is just one caller.
 | `PUT /registry/agents/{id}` | Replace one target's definition |
 | `DELETE /registry/agents/{id}` | Remove it, from the file too when it is in there |
 | `GET /registry/config` | Which file saves go to, and whether they can |
-| `POST /workflow/run` | Start a run; `conversation_id` continues a conversation, without it a new one starts |
+| `POST /workflow/run` | Send a message; `conversation_id` continues a conversation, without it a new one starts |
+| `GET /workflow/{session_id}/waiting`, `POST …/approval`, `POST …/answer` | What a run waits for, and the reply |
 | `POST /conversations` | Open an empty conversation (New chat) |
 | `GET /conversations?limit=N` | Conversations, the one last written to first |
 | `GET /conversations/{id}` | One conversation with every run in it, oldest first |

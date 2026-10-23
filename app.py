@@ -8,6 +8,7 @@ it from a browser or another program, and neither is buried.
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
@@ -335,6 +336,11 @@ _VERSIONED_ASSETS = ("app.css", "app.js")
 # a stylesheet for hours on its own judgement, and an updated page paired with
 # a stale stylesheet or script looks — and is — broken.
 _NO_CACHE = "no-cache"
+
+# The console's script is ES modules, which a browser refuses unless they are
+# served as JavaScript. Python takes the type from the Windows registry, where
+# some installed program may have mapped `.js` to `text/plain`.
+mimetypes.add_type("text/javascript", ".js")
 
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

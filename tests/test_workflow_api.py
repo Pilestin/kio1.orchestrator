@@ -428,6 +428,15 @@ def test_get_workflow_rejects_a_malformed_session_id() -> None:
 # ── the operator console ─────────────────────────────────────────────────────
 
 
+def console_script() -> str:
+    """Return the console's script: the entry module and every module it loads."""
+    from pathlib import Path
+
+    modules = [Path("static/app.js"), *sorted(Path("static/js").glob("*.js"))]
+
+    return "\n".join(module.read_text(encoding="utf-8") for module in modules)
+
+
 def test_the_console_is_served_from_the_service_itself() -> None:
     client, _ = build_client(FakeSessionClient())
 
@@ -466,9 +475,8 @@ def test_the_console_fetches_only_from_this_service() -> None:
     # Every request the script makes is a path on this origin. A URL in the
     # placeholder text a textarea starts with is not a request.
     import re
-    from pathlib import Path
 
-    script = Path("static/app.js").read_text(encoding="utf-8")
+    script = console_script()
     requested = re.findall(r"fetch\(\s*([^,)]+)", script)
 
     assert requested, "the console makes no requests at all, which cannot be right"
@@ -496,9 +504,8 @@ def test_the_console_asks_in_its_own_dialogs() -> None:
     # window.alert, confirm, and prompt block the page and cannot be styled
     # or themed; the console has its own dialog and toasts instead.
     import re
-    from pathlib import Path
 
-    script = Path("static/app.js").read_text(encoding="utf-8")
+    script = console_script()
 
     assert not re.search(r"window\.(alert|confirm|prompt)\(", script)
 
@@ -507,7 +514,7 @@ def test_every_element_the_script_uses_is_on_the_page() -> None:
     import re
     from pathlib import Path
 
-    script = Path("static/app.js").read_text(encoding="utf-8")
+    script = console_script()
     page = Path("static/index.html").read_text(encoding="utf-8")
     used = set(re.findall(r'\$\("([a-z0-9-]+)"\)', script))
     present = set(re.findall(r'id="([^"]+)"', page))
@@ -541,6 +548,31 @@ def test_the_console_stylesheet_and_script_are_served() -> None:
 
     assert client.get("/static/app.css").status_code == 200
     assert client.get("/static/app.js").status_code == 200
+
+
+def test_every_module_the_console_imports_is_served() -> None:
+    # The script is split into ES modules with no build step; a module that
+    # is imported but missing breaks the whole page, not one feature.
+    import re
+
+    client, _ = build_client(FakeSessionClient())
+    imported = set(re.findall(r'from "\./(?:js/)?([\w.]+\.js)"', console_script()))
+    imported |= set(re.findall(r'import "\./js/([\w.]+\.js)"', console_script()))
+
+    assert "chat.js" in imported
+    for module in imported:
+        response = client.get(f"/static/js/{module}")
+        assert response.status_code == 200, module
+        # A browser refuses a module served as anything but JavaScript.
+        assert "javascript" in response.headers["content-type"], module
+
+
+def test_the_console_script_is_loaded_as_a_module() -> None:
+    from pathlib import Path
+
+    page = Path("static/index.html").read_text(encoding="utf-8")
+
+    assert '<script type="module" src="/static/app.js">' in page
 
 
 def test_recent_runs_are_listed() -> None:

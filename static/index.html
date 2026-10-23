@@ -41,6 +41,9 @@
   <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z"/><path d="m13.5 6.5 4 4"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h10"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12.5h9l1-12.5M9.5 7V4.5h5V7"/></symbol>
 </svg>
 
@@ -75,132 +78,75 @@
 <div class="column">
 
 <header class="topbar">
+  <button class="icon-button chat-only" id="threads-toggle" title="Conversations" aria-label="Conversations"><svg class="icon"><use href="#i-list"/></svg></button>
   <h1 id="page-title" class="page-title">Run</h1>
   <span class="spacer"></span>
   <span id="planner-chip" class="chip idle" title="Which model writes the plan">planner</span>
   <span id="conn" class="chip idle">connecting</span>
+  <button class="icon-button chat-only" id="details-toggle" title="Run details" aria-label="Run details" aria-expanded="false"><svg class="icon"><use href="#i-panel"/></svg></button>
   <button class="palette-button" id="open-palette" title="Commands (Ctrl+K)">
     <svg class="icon"><use href="#i-search"/></svg><span class="label">Search or jump to…</span><kbd>Ctrl K</kbd>
   </button>
 </header>
 
 <main>
-  <!-- ── Workflows ───────────────────────────────────────────────────── -->
-  <div id="view-workflows" class="view">
-    <p class="lede">What you write goes to the planning model together with the
-      catalog of targets. The model answers with a plan, and KIO1 runs it. You
-      can watch every step as it happens.</p>
+  <!-- ── Run: the chat ───────────────────────────────────────────────── -->
+  <div id="view-workflows" class="view chat">
+    <aside class="threads" id="threads" aria-label="Conversations">
+      <button class="action primary new-chat" id="new-chat"><svg class="icon"><use href="#i-plus"/></svg>New chat</button>
+      <div id="thread-list" class="thread-list"></div>
+    </aside>
 
-    <div class="run-layout">
-      <div class="stack">
-        <section class="card composer">
-          <label for="request" class="card-title">What should be done?</label>
-          <textarea id="request" spellcheck="false" placeholder="Describe the work in plain language — for example: “Run the tests and show me the last commits.”"></textarea>
-          <div class="examples" id="run-examples" aria-label="Examples">
-            <button class="example" data-example="Show me the recent commit history of this repository and which python version is installed.">Commits &amp; Python version</button>
-            <button class="example" data-example="Run the policy gate tests and report what failed.">Run the tests</button>
-            <button class="example" data-example="What is the current weather at latitude 41.01, longitude 28.97 (Istanbul)?">Weather in Istanbul</button>
-            <button class="example" data-example="There is a null pointer exception in the payment module. Diagnose it, fix it, then run the tests.">Diagnose &amp; fix a bug</button>
+    <section class="conversation">
+      <div class="messages" id="messages">
+        <div class="lane">
+          <div id="chat-empty" class="chat-empty">
+            <svg class="icon big"><use href="#i-sparkle"/></svg>
+            <p><strong>What should be done?</strong></p>
+            <div class="examples" id="run-examples" aria-label="Examples">
+              <button class="example" data-example="Show me the recent commit history of this repository and which python version is installed.">Commits &amp; Python version</button>
+              <button class="example" data-example="Run the policy gate tests and report what failed.">Run the tests</button>
+              <button class="example" data-example="What is the current weather at latitude 41.01, longitude 28.97 (Istanbul)?">Weather in Istanbul</button>
+              <button class="example" data-example="There is a null pointer exception in the payment module. Diagnose it, fix it, then run the tests.">Diagnose &amp; fix a bug</button>
+            </div>
           </div>
-          <div class="composer-foot">
-            <span id="run-workspace" class="mono small muted"></span>
-            <span class="spacer"></span>
-            <span id="run-result" class="small"></span>
-            <button class="action primary" id="run"><svg class="icon"><use href="#i-run"/></svg>Run<kbd class="on-accent">Ctrl ↵</kbd></button>
-          </div>
-        </section>
 
-        <section class="card flush">
-          <div class="card-head">
-            <h2>Recent runs</h2>
-            <span id="runs-count" class="muted small"></span>
-            <span class="spacer"></span>
-            <label class="search small">
-              <svg class="icon"><use href="#i-search"/></svg>
-              <input type="search" id="runs-search" placeholder="Filter runs" aria-label="Filter runs">
-            </label>
+          <div id="turns" class="turns"></div>
+
+          <div id="detail-approval" class="approval hidden">
+            <div class="approval-head">
+              <strong>Approve this plan?</strong>
+              <span id="approval-expires" class="small muted"></span>
+            </div>
+            <ol id="approval-steps" class="approval-steps"></ol>
+            <div class="row end">
+              <button class="action ghost" id="approval-cancel">Cancel</button>
+              <button class="action primary" id="approval-run"><svg class="icon"><use href="#i-run"/></svg>Run plan</button>
+            </div>
           </div>
-          <ol id="runs-body" class="run-list"></ol>
-        </section>
+          <form id="detail-question" class="question hidden">
+            <strong id="question-text"></strong>
+            <div class="question-row">
+              <input type="text" id="question-answer" autocomplete="off" spellcheck="true" aria-labelledby="question-text">
+              <button class="action primary" type="submit" id="question-send">Send</button>
+            </div>
+          </form>
+        </div>
       </div>
 
-      <section class="card detail hidden" id="detail-panel">
-        <div class="detail-head">
-          <div class="detail-title">
-            <span id="detail-status"></span>
-            <p id="detail-request" class="detail-request"></p>
-          </div>
-          <div class="detail-meta">
-            <span id="detail-meta" class="small muted"></span>
-            <button class="copy-chip mono small" id="detail-id" title="Copy the session id"></button>
-          </div>
-        </div>
-
-        <div id="detail-note" class="notice hidden"></div>
-        <div id="detail-approval" class="approval hidden">
-          <div class="approval-head">
-            <strong>Approve this plan?</strong>
-            <span id="approval-expires" class="small muted"></span>
-          </div>
-          <ol id="approval-steps" class="approval-steps"></ol>
-          <div class="row end">
-            <button class="action ghost" id="approval-cancel">Cancel</button>
-            <button class="action primary" id="approval-run"><svg class="icon"><use href="#i-run"/></svg>Run plan</button>
-          </div>
-        </div>
-        <form id="detail-question" class="question hidden">
-          <strong id="question-text"></strong>
-          <div class="question-row">
-            <input type="text" id="question-answer" autocomplete="off" spellcheck="true" aria-labelledby="question-text">
-            <button class="action primary" type="submit" id="question-send">Send</button>
-          </div>
-        </form>
-        <div id="detail-answer" class="answer hidden"></div>
-
-        <div id="live" class="live hidden">
-          <div class="live-head">
-            <span id="live-state" class="chip idle">live</span>
-            <span id="live-phase" class="small muted"></span>
-            <span class="spacer"></span>
-            <label class="switch small"><input type="checkbox" id="live-logs" checked><span class="track"></span>Log lines</label>
-          </div>
-          <div class="live-grid">
-            <div class="live-col">
-              <h3>What the model is writing</h3>
-              <details id="live-thinking-box" class="hidden">
-                <summary class="small muted">Thinking</summary>
-                <pre id="live-thinking" class="output live-text muted"></pre>
-              </details>
-              <pre id="live-model" class="output live-text"></pre>
-            </div>
-            <div class="live-col">
-              <h3>Activity</h3>
-              <ol id="live-log" class="live-log"></ol>
+      <div class="composer-bar">
+        <div class="lane">
+          <div class="composer-box">
+            <textarea id="request" rows="1" placeholder="Ask KIO1…" aria-label="Message"></textarea>
+            <div class="composer-row">
+              <span id="run-result" class="small"></span>
+              <span class="spacer"></span>
+              <button class="action primary" id="run"><svg class="icon"><use href="#i-run"/></svg>Send</button>
             </div>
           </div>
         </div>
-
-        <h3 class="section-label">Steps</h3>
-        <div class="scroll">
-          <table class="steps">
-            <thead>
-              <tr>
-                <th>Step</th><th>Target</th><th>Status</th>
-                <th class="num">Time</th><th>Detail</th>
-              </tr>
-            </thead>
-            <tbody id="steps-body"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="card detail placeholder" id="detail-placeholder">
-        <svg class="icon big"><use href="#i-sparkle"/></svg>
-        <p><strong>Nothing selected.</strong></p>
-        <p class="muted small">Run a request, or pick one from the list, to see
-          its plan, its steps, and what the model wrote — live while it runs.</p>
-      </section>
-    </div>
+      </div>
+    </section>
   </div>
 
   <!-- ── Targets ─────────────────────────────────────────────────────── -->
@@ -687,6 +633,48 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
 </div>
 
 <!-- Transient messages: saved, failed, copied. -->
+<!-- What a run is doing, for whoever wants to look: beside the chat, not in it. -->
+<aside class="drawer" id="drawer" aria-label="Run details">
+  <div class="drawer-head">
+    <strong>Run details</strong>
+    <span id="live-state" class="chip idle">live</span>
+    <span class="spacer"></span>
+    <button class="copy-chip mono small" id="detail-id" title="Copy the session id"></button>
+    <button class="icon-button" id="drawer-close" title="Close" aria-label="Close the run details"><svg class="icon"><use href="#i-close"/></svg></button>
+  </div>
+  <span id="live-phase" class="small muted"></span>
+
+  <div id="live" class="live-col">
+    <h3>What the model is writing</h3>
+    <details id="live-thinking-box" class="hidden">
+      <summary class="small muted">Thinking</summary>
+      <pre id="live-thinking" class="output live-text muted"></pre>
+    </details>
+    <pre id="live-model" class="output live-text"></pre>
+  </div>
+
+  <div class="live-col">
+    <div class="row">
+      <h3>Activity</h3>
+      <span class="spacer"></span>
+      <label class="switch small"><input type="checkbox" id="live-logs" checked><span class="track"></span>Log lines</label>
+    </div>
+    <ol id="live-log" class="live-log"></ol>
+  </div>
+
+  <div class="live-col">
+    <h3>Steps</h3>
+    <div class="scroll">
+      <table class="steps">
+        <thead>
+          <tr><th>Step</th><th>Target</th><th>Status</th><th class="num">Time</th><th>Detail</th></tr>
+        </thead>
+        <tbody id="steps-body"></tbody>
+      </table>
+    </div>
+  </div>
+</aside>
+
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
 <!-- Ctrl+K: jump anywhere, or act, without hunting for the button. -->
@@ -746,6 +734,6 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
   </form>
 </dialog>
 
-<script src="/static/app.js"></script>
+<script type="module" src="/static/app.js"></script>
 </body>
 </html>
