@@ -27,6 +27,7 @@ export function showTab(name, options) {
 
   if (!(options && options.fromAddress)) setAddress(name);
 
+  hooks.shown.forEach(function (callback) { callback(name); });
   hooks.refresh();
 }
 

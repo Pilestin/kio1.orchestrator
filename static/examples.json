@@ -1,0 +1,516 @@
+[
+  {
+    "id": "geo-lookup",
+    "group": "Public APIs",
+    "title": "Coordinates of a place",
+    "summary": "Open-Meteo geocoding. Free, no key.",
+    "ask": "Find the coordinates of Eskişehir",
+    "entry": {
+      "agent_id": "GeoLookup",
+      "type": "http",
+      "description": "Finds the latitude and longitude of a city or place name.",
+      "url": "https://geocoding-api.open-meteo.com/v1/search?name={arguments.name}&count=1&language=en&format=json",
+      "method": "GET",
+      "result_path": ["results"],
+      "health_url": "https://geocoding-api.open-meteo.com/v1/search?name=Istanbul&count=1",
+      "capabilities": ["geo_lookup"],
+      "arguments": {
+        "name": {"type": "string", "required": true, "description": "City or place name only, e.g. Eskişehir"}
+      }
+    }
+  },
+  {
+    "id": "weather",
+    "group": "Public APIs",
+    "title": "Current weather",
+    "summary": "Open-Meteo forecast. Free, no key.",
+    "ask": "What is the weather in Ankara right now?",
+    "entry": {
+      "agent_id": "WeatherForecast",
+      "type": "http",
+      "description": "Gets the current temperature, wind and weather code for given coordinates.",
+      "url": "https://api.open-meteo.com/v1/forecast?latitude={arguments.latitude}&longitude={arguments.longitude}&current_weather=true&timezone=auto",
+      "method": "GET",
+      "result_path": ["current_weather"],
+      "health_url": "https://api.open-meteo.com/v1/forecast?latitude=0&longitude=0&current_weather=true",
+      "capabilities": ["weather_check"],
+      "arguments": {
+        "latitude": {"type": "number", "required": true, "description": "Latitude in decimal degrees"},
+        "longitude": {"type": "number", "required": true, "description": "Longitude in decimal degrees"}
+      }
+    }
+  },
+  {
+    "id": "time",
+    "group": "Public APIs",
+    "title": "Local time at coordinates",
+    "summary": "timeapi.io. Free, no key.",
+    "ask": "What time is it in Tokyo?",
+    "entry": {
+      "agent_id": "TimeLookup",
+      "type": "http",
+      "description": "Gets the current local time and time zone for given coordinates.",
+      "url": "https://timeapi.io/api/time/current/coordinate?latitude={arguments.latitude}&longitude={arguments.longitude}",
+      "method": "GET",
+      "result_path": [],
+      "health_url": "https://timeapi.io/api/time/current/coordinate?latitude=0&longitude=0",
+      "capabilities": ["time_check"],
+      "arguments": {
+        "latitude": {"type": "number", "required": true, "description": "Latitude in decimal degrees"},
+        "longitude": {"type": "number", "required": true, "description": "Longitude in decimal degrees"}
+      }
+    }
+  },
+  {
+    "id": "holidays",
+    "group": "Public APIs",
+    "title": "Public holidays",
+    "summary": "Nager.Date. Free, no key.",
+    "ask": "Which public holidays does Turkey have in 2026?",
+    "entry": {
+      "agent_id": "PublicHolidays",
+      "type": "http",
+      "description": "Lists a country's public holidays for a year.",
+      "url": "https://date.nager.at/api/v3/PublicHolidays/{arguments.year}/{arguments.country_code}",
+      "method": "GET",
+      "result_path": [],
+      "health_url": "https://date.nager.at/api/v3/AvailableCountries",
+      "capabilities": ["public_holidays"],
+      "arguments": {
+        "year": {"type": "integer", "required": true, "description": "Four-digit year, e.g. 2026"},
+        "country_code": {"type": "string", "required": true, "description": "ISO 3166-1 alpha-2 code, e.g. TR, DE, US"}
+      }
+    }
+  },
+  {
+    "id": "currency",
+    "group": "Public APIs",
+    "title": "Exchange rates",
+    "summary": "Frankfurter, from European Central Bank data. Free, no key.",
+    "ask": "How many Turkish lira is one euro today?",
+    "entry": {
+      "agent_id": "CurrencyRates",
+      "type": "http",
+      "description": "Gets today's exchange rates from one currency to others.",
+      "url": "https://api.frankfurter.dev/v1/latest?base={arguments.base}&symbols={arguments.symbols}",
+      "method": "GET",
+      "headers": {"User-Agent": "KIO1-orchestrator/1.0"},
+      "result_path": [],
+      "health_url": "https://api.frankfurter.dev/v1/currencies",
+      "capabilities": ["exchange_rates"],
+      "arguments": {
+        "base": {"type": "string", "required": true, "description": "ISO currency code to convert from, e.g. EUR"},
+        "symbols": {"type": "string", "required": true, "description": "Comma-separated ISO codes to convert to, e.g. TRY,USD"}
+      }
+    }
+  },
+  {
+    "id": "wikipedia",
+    "group": "Public APIs",
+    "title": "Wikipedia summary",
+    "summary": "The opening paragraph of an English Wikipedia article.",
+    "ask": "Summarize what Wikipedia says about Kubernetes",
+    "entry": {
+      "agent_id": "WikipediaSummary",
+      "type": "http",
+      "description": "Returns the opening paragraph of an English Wikipedia article.",
+      "url": "https://en.wikipedia.org/api/rest_v1/page/summary/{arguments.title}",
+      "method": "GET",
+      "headers": {"User-Agent": "KIO1-orchestrator/1.0"},
+      "result_path": ["extract"],
+      "health_url": "https://en.wikipedia.org/api/rest_v1/page/summary/Wikipedia",
+      "capabilities": ["encyclopedia_summary"],
+      "arguments": {
+        "title": {"type": "string", "required": true, "description": "Article title, e.g. Kubernetes"}
+      }
+    }
+  },
+  {
+    "id": "github-repo",
+    "group": "Developer APIs",
+    "title": "GitHub repository facts",
+    "summary": "Stars, open issues, default branch, licence. No key needed for 60 calls an hour.",
+    "ask": "How many stars and open issues does python/cpython have?",
+    "entry": {
+      "agent_id": "GitHubRepo",
+      "type": "http",
+      "description": "Reads a public GitHub repository's metadata: stars, forks, open issues, licence, default branch.",
+      "url": "https://api.github.com/repos/{arguments.owner}/{arguments.repo}",
+      "method": "GET",
+      "headers": {"Accept": "application/vnd.github+json"},
+      "result_path": [],
+      "health_url": "https://api.github.com/",
+      "capabilities": ["github_repository_info"],
+      "arguments": {
+        "owner": {"type": "string", "required": true, "description": "User or organisation, e.g. python"},
+        "repo": {"type": "string", "required": true, "description": "Repository name, e.g. cpython"}
+      }
+    },
+    "note": "For private repositories or more calls, add \"Authorization\": \"Bearer ${GITHUB_TOKEN}\" to headers and set GITHUB_TOKEN where KIO1 runs."
+  },
+  {
+    "id": "pypi",
+    "group": "Developer APIs",
+    "title": "Latest PyPI version",
+    "summary": "The newest released version of a Python package.",
+    "ask": "What is the latest version of fastapi on PyPI?",
+    "entry": {
+      "agent_id": "PyPIVersion",
+      "type": "http",
+      "description": "Returns the latest released version of a Python package on PyPI.",
+      "url": "https://pypi.org/pypi/{arguments.package}/json",
+      "method": "GET",
+      "result_path": ["info", "version"],
+      "health_url": "https://pypi.org/pypi/pip/json",
+      "capabilities": ["pypi_latest_version"],
+      "arguments": {
+        "package": {"type": "string", "required": true, "description": "Package name as on PyPI, e.g. fastapi"}
+      }
+    },
+    "note": "result_path picks one value out of a large response, so the step keeps a version number rather than the whole README."
+  },
+  {
+    "id": "npm",
+    "group": "Developer APIs",
+    "title": "Latest npm package",
+    "summary": "Version, licence and dependencies of an npm package's latest release.",
+    "ask": "Which dependencies does the latest react release have?",
+    "entry": {
+      "agent_id": "NpmPackage",
+      "type": "http",
+      "description": "Reads the latest release of an npm package: version, licence, dependencies.",
+      "url": "https://registry.npmjs.org/{arguments.package}/latest",
+      "method": "GET",
+      "result_path": [],
+      "health_url": "https://registry.npmjs.org/",
+      "capabilities": ["npm_package_info"],
+      "arguments": {
+        "package": {"type": "string", "required": true, "description": "Package name as on npm, e.g. react"}
+      }
+    }
+  },
+  {
+    "id": "osv",
+    "group": "Developer APIs",
+    "title": "Known vulnerabilities",
+    "summary": "OSV.dev: advisories for one version of a package. Free, no key.",
+    "ask": "Does jinja2 2.4.1 have known vulnerabilities?",
+    "entry": {
+      "agent_id": "VulnerabilityCheck",
+      "type": "http",
+      "description": "Lists known security advisories (GHSA, CVE, PYSEC) for one version of a package.",
+      "url": "https://api.osv.dev/v1/querybatch",
+      "method": "POST",
+      "body": {
+        "queries": [
+          {
+            "package": {"name": "{arguments.package}", "ecosystem": "{arguments.ecosystem}"},
+            "version": "{arguments.version}"
+          }
+        ]
+      },
+      "result_path": ["results"],
+      "capabilities": ["vulnerability_check"],
+      "arguments": {
+        "package": {"type": "string", "required": true, "description": "Package name, e.g. jinja2"},
+        "ecosystem": {"type": "string", "required": true, "description": "One of PyPI, npm, Maven, Go, crates.io, NuGet"},
+        "version": {"type": "string", "required": true, "description": "Exact version, e.g. 2.4.1"}
+      }
+    },
+    "note": "The batch endpoint returns advisory ids only. The single-query one returns every advisory in full, tens of kilobytes per step."
+  },
+  {
+    "id": "echo",
+    "group": "Developer APIs",
+    "title": "See what KIO1 sends",
+    "summary": "Posts the execution message to an echo service and returns it. For debugging a template.",
+    "ask": "Use @EchoRequest to show what a step receives",
+    "entry": {
+      "agent_id": "EchoRequest",
+      "type": "http",
+      "description": "Debugging aid: echoes back the exact execution message KIO1 sends to a target.",
+      "url": "https://postman-echo.com/post",
+      "method": "POST",
+      "headers": {"User-Agent": "KIO1-orchestrator/1.0"},
+      "result_path": ["json"],
+      "capabilities": ["echo_request"]
+    },
+    "note": "No body is configured, so the standard execution message is what gets sent. Do not use it for anything private: the message leaves your machine."
+  },
+  {
+    "id": "ollama",
+    "group": "Local services",
+    "title": "A local model through Ollama",
+    "summary": "Sends the step's task to a model running in Ollama on this machine.",
+    "ask": "Use @LocalModel to explain what a race condition is in two sentences",
+    "entry": {
+      "agent_id": "LocalModel",
+      "type": "http",
+      "description": "Answers a prompt with a local language model through the Ollama REST API.",
+      "url": "http://127.0.0.1:11434/api/generate",
+      "method": "POST",
+      "body": {"model": "qwen3:8b", "prompt": "{task}", "stream": false, "think": false},
+      "result_path": ["response"],
+      "health_url": "http://127.0.0.1:11434/",
+      "capabilities": ["local_text_generation"]
+    },
+    "note": "Change model to one you have pulled (ollama list). An Agent target (below) does the same with a role and no JSON."
+  },
+  {
+    "id": "git-log",
+    "group": "Git",
+    "title": "Recent commits",
+    "summary": "The last 20 commits of the workspace repository.",
+    "ask": "What changed recently in the repository?",
+    "entry": {
+      "agent_id": "GitLog",
+      "type": "cli",
+      "description": "Lists the 20 most recent commits of the workspace repository.",
+      "command": ["git", "-C", "{data.repository.path}", "log", "--oneline", "--decorate", "-20"],
+      "capabilities": ["repository_history"]
+    },
+    "note": "{data.repository.path} is the workspace on the Settings tab. git -C runs in it without a cwd."
+  },
+  {
+    "id": "git-status",
+    "group": "Git",
+    "title": "Uncommitted changes",
+    "summary": "Branch and changed files, as git status prints them briefly.",
+    "ask": "Are there uncommitted changes in the repository?",
+    "entry": {
+      "agent_id": "GitStatus",
+      "type": "cli",
+      "description": "Shows the current branch and the files changed but not committed in the workspace repository.",
+      "command": ["git", "-C", "{data.repository.path}", "status", "--short", "--branch"],
+      "capabilities": ["working_tree_status"]
+    }
+  },
+  {
+    "id": "git-diff",
+    "group": "Git",
+    "title": "Size of the current diff",
+    "summary": "Lines added and removed per file, not yet committed.",
+    "ask": "How big is the uncommitted change?",
+    "entry": {
+      "agent_id": "GitDiffStat",
+      "type": "cli",
+      "description": "Summarises the uncommitted change in the workspace repository: lines added and removed per file.",
+      "command": ["git", "-C", "{data.repository.path}", "diff", "--stat", "HEAD"],
+      "capabilities": ["diff_summary"]
+    }
+  },
+  {
+    "id": "git-authors",
+    "group": "Git",
+    "title": "Who wrote the code",
+    "summary": "Commit count per author.",
+    "ask": "Who contributed most to the repository?",
+    "entry": {
+      "agent_id": "GitAuthors",
+      "type": "cli",
+      "description": "Counts commits per author in the workspace repository.",
+      "command": ["git", "-C", "{data.repository.path}", "shortlog", "-sne", "HEAD"],
+      "capabilities": ["contributor_statistics"]
+    },
+    "note": "HEAD is not optional: without a revision, git shortlog waits to read a log from its input."
+  },
+  {
+    "id": "ruff",
+    "group": "Code quality",
+    "title": "Lint Python with Ruff",
+    "summary": "Every Ruff finding in the workspace, one per line.",
+    "ask": "Lint the Python code in the workspace",
+    "entry": {
+      "agent_id": "RuffLint",
+      "type": "cli",
+      "description": "Lints the Python code in the workspace with Ruff and lists each finding with file and line.",
+      "command": ["ruff", "check", "--exit-zero", "--output-format", "concise", "{data.repository.path}"],
+      "capabilities": ["python_lint"]
+    },
+    "needs": "pip install ruff",
+    "note": "--exit-zero matters: Ruff exits 1 when it finds something, and a CLI target that exits non-zero is a failed step."
+  },
+  {
+    "id": "pytest",
+    "group": "Code quality",
+    "title": "Run the tests",
+    "summary": "pytest on the workspace, stopping at the first failure.",
+    "ask": "Run the test suite",
+    "entry": {
+      "agent_id": "Pytest",
+      "type": "cli",
+      "description": "Runs the workspace's pytest suite and reports what failed. Stops at the first failure.",
+      "command": ["python", "-m", "pytest", "-q", "-x", "--no-header", "-p", "no:cacheprovider", "{data.repository.path}"],
+      "capabilities": ["test_execution"]
+    },
+    "needs": "pytest in the Python KIO1 runs with",
+    "note": "A step is stopped after dispatch.request_timeout seconds. Point it at one test folder if the whole suite takes longer."
+  },
+  {
+    "id": "system-info",
+    "group": "System",
+    "title": "Machine facts",
+    "summary": "OS, Python version, CPU count and free disk space, as JSON.",
+    "ask": "How much free disk space does the machine have?",
+    "entry": {
+      "agent_id": "SystemInfo",
+      "type": "cli",
+      "description": "Reports the operating system, Python version, CPU count and free disk space of the machine KIO1 runs on.",
+      "command": [
+        "python",
+        "-c",
+        "import json, os, platform, shutil; d = shutil.disk_usage(os.getcwd()); print(json.dumps({'os': platform.platform(), 'python': platform.python_version(), 'cpus': os.cpu_count(), 'disk_free_gb': round(d.free / 1e9, 1), 'disk_total_gb': round(d.total / 1e9, 1)}))"
+      ],
+      "capabilities": ["system_info"]
+    },
+    "note": "A program that prints one JSON object has that object become the step's output."
+  },
+  {
+    "id": "docker-ps",
+    "group": "System",
+    "title": "Running containers",
+    "summary": "Name, image and status of each running Docker container.",
+    "ask": "Which Docker containers are running?",
+    "entry": {
+      "agent_id": "DockerContainers",
+      "type": "cli",
+      "description": "Lists the running Docker containers with their image and status.",
+      "command": ["docker", "ps", "--format", "{{.Names}}  {{.Image}}  {{.Status}}"],
+      "capabilities": ["container_status"]
+    },
+    "needs": "Docker running"
+  },
+  {
+    "id": "mcp-filesystem",
+    "group": "MCP servers",
+    "title": "Files in a folder",
+    "summary": "Read, list and search files. Its tools become the capabilities.",
+    "ask": "List the files in the workspace folder",
+    "entry": {
+      "agent_id": "Files",
+      "type": "mcp",
+      "description": "Reads, lists and searches files in one folder.",
+      "command": ["npx.cmd", "-y", "@modelcontextprotocol/server-filesystem", "C:/path/to/folder"],
+      "capabilities": ["read_text_file", "list_directory", "search_files", "get_file_info"]
+    },
+    "needs": "Node.js",
+    "note": "Replace the folder. npx.cmd is for Windows; use npx elsewhere. The capabilities list keeps it read-only: the server can also write, and only the tools listed are offered."
+  },
+  {
+    "id": "mcp-fetch",
+    "group": "MCP servers",
+    "title": "Read a web page",
+    "summary": "Fetches a URL and returns it as Markdown.",
+    "ask": "Fetch https://peps.python.org/pep-0008/ and list its main sections",
+    "entry": {
+      "agent_id": "WebFetch",
+      "type": "mcp",
+      "description": "Fetches a web page and returns its content as Markdown.",
+      "command": ["uvx", "mcp-server-fetch"]
+    },
+    "needs": "uv (pip install uv)"
+  },
+  {
+    "id": "mcp-git",
+    "group": "MCP servers",
+    "title": "Git, as tools",
+    "summary": "Log, diff, status and show for one repository.",
+    "ask": "Show the last three commits of the repository",
+    "entry": {
+      "agent_id": "GitTools",
+      "type": "mcp",
+      "description": "Reads one git repository: log, status, diffs and individual commits.",
+      "command": ["uvx", "mcp-server-git", "--repository", "C:/path/to/repo"],
+      "capabilities": ["git_status", "git_log", "git_diff_unstaged", "git_diff_staged", "git_show"]
+    },
+    "needs": "uv (pip install uv)",
+    "note": "Replace the repository path. The capabilities list leaves out the tools that commit and reset."
+  },
+  {
+    "id": "mcp-time",
+    "group": "MCP servers",
+    "title": "Time zones",
+    "summary": "Current time in a time zone, and conversion between zones.",
+    "ask": "What time is it in New York when it is 15:00 in Istanbul?",
+    "entry": {
+      "agent_id": "TimeZones",
+      "type": "mcp",
+      "description": "Tells the current time in any IANA time zone and converts times between zones.",
+      "command": ["uvx", "mcp-server-time"]
+    },
+    "needs": "uv (pip install uv)"
+  },
+  {
+    "id": "llm-tests",
+    "group": "Agents",
+    "title": "Unit test writer",
+    "summary": "Writes pytest tests for code given in the task.",
+    "ask": "Write tests for: def slug(s): return s.strip().lower().replace(' ', '-')",
+    "entry": {
+      "agent_id": "TestWriter",
+      "type": "llm",
+      "description": "Writes pytest unit tests for the code in the task, covering edge cases.",
+      "instructions": "You are a test engineer. Write pytest tests for the code in the task: one behaviour per test, named as a sentence, covering normal input, edge cases and errors. Return only the test code. If the task contains no code, say so instead of inventing it.",
+      "capabilities": ["unit_test_writing"]
+    }
+  },
+  {
+    "id": "llm-commit",
+    "group": "Agents",
+    "title": "Commit message writer",
+    "summary": "Turns a diff into a conventional commit message.",
+    "ask": "Write a commit message for the uncommitted change",
+    "entry": {
+      "agent_id": "CommitMessageWriter",
+      "type": "llm",
+      "description": "Writes a conventional commit message for a diff or a description of a change.",
+      "instructions": "You write git commit messages. From the diff or change in the task and its inputs, write one conventional commit: a type and a summary under 70 characters, a blank line, then two to four lines on why the change was made. Return only the message.",
+      "capabilities": ["commit_message_writing"]
+    },
+    "note": "Pair it with GitDiffStat or GitTools: an agent sees only its task and earlier steps, never the repository."
+  },
+  {
+    "id": "llm-sql",
+    "group": "Agents",
+    "title": "SQL writer",
+    "summary": "Writes a query from a plain-language question and a schema.",
+    "ask": "Write SQL for the top 5 customers by revenue; tables: customers(id, name), orders(id, customer_id, total)",
+    "entry": {
+      "agent_id": "SqlWriter",
+      "type": "llm",
+      "description": "Writes an SQL query from a plain-language question and the table definitions given with it.",
+      "instructions": "You are a database engineer. Write one standard SQL query that answers the question in the task, using only the tables and columns it names. Follow the query with one sentence on what it returns. If a needed table or column is not given, say which.",
+      "capabilities": ["sql_writing"]
+    }
+  },
+  {
+    "id": "llm-translate",
+    "group": "Agents",
+    "title": "Translator",
+    "summary": "Translates between Turkish and English, keeping code and names as they are.",
+    "ask": "Translate to English: Kullanıcı şifresini sıfırlayabilmeli.",
+    "entry": {
+      "agent_id": "Translator",
+      "type": "llm",
+      "description": "Translates text between Turkish and English, leaving code, identifiers and product names unchanged.",
+      "instructions": "You are a technical translator. Translate the text in the task into English if it is Turkish, and into Turkish otherwise. Keep code, identifiers, file names and product names exactly as written. Return only the translation.",
+      "capabilities": ["translation"],
+      "temperature": 0.1
+    }
+  },
+  {
+    "id": "kio",
+    "group": "KIO agents",
+    "title": "A KIO1–KIO10 protocol agent",
+    "summary": "A service that accepts the execution message at one path.",
+    "ask": "Generate a function that parses ISO dates",
+    "entry": {
+      "agent_id": "KIO7",
+      "description": "Code generation and code understanding.",
+      "endpoint": "http://127.0.0.1:8107",
+      "path": "/execute",
+      "capabilities": ["code_generation", "code_understanding"]
+    },
+    "note": "No type means kio. Health is checked at the endpoint's /health."
+  }
+]

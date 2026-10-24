@@ -1141,13 +1141,15 @@ td.actions .icon-button .icon { width: 16px; height: 16px; }
 
 /* ── run details drawer ─────────────────────────────────────────────────── */
 
+:root { --drawer-width: 440px; }
+
 .drawer {
   position: fixed;
   z-index: 40;
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(440px, 100vw);
+  width: min(var(--drawer-width), 100vw);
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
@@ -1164,9 +1166,48 @@ td.actions .icon-button .icon { width: 16px; height: 16px; }
 .drawer.open { transform: none; visibility: visible; transition: transform 0.2s ease; }
 
 .drawer-head { display: flex; align-items: center; gap: 0.6rem; }
-.drawer .live-text { max-height: 16rem; }
-.drawer .live-log { max-height: 18rem; }
+/* Taller on request: the model's output is what people come here to read. */
+.drawer .live-text { max-height: 16rem; resize: vertical; }
+.drawer .live-log { max-height: 18rem; resize: vertical; }
 .drawer .steps th, .drawer .steps td { padding: 0.5rem; }
+
+/* A step's error and output take the table's whole width, under its row,
+   rather than a column too narrow to read JSON in. */
+.drawer .steps tr.step-main td { border-bottom: 0; }
+.drawer .steps tr.step-more td { padding-top: 0; }
+.drawer .steps tr.step-more .reason { max-width: none; }
+.drawer .steps tr.step-more pre { max-height: 20rem; resize: vertical; }
+
+/* Dragged to make the drawer wider or narrower. */
+.drawer-resize {
+  /* Fixed, not absolute: the drawer scrolls, and the edge must not scroll
+     away with its content. An open drawer has no transform, so this is
+     placed against the window. */
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: calc(min(var(--drawer-width), 100vw) - 7px);
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.drawer-resize:hover, .drawer-resize:focus-visible, .drawer-resizing .drawer-resize {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+  outline: none;
+}
+
+/* While dragging, follow the pointer rather than easing after it. */
+.drawer-resizing .drawer, .drawer-resizing .column { transition: none; }
+.drawer-resizing { user-select: none; cursor: col-resize; }
+
+/* With room to spare, the drawer sits beside the chat instead of over it:
+   it used to cover the right of every answer and the message box. live.js
+   decides which, from the window and the drawer's width. */
+.column { transition: margin-right 0.2s ease; }
+:root[data-page="run"][data-drawer="docked"] .column { margin-right: var(--drawer-width); }
+:root[data-drawer="docked"] .drawer { box-shadow: none; }
 
 @media (max-width: 900px) {
   .view.chat { grid-template-columns: minmax(0, 1fr); }
@@ -1331,6 +1372,40 @@ pre.live-text:empty::before { content: "—"; color: var(--muted); }
 .kind:first-child { border-top: 0; padding-top: 0; }
 .kind h3 { text-transform: none; letter-spacing: 0; font-size: 0.92rem; color: var(--ink); }
 .kind pre { width: 100%; }
+
+/* How to use is two pages, the guide and the examples, inside one view. */
+.help-page { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; }
+
+.examples-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr));
+  gap: 0.9rem;
+}
+
+.gallery-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.gallery-head { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
+.gallery-head h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+.gallery-item .copyable { width: 100%; }
+/* Long enough to read a definition, short enough that thirty fit a page. */
+.gallery-item pre { width: 100%; max-height: 15rem; overflow: auto; font-size: 0.76rem; }
+.gallery-item .action { margin-top: auto; }
 
 pre, .sample {
   margin: 0;

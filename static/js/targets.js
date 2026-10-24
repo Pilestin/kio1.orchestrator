@@ -634,14 +634,22 @@ $("cancel-edit").addEventListener("click", startAdding);
 
 // ── help ────────────────────────────────────────────────────────────────────
 
+/** Open the Add form on the Targets page with a definition already in it.
+ *
+ * In JSON mode: `startAdding` leaves the editor on the agent form, where a
+ * definition written into the hidden JSON box would show as an empty form.
+ */
+export function putInForm(text) {
+  startAdding();
+  setEditorMode("json");
+  $("entry").value = text;
+  showTab("targets");
+  openEditor();
+}
+
 document.querySelectorAll(".use-sample").forEach(function (button) {
   button.addEventListener("click", function () {
-    const sample = document.querySelector('[data-sample="' + button.dataset.for + '"]');
-    state.editing = null;
-    startAdding();
-    $("entry").value = sample.textContent;
-    showTab("targets");
-    openEditor();
+    putInForm(document.querySelector('[data-sample="' + button.dataset.for + '"]').textContent);
   });
 });
 

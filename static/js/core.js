@@ -22,6 +22,8 @@ export const state = {
  * pages that provide them, which would make every module import every other. */
 export const hooks = {
   refresh: function () {},
+  // Each is called with the page's name whenever a page is shown.
+  shown: [],
   // Each returns commands for the palette: { label, hint, run }.
   paletteSources: [],
 };

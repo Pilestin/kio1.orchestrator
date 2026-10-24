@@ -330,6 +330,37 @@ def test_result_path_keeps_only_the_part_that_matters(api: str) -> None:
     assert reply["output"] == {"verdict": "defect", "count": 3}
 
 
+def test_a_json_object_written_as_text_at_result_path_is_decoded(api: str) -> None:
+    # Ollama's /api/chat: the model's structured answer arrives as a string.
+    RecordingHandler.body = json.dumps(
+        {
+            "model": "kio12",
+            "message": {
+                "role": "assistant",
+                "content": '\n{"verdict": "defect", "findings": [{"title": "CWE-502"}]}\n',
+            },
+            "done": True,
+        }
+    )
+
+    reply = call_api(
+        http_registry(url=f"{api}/api/chat", result_path=["message", "content"])
+    )
+
+    assert reply["output"] == {"verdict": "defect", "findings": [{"title": "CWE-502"}]}
+
+
+def test_text_at_result_path_that_is_not_a_json_object_stays_text(api: str) -> None:
+    for content in ("All clear, nothing found.", "[1, 2, 3]", '{"verdict": "clean"'):
+        RecordingHandler.body = json.dumps({"message": {"content": content}})
+
+        reply = call_api(
+            http_registry(url=f"{api}/api/chat", result_path=["message", "content"])
+        )
+
+        assert reply["output"] == {"result": content}
+
+
 def test_a_plain_text_response_is_still_usable(api: str) -> None:
     RecordingHandler.body = "everything is fine"
     RecordingHandler.content_type = "text/plain"
