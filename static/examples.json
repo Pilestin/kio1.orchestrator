@@ -512,5 +512,24 @@
       "capabilities": ["code_generation", "code_understanding"]
     },
     "note": "No type means kio. Health is checked at the endpoint's /health."
+  },
+  {
+    "id": "kio-jobs",
+    "group": "KIO agents",
+    "title": "A KIO on the job interface",
+    "summary": "KIO9: the post returns a job id, and the review is polled for.",
+    "ask": "Export the UC2 report and run a compliance review on it",
+    "entry": {
+      "agent_id": "KIO9",
+      "description": "Compliance review of a clinical report against a compliance contract (KVKK, GDPR, EU AI Act); also issues the contract.",
+      "endpoint": "http://127.0.0.1:8109",
+      "path": "/jobs",
+      "protocol": "kio1-jobs",
+      "poll": {"path": "/jobs/{job_id}", "interval_s": 2, "timeout_s": 240},
+      "data": "{data.upstream.s1.data}",
+      "capabilities": ["compliance_review", "contract_specification"]
+    },
+    "needs": "UC2's mock (python -m kio_mocks.server --port 8109) or ERGTECH's KIO9",
+    "note": "The payload comes from step s1, which this step must depend on. gate pass is clean, block is defect, warn waits for a person. ERGTECH's: https://cloud.erarge.com.tr/ai4sweng/kio9"
   }
 ]

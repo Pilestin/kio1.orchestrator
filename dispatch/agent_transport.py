@@ -89,8 +89,17 @@ class HttpAgentTransport:
             AgentTransportError: If the request failed, the agent answered
                 with a non-2xx status, or the reply was not a JSON object.
         """
+        # Imported here: tool_transport imports this module for the error type.
+        from dispatch.tool_transport import expand_environment
+
         payload = json.dumps(message.to_payload()).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            name: expand_environment(
+                value, agent_id=agent.agent_id, field=f"header {name}"
+            )
+            for name, value in agent.headers.items()
+        }
+        headers["Content-Type"] = "application/json"
         # W3C trace context, so an agent that reads `traceparent` continues
         # this trace instead of starting an unrelated one. Agents that ignore
         # the header are unaffected.
