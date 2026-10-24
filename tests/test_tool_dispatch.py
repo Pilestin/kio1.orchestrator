@@ -418,6 +418,22 @@ def test_an_http_entry_needs_a_url() -> None:
         load_agent_registry({"Api": {"type": "http", "capabilities": ["x"]}})
 
 
+def test_an_http_url_placeholder_nothing_fills_is_rejected_with_the_right_spelling() -> None:
+    url = "https://timeapi.io/api/time?latitude={latitude}"
+
+    with pytest.raises(ValueError, match=r"\{arguments\.latitude\}"):
+        load_agent_registry({"TimeLookup": {"type": "http", "url": url}})
+
+
+def test_an_http_url_may_use_arguments_and_message_fields() -> None:
+    url = "https://api.example.org/{capability}?q={task}&lat={arguments.latitude}"
+    registry = load_agent_registry({"Api": {"type": "http", "url": url}})
+    agent = registry.resolve("Api")
+
+    assert agent is not None
+    assert agent.tool.url == url
+
+
 def test_an_unknown_type_is_rejected() -> None:
     with pytest.raises(ValueError, match="type must be one of"):
         load_agent_registry({"Thing": {"type": "grpc", "url": "http://x/y"}})

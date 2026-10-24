@@ -677,6 +677,13 @@ class AgentDirectory:
                 if record is None:  # removed while the pass was running
                     continue
 
+                if record.endpoint != endpoint:
+                    # Edited while the pass was running. The outcome carries
+                    # the definition as it was before the edit, and writing it
+                    # back would silently undo a change the console reported
+                    # as saved. The edit was probed when it was stored.
+                    continue
+
                 self._records[endpoint.agent_id] = self._apply_probe(
                     record, outcome, checked_at
                 )

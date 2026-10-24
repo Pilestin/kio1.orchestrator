@@ -514,14 +514,15 @@ export async function removeTarget(agentId) {
 }
 
 document.addEventListener("click", function (event) {
-  const target = event.target;
-  if (!target.getAttribute) return;
+  // `closest`, not the target itself: most of a 30px icon button is its 16px
+  // icon, and a click there lands on the <svg> or <use>, not the button.
+  const target = event.target.closest && event.target.closest("[data-edit], [data-remove]");
+  if (!target) return;
 
   const editId = target.getAttribute("data-edit");
   if (editId) { startEditing(editId); return; }
 
-  const removeId = target.getAttribute("data-remove");
-  if (removeId) removeTarget(removeId);
+  removeTarget(target.getAttribute("data-remove"));
 });
 
 document.addEventListener("change", function (event) {

@@ -1,4 +1,5 @@
 import logging
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import urlparse
@@ -33,6 +34,15 @@ ALLOWED_KINDS = frozenset({KIND_KIO, KIND_HTTP, KIND_CLI, KIND_MCP, KIND_LLM})
 _MAX_INSTRUCTIONS = 8000
 
 _ALLOWED_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
+
+# Anything in braces in a URL. Literal braces are not valid in a URL, so every
+# one is meant as a placeholder and can be checked when the entry is saved.
+_URL_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
+
+# The execution-message fields `tool_transport.render` substitutes by name.
+_MESSAGE_FIELDS = frozenset(
+    {"task", "workflow_id", "step_id", "agent_id", "capability", "endpoint", "data"}
+)
 
 
 @dataclass(frozen=True)
@@ -409,6 +419,35 @@ _ARGUMENT_TYPES = frozenset(
 )
 
 
+def _check_url_placeholders(agent_id: str, url: str) -> None:
+    """Refuse a URL placeholder that nothing would ever substitute.
+
+    An unknown placeholder is sent as it is, so `{latitude}` reaches the API
+    literally and comes back as the API's own validation error, which names
+    the field but not the cause. Caught here, the entry is refused when it is
+    saved, with the spelling that would have worked.
+
+    Args:
+        agent_id: Identifier of the entry, for error messages.
+        url: The configured URL.
+
+    Raises:
+        ValueError: If a placeholder names no execution-message field.
+    """
+    for name in _URL_PLACEHOLDER.findall(url):
+        root = name.split(".", 1)[0]
+
+        if root in _MESSAGE_FIELDS or root == "arguments":
+            continue
+
+        raise ValueError(
+            f"dispatch.agents.{agent_id}.url has the placeholder {{{name}}}, "
+            "which nothing fills in. A value the plan supplies is written "
+            f"{{arguments.{name}}}; the other names are "
+            f"{', '.join(f'{{{field}}}' for field in sorted(_MESSAGE_FIELDS))}."
+        )
+
+
 def _read_arguments_schema(agent_id: str, agent_data: dict[str, Any]) -> dict[str, Any]:
     """Read an entry's declared arguments as a JSON Schema.
 
@@ -769,6 +808,8 @@ def _read_tool_entry(
             raise ValueError(
                 f"dispatch.agents.{agent_id}.url must be a non-empty HTTP(S) URL."
             )
+
+        _check_url_placeholders(agent_id, url)
 
         method = agent_data.get("method", "POST")
         if not isinstance(method, str) or method.upper() not in _ALLOWED_HTTP_METHODS:

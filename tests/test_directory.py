@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from app import REGISTRY_TOKEN_ENV, _State, app, get_state
 from core.prompt_loader import render_catalog
+from dispatch import directory as directory_module
 from dispatch.agent_registry import AgentRegistry, load_agent_registry
 from dispatch.directory import (
     ORIGIN_CONFIG,
@@ -381,6 +382,30 @@ def test_removing_something_unknown_reports_so() -> None:
 
 
 # ── the background pass ──────────────────────────────────────────────────────
+
+
+def test_an_edit_made_during_a_probe_pass_is_not_undone_by_it(
+    agent: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = AgentDirectory(AgentRegistry({}), health=HEALTH)
+    directory.register("KIO2", {"endpoint": agent, "capabilities": ["diagnosis"]})
+    edited = load_agent_registry(
+        {"KIO2": {"endpoint": agent, "capabilities": ["diagnosis", "replay"]}}
+    ).resolve("KIO2")
+    real_probe = directory_module.probe_target
+
+    def probe_then_edit(target: Any, *args: Any) -> Any:
+        # The console saves while the pass is still waiting on the network.
+        outcome = real_probe(target, *args)
+        directory.upsert(edited, ORIGIN_CONFIG, replace=True)
+        return outcome
+
+    monkeypatch.setattr(directory_module, "probe_target", probe_then_edit)
+    directory._probe_all()
+    record = directory.record_for("KIO2")
+
+    assert record is not None
+    assert record.endpoint == edited
 
 
 def test_the_watch_keeps_the_directory_current_on_its_own(agent: str) -> None:
