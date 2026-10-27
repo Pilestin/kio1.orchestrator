@@ -77,6 +77,26 @@ the same form an [MCP tool](mcp.md) is shown in, and a plan step carries
 - A full JSON Schema (`{"type": "object", "properties": …, "required": […]}`) is accepted as it is, so one copied from an OpenAPI document needs no rewriting.
 - Values substituted into `url` are URL-encoded; in `headers` and `body` they are inserted as they are.
 
+**A value another step finds.** "What is the weather in Ankara?" names a
+city, not coordinates. When a target can turn the one into the other, the
+plan does that first and passes the result on:
+
+```json
+{"step_id": "s1", "agent_id": "GeoLookup", "capability": "geo_lookup", "arguments": {"location": "Ankara"}},
+{"step_id": "s2", "agent_id": "WeatherForecast", "capability": "weather_check",
+ "depends_on": ["s1"], "arguments": {"latitude": "${s1.latitude}", "longitude": "${s1.longitude}"}}
+```
+
+`${s1.latitude}` is filled from s1's output just before s2 is sent. The
+planner cannot see what a target returns, so the path is a guess: when
+`latitude` is not at the top of the output, the first `latitude` anywhere in
+it is used (`results[0].latitude` here). A value that is the whole reference
+keeps its type, so a number stays a number. A reference that still finds
+nothing is sent as written, and the step's error shows it. A step that
+refers to another always runs after it, whether or not the plan says
+`depends_on`. Only the plan's own step ids count; `${LOG_API_TOKEN}` below is
+an environment variable, as always. See `dispatch/step_references.py`.
+
 **How the response is read.** A `2xx` with a JSON object becomes the step's
 output as-is. A JSON value that is not an object, or a plain-text body, is
 kept under `result`. A non-`2xx` fails the step and the body is quoted in the

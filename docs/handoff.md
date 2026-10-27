@@ -100,9 +100,6 @@ node --check static/app.js
   (canlı denemede 8 adımlık plan uçtan uca çalıştı; cevaplar sahte).
 - Süre/token bütçeleri yok (yol haritası Adım 4 kalanı). Stop var
   (`core/cancellation.py`); ajana gitmiş bir adım kesilmez, bitmesi beklenir.
-- **`http`/`mcp` adımları arasında veri aktarımı yok:** argümanlar plan anında
-  sabitleniyor, önceki adımın çıktısı yalnızca `kio` hedeflerine `data.upstream`
-  olarak gidiyor. Model `${s1...}` uyduruyor (canlı: GeoLookup → TimeLookup HTTP 400).
 
 ## Mimari hızlı harita
 

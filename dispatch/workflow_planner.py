@@ -5,6 +5,7 @@ from typing import Any
 from dispatch.agent_registry import AgentEndpoint, AgentRegistry
 from dispatch.failover import FailoverConfig, candidates_for
 from dispatch.scoreboard import Scoreboard
+from dispatch.step_references import referenced_steps
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,7 @@ def parse_plan(parsed_response: Any) -> WorkflowPlan:
         )
 
     explanation = parsed_response.get("explanation")
-    steps = _sanitize_dependencies(steps)
+    steps = _sanitize_dependencies(_with_referenced_steps(steps))
 
     return WorkflowPlan(
         workflow_id=workflow_id.strip(),
@@ -191,6 +192,31 @@ def parse_plan(parsed_response: Any) -> WorkflowPlan:
         steps=tuple(steps),
         explanation=explanation.strip() if isinstance(explanation, str) else "",
     )
+
+
+def _with_referenced_steps(steps: list[PlanStep]) -> list[PlanStep]:
+    """Make a step depend on every step its arguments take a value from.
+
+    `"latitude": "${s1.latitude}"` cannot be filled until s1 has answered.
+    A model that writes the reference but forgets `depends_on` would have
+    the step sent alongside s1, or before it, with the reference unfilled.
+    """
+    step_ids = {step.step_id for step in steps}
+
+    return [
+        replace(
+            step,
+            depends_on=tuple(
+                dict.fromkeys(
+                    [
+                        *step.depends_on,
+                        *referenced_steps(step.arguments, step_ids - {step.step_id}),
+                    ]
+                )
+            ),
+        )
+        for step in steps
+    ]
 
 
 def _read_arguments(step_data: dict[str, Any], step_id: str) -> dict[str, Any]:

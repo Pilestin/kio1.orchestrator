@@ -24,6 +24,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any
 
+from dispatch.step_references import rename_references
 from dispatch.workflow_executor import STATUS_OK, StepResult, WorkflowResult
 from dispatch.workflow_planner import PlanStep, WorkflowPlan
 
@@ -89,11 +90,14 @@ def prefix_plan(plan: WorkflowPlan, prefix: str) -> WorkflowPlan:
     Returns:
         The same plan with renamed steps.
     """
+    renamed = {step.step_id: prefix + step.step_id for step in plan.steps}
     steps: list[PlanStep] = [
         replace(
             step,
             step_id=prefix + step.step_id,
             depends_on=tuple(prefix + dependency for dependency in step.depends_on),
+            # `${s1.latitude}` follows s1 to its new name.
+            arguments=rename_references(step.arguments, renamed),
         )
         for step in plan.steps
     ]

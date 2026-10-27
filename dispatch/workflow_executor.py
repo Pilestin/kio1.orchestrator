@@ -19,6 +19,7 @@ from dispatch.agent_transport import AgentTransport, AgentTransportError
 from dispatch.failover import FailoverConfig
 from dispatch.policy import Policy, applies_to, apply_gates, providers_of
 from dispatch.scoreboard import Scoreboard
+from dispatch.step_references import resolve
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_planner import (
     ExecutionMessage,
@@ -518,9 +519,13 @@ def _with_upstream_data(
         plan: The plan, read for the step's declared dependencies.
         results: Results of the steps that have already run.
 
+    Arguments that refer to an earlier step's output — `${s1.latitude}` —
+    are filled in here too, now that the output exists: a tool that takes
+    named arguments reads nothing else.
+
     Returns:
         The message, with `data.upstream` populated when there is anything
-        to pass on.
+        to pass on, and its arguments' references filled.
     """
     step = next(
         (candidate for candidate in plan.steps if candidate.step_id == message.step_id),
@@ -539,7 +544,24 @@ def _with_upstream_data(
     if not upstream:
         return message
 
-    return replace(message, data={**message.data, "upstream": upstream})
+    data = {**message.data, "upstream": upstream}
+
+    if isinstance(data.get("arguments"), dict):
+        outputs = {
+            step_id: result.output
+            for step_id, result in results.items()
+            if result.output is not None
+        }
+        data["arguments"], unresolved = resolve(data["arguments"], outputs)
+
+        if unresolved:
+            logger.warning(
+                "Arguments refer to output that is not there: step_id=%s refs=%s",
+                message.step_id,
+                ", ".join(unresolved),
+            )
+
+    return replace(message, data=data)
 
 
 def _candidates_for_message(
