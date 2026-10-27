@@ -7,6 +7,14 @@ from uuid import UUID
 
 from core.approvals import ApprovalDesk
 from core.attachments import Attachment, describe
+from core.cancellation import (
+    STOPPED_REASON,
+    RunStopped,
+    StopBoard,
+    check_stop,
+    stop_requested,
+    stoppable,
+)
 from core.config_loader import APPROVAL_AUTO, APPROVAL_NEVER, Config
 from core.formatter import parse_response
 from core.prompt_loader import fill_catalog
@@ -353,6 +361,9 @@ class WorkflowRunner:
     # Where plans that need a person wait for one. None runs every plan
     # without asking — the terminal application and most tests.
     approvals: ApprovalDesk | None = None
+    # Where a person's "stop" arrives. None makes runs unstoppable — the
+    # terminal application and most tests.
+    stops: StopBoard | None = None
 
     def run(
         self,
@@ -386,9 +397,12 @@ class WorkflowRunner:
         with (
             trace_operation("kio1.workflow.run", attributes),
             observing(self.events, str(session_id)),
+            stoppable(self.stops, str(session_id)),
         ):
             try:
                 self._run(session_id, request_text, earlier, attachments or [])
+            except RunStopped:
+                self._stopped(session_id)
             finally:
                 # Always the last event, whatever happened, so a reader knows
                 # the stream is over and stops waiting for more.
@@ -446,6 +460,8 @@ class WorkflowRunner:
         review: Review | None = None
 
         for number in range(1, max_rounds + 1):
+            check_stop()
+
             if number > 1:
                 emit("round_started", round=number, request=planning_request)
 
@@ -481,6 +497,7 @@ class WorkflowRunner:
             if not reviewing:
                 break
 
+            check_stop()
             review = self._review(
                 session_id,
                 clarified.apply(request_text),
@@ -566,9 +583,12 @@ class WorkflowRunner:
             plan = self._plan_asking(
                 session_id, number, planning_request, registry, clarified
             )
-        except PlannerReply:
+        except (PlannerReply, RunStopped):
             raise
         except Exception as error:
+            if stop_requested():
+                raise RunStopped() from error
+
             logger.exception(
                 "Planning failed: session_id=%s round=%d", session_id, number
             )
@@ -604,6 +624,8 @@ class WorkflowRunner:
                 execution_mode=plan.execution_mode,
             )
 
+        check_stop()
+
         if not self._approved(session_id, number, plan, registry):
             raise PlanRejected(number)
 
@@ -620,6 +642,9 @@ class WorkflowRunner:
                 scoreboard=self.scoreboard,
             )
         except Exception as error:
+            if stop_requested():
+                raise RunStopped() from error
+
             logger.exception(
                 "Dispatch failed: session_id=%s round=%d", session_id, number
             )
@@ -627,6 +652,7 @@ class WorkflowRunner:
             return None
 
         self._record_results(session_id, plan, result)
+        check_stop()
 
         return Round(number=number, plan=plan, result=result)
 
@@ -691,6 +717,7 @@ class WorkflowRunner:
         reply = self.approvals.ask_question(
             str(session_id), number, question, settings.question_timeout
         )
+        check_stop()
 
         if reply is None or not reply.strip():
             raise ValueError(f"The question was not answered: {question}")
@@ -765,6 +792,7 @@ class WorkflowRunner:
         approved = self.approvals.ask(
             str(session_id), number, summary, settings.approval_timeout
         )
+        check_stop()
         emit("approval", round=number, approved=approved)
 
         return approved
@@ -775,6 +803,12 @@ class WorkflowRunner:
         self.recorder.update_session(session_id, status="completed", answer=reply)
         emit("status", status="completed", rounds=0, steps=[])
         logger.info("Answered without a plan: session_id=%s", session_id)
+
+    def _stopped(self, session_id: UUID) -> None:
+        """Finish a run a person stopped."""
+        self.recorder.update_session(session_id, status="failed", error=STOPPED_REASON)
+        emit("status", status="failed", error=STOPPED_REASON)
+        logger.info("Run stopped: session_id=%s", session_id)
 
     def _round_failed(self, session_id: UUID, number: int, error: Exception) -> None:
         """Record why a round could not be carried out."""
@@ -830,7 +864,10 @@ class WorkflowRunner:
                 role=self._reviewer(),
                 read=lambda decoded: parse_review(decoded, final=final),
             )
-        except Exception as error:  # noqa: BLE001 - any failure falls back to an answer
+        except Exception as error:
+            if isinstance(error, RunStopped) or stop_requested():
+                raise RunStopped() from error
+
             logger.warning(
                 "Review failed, answering from the results: session_id=%s error=%s",
                 session_id,
@@ -1037,7 +1074,12 @@ class WorkflowRunner:
             max_output_tokens=role.config.max_output_tokens,
             temperature=role.config.temperature,
         ):
-            extra = {"on_token": relay} if streaming else {}
+
+            def relay_unless_stopped(text: str, channel: str = "content") -> None:
+                check_stop()
+                relay(text, channel)
+
+            extra = {"on_token": relay_unless_stopped} if streaming else {}
 
             try:
                 response = role.provider.send_request(
@@ -1050,6 +1092,7 @@ class WorkflowRunner:
             finally:
                 relay.flush()
 
+        check_stop()
         content = role.provider.extract_content(response)
         emit("model_answer", text=content)
 
@@ -1106,6 +1149,7 @@ def build_runner(
     events: RunEventBus | None = None,
     review_template: str = "",
     approvals: ApprovalDesk | None = None,
+    stops: StopBoard | None = None,
 ) -> WorkflowRunner:
     """Assemble a runner with the transport the configuration selects.
 
@@ -1158,4 +1202,5 @@ def build_runner(
         events=events,
         review_template=review_template,
         approvals=approvals,
+        stops=stops,
     )

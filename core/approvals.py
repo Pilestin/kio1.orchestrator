@@ -170,6 +170,25 @@ class ApprovalDesk:
 
         return True
 
+    def withdraw(self, session_id: str) -> bool:
+        """End whatever a run waits on, with no answer: it is being stopped.
+
+        The waiting run wakes as if time had run out — a plan not approved, a
+        question with no answer — and its stop check takes it from there.
+
+        Returns:
+            True when the run was waiting on something.
+        """
+        with self._lock:
+            pending = self._pending.pop(session_id, None)
+
+        if pending is None:
+            return False
+
+        pending.decided.set()
+
+        return True
+
     def answer(self, session_id: str, reply: str) -> bool:
         """Answer a waiting question.
 

@@ -37,6 +37,7 @@ from core.agent_store import (
 )
 from core.approvals import ApprovalDesk
 from core.attachments import AttachmentError, AttachmentStore
+from core.cancellation import StopBoard
 from core.config_loader import Config, Workspace, load_config, rehost_entry
 from core.config_writer import (
     ConfigWriteError,
@@ -176,6 +177,7 @@ class _State:
     scoreboard: Scoreboard
     events: RunEventBus = field(default_factory=RunEventBus)
     approvals: ApprovalDesk = field(default_factory=ApprovalDesk)
+    stops: StopBoard = field(default_factory=StopBoard)
     store: AgentStore = field(default_factory=FileAgentStore)
     attachments: AttachmentStore = field(default_factory=AttachmentStore)
     pulls: PullManager = field(default_factory=PullManager)
@@ -246,6 +248,7 @@ def _build_state() -> _State:
     scoreboard = Scoreboard(config.dispatch.selection)
     events = RunEventBus()
     approvals = ApprovalDesk()
+    stops = StopBoard()
 
     provider = load_provider(config.provider, config.allowed_providers)
     provider_client = provider.create_client(config)
@@ -293,12 +296,14 @@ def _build_state() -> _State:
             events=events,
             review_template=review_template,
             approvals=approvals,
+            stops=stops,
         ),
         session_client=session_client,
         directory=directory,
         scoreboard=scoreboard,
         events=events,
         approvals=approvals,
+        stops=stops,
         store=store,
     )
 
@@ -902,6 +907,42 @@ def answer_question(
         )
 
     return {"session_id": str(session_id), "answered": True}
+
+
+@app.post("/workflow/{session_id}/cancel")
+def cancel_workflow(
+    session_id: UUID, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Stop a run that is under way.
+
+    The run stops at its next safe point: a model writing as it streams
+    stops at once, a step already with an agent finishes first, and a run
+    waiting for an approval or an answer stops waiting now. It ends as
+    failed, saying "Stopped.".
+
+    Not behind the administration token, for the same reason starting a run
+    is not: stopping only ever does less.
+
+    Args:
+        session_id: The run.
+        state: Where runs are told to stop, and where they wait.
+
+    Returns:
+        Confirmation.
+
+    Raises:
+        HTTPException: 409 when the run is not running.
+    """
+    if not state.stops.stop(str(session_id)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This run is not running.",
+        )
+
+    state.approvals.withdraw(str(session_id))
+    logger.info("Stop requested: session_id=%s", session_id)
+
+    return {"session_id": str(session_id), "stopping": True}
 
 
 @app.post("/workflow/{session_id}/approval")

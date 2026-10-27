@@ -116,7 +116,7 @@ export function statusChip(value) {
   const kind = {
     ok: "ok", ready: "ok", completed: "ok", installed: "ok",
     running: "warn", pending: "warn",
-    unchecked: "idle", skipped: "idle", not_run: "idle", disabled: "idle",
+    unchecked: "idle", skipped: "idle", not_run: "idle", disabled: "idle", stopped: "idle",
     error: "bad", failed: "bad", unreachable: "bad",
   }[value] || "idle";
 

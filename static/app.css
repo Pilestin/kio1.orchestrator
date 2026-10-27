@@ -187,7 +187,7 @@ a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-of
   stroke-linejoin: round;
 }
 
-.icon .fill, #i-run path { fill: currentColor; }
+.icon .fill, #i-run path, #i-stop rect { fill: currentColor; }
 .icon.big { width: 40px; height: 40px; stroke-width: 1.4; color: var(--accent-text); }
 
 kbd {
@@ -1862,3 +1862,13 @@ pre.output.bad { color: var(--bad); }
   line-height: 1.55;
   font-size: 0.9rem;
 }
+
+/* Stop is not another way to send: plain and dark, so it is not mistaken for it. */
+.action.primary.stop {
+  background: var(--ink);
+  color: var(--surface);
+  box-shadow: none;
+  animation: enter 0.18s ease;
+}
+
+.action.primary.stop:hover:not(:disabled) { background: var(--ink); filter: none; opacity: 0.88; }

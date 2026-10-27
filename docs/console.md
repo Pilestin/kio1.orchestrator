@@ -60,6 +60,12 @@ A later message continues the conversation: the last three runs go with it,
 so "now add type hints" knows which function. How much goes along, and why,
 is in [review.md](review.md#follow-up-requests).
 
+While a run is under way, **Send** becomes **Stop** (and a question has a
+Stop beside its Send). The run stops at its next safe point: a model writing
+its answer is cut off at once, a step already with an agent finishes and the
+ones after it are not sent, a wait for an approval or an answer ends now. It
+is shown as *stopped*, not failed (`POST /workflow/{id}/cancel`).
+
 The examples on an empty chat are only the ones a ready agent can do.
 
 Below an answer: copy it, ask the same again, or open the run details.

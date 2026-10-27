@@ -88,7 +88,7 @@ KIO1'in "orkestratör" olarak asıl değeri burada.
 - [x] **Rol bazlı model seçimi (cevap modeli)** — 2026-10-22: değerlendirme ve cevap ayrı sağlayıcı/modelle yapılabiliyor (`orchestration.review_provider/review_model`, Settings → Answer model). Canlı ölçüm: ministral planlayıp qwen3.5:4b cevaplayınca en yeni commit'ler birebir doğru geldi, uydurma kalmadı (~101 sn, CPU).
 - [x] **İnsan onayı gereken hedefler** — 2026-10-22: hedefe `"approval": true` eklenince ona ulaşabilecek her plan (failover adayları dahil) onay bekler; konsolda kilit simgesi. *(Kalan: capability bazında işaretleme.)*
 - [ ] **Olay akışı**: her olay (plan, adım başladı/bitti, değerlendirme, soru) tek bir olay veriyolundan SSE ile konsola akar ve veritabanına yazılır. *(Veriyolu ve SSE hazır; kalan: değerlendirme/soru olayları ve kalıcılık.)*
-- [ ] **İptal**: çalışan bir istek durdurulabilir; MCP ve HTTP çağrılarına iptal iletilir.
+- [x] **İptal** — 2026-10-27: Stop düğmesi, `POST /workflow/{id}/cancel`; akan model cevabı hemen kesilir, başlamamış adımlar gönderilmez, onay/soru beklemesi biter. *(Kalan: ajana gitmiş HTTP/MCP çağrısına iptal iletmek.)*
 - [ ] **Rol bazlı model seçimi**: planlama, değerlendirme ve son cevap için ayrı model seçilebilir (ör. planlama için yerel model, değerlendirme için bulut model).
 
 ### Adım 5 — Sohbet ekranı ve UI/UX  `L`

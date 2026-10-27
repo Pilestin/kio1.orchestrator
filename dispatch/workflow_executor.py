@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import Any
 
+from core.cancellation import STOPPED_REASON, stop_requested
 from core.config_loader import DispatchConfig
 from core.run_events import emit
 from core.telemetry import (
@@ -600,6 +601,17 @@ def _dispatch_step(
             capability=message.capability,
             status=STATUS_ERROR,
             error=f"No target available for {message.agent_id}",
+        )
+
+    # A run asked to stop sends nothing more. A step already with an agent
+    # finishes; this one, and every one after it, does not start.
+    if stop_requested():
+        return StepResult(
+            step_id=message.step_id,
+            agent_id=message.agent_id,
+            capability=message.capability,
+            status=STATUS_NOT_RUN,
+            error=STOPPED_REASON,
         )
 
     attempts: list[StepAttempt] = []

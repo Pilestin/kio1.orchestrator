@@ -21,10 +21,16 @@ const chat = {
   modes: {},          // session id -> the plan's execution mode, as heard live
   open: new Map(),    // session id -> whether the reader opened or closed its plan card
   waiting: null,      // the run an approval or a question belongs to
+  stopping: null,     // the run asked to stop, until it has
   phase: "",          // the phase last drawn, so streamed text does not redraw
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A run the person stopped ended as they asked: it did not fail. */
+function wasStopped(session) {
+  return session.status === "failed" && session.error === "Stopped.";
+}
 
 function isActive(session) {
   return session.status === "running" || session.status === "pending";
@@ -162,6 +168,7 @@ function recordedSteps(item) {
 // What a run's error means for the person reading it, most specific first.
 // The raw text stays one click away: it is what a bug report needs.
 const EXPLAINED = [
+  [/^Stopped\.$/, "You stopped this run."],
   [/KIO1 stopped while/, "KIO1 was restarted while this was running. Ask again."],
   [/plan was not approved/i, "The plan was cancelled."],
   [/question was not answered/i, "The question got no answer, so the request stopped."],
@@ -216,7 +223,7 @@ function planCard(item, isLast) {
   steps.forEach(function (step, index) { numbers[step.step_id] = index + 1; });
 
   return '<details class="plan-card" data-session="' + esc(id) + '"' + (open ? " open" : "") + ">"
-    + "<summary>" + statusChip(session.status)
+    + "<summary>" + statusChip(wasStopped(session) ? "stopped" : session.status)
       + (steps.length ? "<strong>" + steps.length + " step" + (steps.length === 1 ? "" : "s") + "</strong>" : "")
       + [mode, phase].filter(Boolean).map(function (part, index) {
         return '<span class="small muted">' + (steps.length || index ? "· " : "") + esc(part) + "</span>";
@@ -243,7 +250,7 @@ function turnHtml(item, isLast) {
     + '<div class="msg-kio">'
       + '<div class="who"><span class="mark">K1</span>KIO1</div>'
       + planCard(item, isLast)
-      + (note ? '<div class="notice bad small">' + note + "</div>" : "")
+      + (note ? '<div class="notice small' + (wasStopped(session) ? "" : " bad") + '">' + note + "</div>" : "")
       + (session.answer ? '<div class="answer-bubble">' + formatAnswer(session.answer) + "</div>" : "")
       + actions
     + "</div>";
@@ -321,6 +328,8 @@ function renderTurns() {
   while (box.children.length > turns.length) box.lastElementChild.remove();
 
   $("chat-empty").classList.toggle("hidden", turns.length > 0);
+  if (chat.stopping && chat.stopping !== activeRun()) chat.stopping = null;
+  renderSendButton();
   if (!turns.length) showUsableExamples();
   if (state.tab === "workflows") {
     setTitle(chat.detail ? chat.detail.conversation.title || "New chat" : "New chat");
@@ -329,6 +338,52 @@ function renderTurns() {
   // Follow the conversation down as it grows, unless the reader scrolled up
   // to read something earlier.
   if (atBottom || box.children.length !== before) messages.scrollTop = messages.scrollHeight;
+}
+
+/** The run under way in the open conversation, or null. */
+function activeRun() {
+  const items = chat.detail ? chat.detail.sessions || [] : [];
+  const running = items.filter(function (item) { return isActive(item.session); }).pop();
+  return running ? running.session.session_id : null;
+}
+
+/** Send becomes Stop while a run is under way in this conversation. */
+function renderSendButton() {
+  const button = $("run");
+  const running = activeRun();
+  const stopping = Boolean(running) && chat.stopping === running;
+  const mode = running ? "stop" : "send";
+
+  if (button.dataset.mode !== mode || button.dataset.stopping !== String(stopping)) {
+    button.dataset.mode = mode;
+    button.dataset.stopping = String(stopping);
+    button.classList.toggle("stop", Boolean(running));
+    button.innerHTML = running
+      ? '<svg class="icon"><use href="#i-stop"/></svg>' + (stopping ? "Stopping…" : "Stop")
+      : '<svg class="icon"><use href="#i-run"/></svg>Send';
+    button.title = running ? "Stop this run" : "Send (Enter)";
+  }
+
+  button.disabled = chat.sending || stopping;
+}
+
+/** Ask the run to stop; it ends at its next safe point. */
+async function stopRun(sessionId) {
+  if (!sessionId) return;
+
+  chat.stopping = sessionId;
+  renderSendButton();
+
+  try {
+    await api("/workflow/" + encodeURIComponent(sessionId) + "/cancel", { method: "POST" });
+  } catch (error) {
+    // Already over: the next refresh shows how it ended.
+    if (error.status !== 409) toast(error.message, "bad");
+  }
+
+  hideQuestion();
+  hideApproval();
+  loadConversation();
 }
 
 function findTurn(sessionId) {
@@ -448,7 +503,6 @@ export async function send(text, files) {
 
   chat.sending = true;
   chat.pending = request;
-  $("run").disabled = true;
   $("run-result").textContent = "";
   if (composing) {
     $("request").value = "";
@@ -476,7 +530,6 @@ export async function send(text, files) {
   } finally {
     chat.pending = null;
     chat.sending = false;
-    $("run").disabled = false;
     renderTurns();
     loadConversations();
   }
@@ -690,7 +743,12 @@ subscribe(function (data) {
 
 // ── events ──────────────────────────────────────────────────────────────────
 
-$("run").addEventListener("click", function () { send(); });
+$("run").addEventListener("click", function () {
+  const running = activeRun();
+  if (running) stopRun(running); else send();
+});
+
+$("question-stop").addEventListener("click", function () { stopRun(chat.waiting); });
 
 $("request").addEventListener("keydown", function (event) {
   // Enter sends, Shift+Enter starts a new line. Not while an input method

@@ -98,12 +98,11 @@ node --check static/app.js
   plan + çalıştırma.
 - KIO2–KIO13 servisleri çalışmıyor; denemek için `python tools/dummy_fleet.py --include KIO2`
   (canlı denemede 8 adımlık plan uçtan uca çalıştı; cevaplar sahte).
-- Konsolda iptal düğmesi yok; planlayıcının sorusu da kapatılamıyor (30 dk bekler).
-  Süre/token bütçeleri yok (yol haritası Adım 4 kalanları).
+- Süre/token bütçeleri yok (yol haritası Adım 4 kalanı). Stop var
+  (`core/cancellation.py`); ajana gitmiş bir adım kesilmez, bitmesi beklenir.
 - **`http`/`mcp` adımları arasında veri aktarımı yok:** argümanlar plan anında
   sabitleniyor, önceki adımın çıktısı yalnızca `kio` hedeflerine `data.upstream`
   olarak gidiyor. Model `${s1...}` uyduruyor (canlı: GeoLookup → TimeLookup HTTP 400).
-- Cevapta Markdown liste/kod bloğu işlenmiyor (`formatAnswer` yalnızca kalın ve satır içi kod).
 
 ## Mimari hızlı harita
 
