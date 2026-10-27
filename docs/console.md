@@ -50,7 +50,11 @@ its capabilities — and KIO1 dispatches it. Under your message:
   click opens it.
 - **Approve this plan?** or **a question**, when the run needs you. They
   appear below the last message, and the run waits for them.
-- **The answer**, with the targets it came from as small tags.
+- **The answer**, with the targets it came from as small tags. It is
+  Markdown — lists, tables, headings, links, and code blocks with a copy
+  button — rendered by `static/js/markdown.js`, which escapes everything first
+  and links only http(s) addresses. An AI agent's reply in the Try box is
+  rendered the same way; a command's output stays plain text.
 
 A later message continues the conversation: the last three runs go with it,
 so "now add type hints" knows which function. How much goes along, and why,

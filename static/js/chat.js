@@ -6,8 +6,9 @@
 // stay in the run details drawer; the chat keeps only what a person needs.
 
 import { attachmentIds, clearAttachments, readyCapabilities, uploading } from "./composer.js";
-import { $, api, ask, copyText, esc, hooks, relativeTime, setRows, state, statusChip, toast } from "./core.js";
+import { $, addCopyButtons, api, ask, copyText, esc, hooks, relativeTime, setRows, state, statusChip, toast } from "./core.js";
 import { followRun, live, loadSteps, setDrawer, subscribe } from "./live.js";
+import { renderMarkdown } from "./markdown.js";
 import { addressDetail, setAddress, setTitle, showTab } from "./shell.js";
 
 const chat = {
@@ -97,25 +98,22 @@ function durationOf(session) {
   return shortDuration(new Date(session.updated_at) - new Date(session.created_at));
 }
 
-/** An answer, with citations such as [Python] shown as small tags so it is
- * clear which target said what.
- *
- * Models write **bold** and `code`; everything is escaped first, so only
- * those marks become markup. Code is set aside before citations are looked
- * for: `list[float]` is a type, not a target called "float". */
-function formatAnswer(text) {
-  return String(text).split(/(`[^`\n]+`)/).map(function (part, index) {
-    if (index % 2 === 1) return "<code>" + esc(part.slice(1, -1)) + "</code>";
+/** Citations such as [Python] as small tags, so it is clear which target
+ * said what. Given escaped prose only — code is set aside before this sees
+ * it: `list[float]` is a type, not a target called "float". */
+export function markSources(html) {
+  return html.replace(
+    /\[([A-Za-z0-9_.-]{1,40}(?:,\s*[A-Za-z0-9_.-]{1,40})*)\]/g,
+    function (match, names) {
+      return names.split(/,\s*/).map(function (name) {
+        return '<span class="source">' + name + "</span>";
+      }).join("");
+    });
+}
 
-    return esc(part).replace(
-      /\[([A-Za-z0-9_.-]{1,40}(?:,\s*[A-Za-z0-9_.-]{1,40})*)\]/g,
-      function (match, names) {
-        return names.split(/,\s*/).map(function (name) {
-          return '<span class="source">' + name + "</span>";
-        }).join("");
-      })
-      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
-  }).join("");
+/** An answer as Markdown — lists, tables, code — with its sources marked. */
+function formatAnswer(text) {
+  return renderMarkdown(text, { citations: markSources });
 }
 
 const MODES = { sequential: "in order", parallel: "in parallel", mixed: "partly in parallel" };
@@ -316,6 +314,8 @@ function renderTurns() {
     }
 
     setRows(element, turn[1]);
+    // Code blocks in an answer get a copy button, as everywhere else.
+    addCopyButtons(element);
   });
 
   while (box.children.length > turns.length) box.lastElementChild.remove();

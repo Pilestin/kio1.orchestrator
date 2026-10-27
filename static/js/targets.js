@@ -2,6 +2,7 @@
 // and changes them. The How-to-use page's samples open in that editor.
 
 import { $, api, ask, esc, hooks, setConnection, setRows, state, statusChip, toast } from "./core.js";
+import { renderMarkdown } from "./markdown.js";
 import { showTab } from "./shell.js";
 
 const NEW_ENTRY = `{
@@ -619,6 +620,12 @@ function tryResultHtml(result) {
   const text = ["answer", "text", "stdout", "summary", "result"]
     .map(function (key) { return output[key]; })
     .find(function (value) { return typeof value === "string" && value.trim(); });
+
+  // An AI agent writes Markdown; a command's output is text whose * and _
+  // are its own, so only the first is rendered.
+  if (text && state.agentKind === "llm") {
+    return '<div class="try-head">' + head + '</div><div class="md try-md">' + renderMarkdown(text) + "</div>";
+  }
 
   return '<div class="try-head">' + head + "</div>"
     + '<pre class="output">' + esc(text || JSON.stringify(output, null, 2)) + "</pre>";
