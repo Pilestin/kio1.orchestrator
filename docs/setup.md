@@ -1,7 +1,11 @@
 # First-time setup
 
-The first time the console opens with a working token, **Set up KIO1**
-appears once. It can be opened again from the command palette (Ctrl K →
+When the console opens with a working token on an installation that still
+needs it — no workspace set, or a local planning model that is not
+downloaded — **Set up KIO1** appears by itself, until it is closed. The
+server decides that (`needs_setup` in `GET /system`), so a set-up
+installation opened in a new browser or a private window does not offer it
+again. It can always be opened from the command palette (Ctrl K →
 *Set up KIO1*).
 
 1. **Model.** One line on this computer — memory, cores, graphics card,

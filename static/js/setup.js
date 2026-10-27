@@ -6,8 +6,8 @@ import { showTab } from "./shell.js";
 // ── setup ───────────────────────────────────────────────────────────────────
 //
 // First run: pick and download a model that suits this computer, point the
-// agents at the code, and run something. Opens by itself once, then from the
-// command palette.
+// agents at the code, and run something. Opens by itself when the server says
+// the installation needs it, until closed; then from the command palette.
 
 const SETUP_KEY = "kio1.setup";
 const setup = { timer: null, recommended: { planning: "", answers: "" } };
@@ -172,15 +172,18 @@ hooks.paletteSources.push(function () {
   return [{ label: "Set up KIO1", hint: "setup", run: openSetup }];
 });
 
-/** Open setup by itself once, on a first visit with a working token. */
+/** Open setup by itself once, when the installation still needs it. */
 export async function maybeOpenSetup() {
   let done = false;
   try { done = localStorage.getItem(SETUP_KEY) === "done"; } catch { done = true; }
   if (done) return;
 
   try {
-    await api("/system");
-    openSetup();
+    // The server knows whether this installation is set up; a browser that
+    // has never seen it does not, and asking it alone re-offered setup on
+    // every new machine and private window.
+    const system = await api("/system");
+    if (system.needs_setup) openSetup();
   } catch {
     // Without the token the console cannot set anything up; it asks later.
   }

@@ -275,3 +275,33 @@ def suggest(machine: Hardware, installed: list[str]) -> list[dict[str, Any]]:
         }
         for suggestion in SUGGESTIONS
     ]
+
+
+def needs_setup(
+    provider: str, model: str, workspace: str, installed: list[str]
+) -> bool:
+    """Return whether this installation still lacks what a first run needs.
+
+    Decided here, from the configuration, rather than by each browser: a
+    console opened on a new machine, or in a private window, used to offer
+    setup again on an installation that was long set up.
+
+    Args:
+        provider: The planning provider.
+        model: The planning model.
+        workspace: The configured repository path.
+        installed: The models Ollama has, when it is the provider.
+
+    Returns:
+        True when no workspace is set, or the planning model is a local one
+        that is not downloaded.
+    """
+    if not workspace.strip():
+        return True
+
+    if provider != "ollama":
+        return False
+
+    names = set(installed) | {name.removesuffix(":latest") for name in installed}
+
+    return model not in names

@@ -20,7 +20,7 @@ import app as service
 from app import _State, app, get_state
 from core.model_pull import PullManager
 from core.session_client import NullSessionClient
-from core.system_info import Hardware, ollama_status, suggest
+from core.system_info import Hardware, needs_setup, ollama_status, suggest
 from dispatch.agent_registry import AgentRegistry
 from dispatch.directory import AgentDirectory
 from dispatch.scoreboard import Scoreboard
@@ -206,3 +206,27 @@ def test_a_model_name_cannot_carry_anything_else(client: TestClient) -> None:
 
 def test_setup_is_behind_the_token() -> None:
     assert TestClient(app).get("/system").status_code in {401, 503}
+
+
+# ── whether to offer setup at all ───────────────────────────────────────────
+
+
+def test_setup_is_needed_until_a_workspace_is_set() -> None:
+    assert needs_setup("openrouter", "openrouter/free", "", [])
+
+
+def test_a_cloud_model_and_a_workspace_need_no_setup() -> None:
+    assert not needs_setup("openrouter", "openrouter/free", "/work", [])
+
+
+def test_a_local_model_that_is_not_downloaded_needs_setup() -> None:
+    assert needs_setup("ollama", "ministral-3:3b", "/work", ["qwen2.5:3b"])
+
+
+def test_a_downloaded_local_model_is_found_with_or_without_its_tag() -> None:
+    assert not needs_setup("ollama", "ministral-3:3b", "/work", ["ministral-3:3b"])
+    assert not needs_setup("ollama", "llama3", "/work", ["llama3:latest"])
+
+
+def test_the_console_is_told_whether_to_offer_setup(client: TestClient) -> None:
+    assert client.get("/system").json()["needs_setup"] is True

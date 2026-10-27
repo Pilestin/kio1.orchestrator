@@ -51,7 +51,7 @@ from core.prompt_loader import load_prompt
 from core.run_events import RunEvent, RunEventBus, install_log_relay
 from core.service_telemetry import TraceContextMiddleware
 from core.session_client import NullSessionClient, SessionClient, SessionClientError
-from core.system_info import hardware, ollama_status, suggest
+from core.system_info import hardware, needs_setup, ollama_status, suggest
 from core.telemetry import init_telemetry, shutdown_telemetry, trace_provider_preload
 from dispatch.agent_registry import AgentEndpoint, McpToolSpec, load_agent_entry
 from dispatch.directory import (
@@ -2162,6 +2162,12 @@ def system_status(
         },
         "workspace": config.dispatch.workspace.path,
         "pulls": state.pulls.status(),
+        "needs_setup": needs_setup(
+            config.provider,
+            config.model,
+            config.dispatch.workspace.path,
+            ollama["models"],
+        ),
     }
 
 

@@ -20,13 +20,19 @@
 
 ## Bugünkü durum
 
-885 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler).
+928 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler).
 
 2026-10-27'de eklenenler: açılışta yarım kalan çalışmalar kapatılıyor
 (`EmbeddedSessionClient.close_interrupted`); hedef gerektirmeyen istekler
 planlanmadan cevaplanıyor (`{"reply": ...}`, `PlannerReply`); okunamayan plan
 ya da değerlendirme modele bir kez düzelttiriliyor (`_ask_for_json`); konsolda
 hatalar tek cümleyle, ham metin "Details" altında (`explainError`, `chat.js`).
+Konsol sadeleşti (Chat / Agents / Settings, agent kartları, katlı Advanced);
+"Add an agent" sihirbazı ve Try kutusu (`POST /registry/agents/try`, yanıttan
+tıklayarak `result_path`); cevaplarda Markdown (`static/js/markdown.js`);
+Stop (`core/cancellation.py`, `POST /workflow/{id}/cancel`); adımlar arası
+değer aktarımı `${s1.latitude}` (`dispatch/step_references.py`); komut çıktısı
+önce UTF-8 okunuyor; kurulum diyaloğu sunucunun `needs_setup` kararına göre açılıyor.
 
 | Özellik | Dosyalar | Doküman |
 |---|---|---|
