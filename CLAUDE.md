@@ -6,8 +6,8 @@ gaps), then the current plan in `docs/plans/`.
 Rules from the user:
 
 - Talk to the user in Turkish. Code, comments, and docs in English.
-- Never `git push`, and do not commit: end each step with a commit message
-  for the user to use.
+- Never `git push`. Commit each finished step yourself, with a plain
+  message and **no** `Co-Authored-By` (or any other Claude) trailer.
 - Keep UI text minimal; ask before a large visual change; verify UI with
   `tools/console_screenshots.py` and show the screenshots.
 - Run the tests (`python -m pytest -q -p no:cacheprovider`) and try changes

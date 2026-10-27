@@ -1,15 +1,17 @@
 # Devir notu — KIO1 orchestrator
 
-> 2026-10-22 itibarıyla. Yeni bir oturumun nereden devam edeceğini anlatır.
-> Sıradaki iş: [plans/chat.md](plans/chat.md) (sohbet ekranı). Genel plan: [roadmap.md](roadmap.md).
+> 2026-10-27 itibarıyla. Yeni bir oturumun nereden devam edeceğini anlatır.
+> Sıradaki iş: [plans/agent-onboarding.md](plans/agent-onboarding.md) (agent eklemeyi
+> kolaylaştırmak, arayüzü sadeleştirmek; kararlar bekliyor). Sohbet ekranı
+> ([plans/chat.md](plans/chat.md)) 1–5. adımlarıyla bitti. Genel plan: [roadmap.md](roadmap.md).
 
 ## Kullanıcı ve çalışma kuralları
 
 - Kullanıcıyla **Türkçe** konuş (doğru Türkçe karakterlerle). Kod, kod yorumları ve
   `docs/` (roadmap ve planlar hariç) İngilizce.
-- **Asla `git push` yapma. Commit de yapma.** Her adımın sonunda kod bloğu içinde
-  bir commit mesajı ver; commit'i kullanıcı yapar. Adımları ayrı commit'lere
-  sığacak büyüklükte tut.
+- **Asla `git push` yapma.** Her biten adımı kendin commit'le (2026-10-27'den
+  beri); mesajda **asla** `Co-Authored-By` ya da başka bir Claude satırı olmasın.
+  Adımları ayrı commit'lere sığacak büyüklükte tut.
 - **Arayüzde metin minimum.** Kullanıcı açıklama paragraflarıyla dolu tasarımı
   beğenmedi. Büyük bir görsel değişiklikten önce yön sor; bitince ekran
   görüntüsüyle göster.
@@ -18,7 +20,13 @@
 
 ## Bugünkü durum
 
-811 test geçiyor, 18 atlanıyor (PostgreSQL/NATS gerektirenler).
+885 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler).
+
+2026-10-27'de eklenenler: açılışta yarım kalan çalışmalar kapatılıyor
+(`EmbeddedSessionClient.close_interrupted`); hedef gerektirmeyen istekler
+planlanmadan cevaplanıyor (`{"reply": ...}`, `PlannerReply`); okunamayan plan
+ya da değerlendirme modele bir kez düzelttiriliyor (`_ask_for_json`); konsolda
+hatalar tek cümleyle, ham metin "Details" altında (`explainError`, `chat.js`).
 
 | Özellik | Dosyalar | Doküman |
 |---|---|---|
@@ -88,8 +96,14 @@ node --check static/app.js
 - Soru-cevaplar ve canlı olaylar kalıcı değil (olaylar bellekte, son 50 çalışma).
 - `main.py` (terminal) değerlendirme/onay/soru döngüsünü kullanmıyor; yalnızca
   plan + çalıştırma.
-- KIO2–KIO13 servisleri çalışmıyor; denemek için `python tools/dummy_fleet.py`.
-- Konsolda iptal düğmesi, süre/token bütçeleri yok (yol haritası Adım 4 kalanları).
+- KIO2–KIO13 servisleri çalışmıyor; denemek için `python tools/dummy_fleet.py --include KIO2`
+  (canlı denemede 8 adımlık plan uçtan uca çalıştı; cevaplar sahte).
+- Konsolda iptal düğmesi yok; planlayıcının sorusu da kapatılamıyor (30 dk bekler).
+  Süre/token bütçeleri yok (yol haritası Adım 4 kalanları).
+- **`http`/`mcp` adımları arasında veri aktarımı yok:** argümanlar plan anında
+  sabitleniyor, önceki adımın çıktısı yalnızca `kio` hedeflerine `data.upstream`
+  olarak gidiyor. Model `${s1...}` uyduruyor (canlı: GeoLookup → TimeLookup HTTP 400).
+- Cevapta Markdown liste/kod bloğu işlenmiyor (`formatAnswer` yalnızca kalın ve satır içi kod).
 
 ## Mimari hızlı harita
 
