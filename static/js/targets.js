@@ -627,9 +627,62 @@ function tryResultHtml(result) {
     return '<div class="try-head">' + head + '</div><div class="md try-md">' + renderMarkdown(text) + "</div>";
   }
 
+  // A web API's reply is a tree to pick the answer from: clicking a field
+  // keeps only that part from now on, which is what "Answer field" means.
+  if (state.agentKind === "http" && state.editorMode !== "json" && !text) {
+    const warned = typeof output.warning === "string";
+    const base = warned ? "" : $("agent-result-path").value.trim();
+    // A field that was not an object is kept under "result", which is not
+    // a field of the reply: what it holds is shown, not offered.
+    const wrapped = !warned && base && Object.keys(output).length === 1 && "result" in output;
+    const body = warned || wrapped ? output.result : output;
+
+    return '<div class="try-head">' + head + "</div>"
+      + (warned ? '<p class="hint reason">' + esc(output.warning) + "</p>" : "")
+      + '<div class="json-box">' + jsonTree(body, base ? base.split(".") : []) + "</div>"
+      + '<p class="hint">Click a field to keep only that part.</p>';
+  }
+
   return '<div class="try-head">' + head + "</div>"
     + '<pre class="output">' + esc(text || JSON.stringify(output, null, 2)) + "</pre>";
 }
+
+/** A short form of a value, for a line in the tree. */
+function jsonPreview(value) {
+  const text = JSON.stringify(value);
+  return text.length > 120 ? text.slice(0, 117) + "…" : text;
+}
+
+/** An object's fields as a tree; each one a button naming its path. Only
+ * objects are walked — the answer field is a chain of keys, so a list is
+ * shown, not entered. */
+export function jsonTree(value, path) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return '<span class="json-value">' + esc(jsonPreview(value)) + "</span>";
+  }
+
+  return '<ul class="json-tree">' + Object.keys(value).map(function (key) {
+    const inner = value[key];
+    const here = path.concat(key);
+    const nested = inner && typeof inner === "object" && !Array.isArray(inner);
+    const name = key.indexOf(".") === -1
+      ? '<button type="button" class="json-key" data-path="' + esc(here.join(".")) + '" title="Keep only this">'
+        + esc(key) + "</button>"
+      : '<span class="json-key plain">' + esc(key) + "</span>";
+
+    return "<li>" + name + (nested ? jsonTree(inner, here) : '<span class="json-value">' + esc(jsonPreview(inner)) + "</span>")
+      + "</li>";
+  }).join("") + "</ul>";
+}
+
+$("try-result").addEventListener("click", function (event) {
+  const key = event.target.closest("button.json-key");
+  if (!key) return;
+
+  $("agent-result-path").value = key.dataset.path;
+  document.querySelector("#agent-form .more").open = true;
+  runTry();
+});
 
 export async function runTry() {
   const box = $("try-result");

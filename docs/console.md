@@ -195,7 +195,10 @@ why it failed. Nothing is saved and nothing is recorded against it, so a
 draft can be tried until it does what it should
 (`POST /registry/agents/try`). For a tool server the box lists the tools it
 reports instead; when the program that starts it (`npx`, `uvx`) is not
-installed, it says where to get it.
+installed, it says where to get it. A web address's reply is shown as a tree: clicking
+a field makes it the **Answer field** (`result_path`) and tries again, so
+the part of the reply worth keeping is picked by looking at it rather than
+by guessing its name.
 
 **Edit** opens a target in the same form — or as JSON, for a kind the
 form does not show. The whole entry

@@ -1872,3 +1872,34 @@ pre.output.bad { color: var(--bad); }
 }
 
 .action.primary.stop:hover:not(:disabled) { background: var(--ink); filter: none; opacity: 0.88; }
+
+/* A web API reply to pick the answer field from. */
+.json-box {
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font: 0.8rem/1.7 var(--mono);
+}
+
+.json-tree { list-style: none; margin: 0; padding: 0 0 0 1rem; }
+.json-box > .json-tree { padding-left: 0; }
+.json-tree li { white-space: nowrap; }
+
+.json-key {
+  margin-right: 0.45rem;
+  padding: 0 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.json-key:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+.json-key.plain { cursor: default; }
+.json-value { color: var(--muted); }
