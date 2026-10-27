@@ -19,6 +19,15 @@ plan → carry out → review ─ done ─────────────�
 The answer is saved with the run and shown at the top of its detail in the
 console; `GET /workflow/{session_id}` returns it as `session.answer`.
 
+## Requests that need no target
+
+A greeting, a thank-you, "what can you do?", or a request nothing in the
+catalog can serve is not planned at all. The planner answers with
+`{"reply": "..."}` — in the request's language, listing what the catalog's
+targets can do when asked — and the run completes with that as its answer,
+without a step or a review. A plan with no steps but an explanation is read
+the same way, because a small model writes that about as often.
+
 ## Configuration
 
 ```json
@@ -69,7 +78,8 @@ If the conversation cannot be read, the request runs without it.
 
 | Situation | Result |
 |-----------|--------|
-| The review is not valid JSON, has no answer, or times out | The run still completes. The answer is written from the step results instead, one line per step, and the activity log marks it as a summary. |
+| The review or the plan is not valid JSON, or a plan has no steps | The model is shown what it wrote and why it could not be used, and asked once to correct it. The activity log says so. |
+| The corrected review is still unusable, or the review times out | The run still completes. The answer is written from the step results instead, one line per step, and the activity log marks it as a summary. |
 | A follow-up plan cannot be made or carried out | The rounds stop; the answer from the last review stands. |
 | The reviewer asks to continue on the last round | Treated as done. |
 | The reviewer asks to continue without saying what is missing | Treated as done. |

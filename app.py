@@ -261,6 +261,9 @@ def _build_state() -> _State:
         # unless KIO1_DATABASE_URL says otherwise. A first run on one machine
         # needs neither Docker nor a second program to see what it did.
         session_client = EmbeddedSessionClient(*open_repository(database_url))
+        # Nothing runs yet, so whatever is still running in the store was cut
+        # off by the last stop and would otherwise say "working…" forever.
+        session_client.close_interrupted()
 
     return _State(
         runner=build_runner(

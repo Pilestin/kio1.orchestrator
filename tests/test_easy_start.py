@@ -19,7 +19,11 @@ from core.session_client import SessionClientError
 from providers.ollama_client import _get_think
 from services.session_manager.repository import InMemorySessionRepository
 from services.session_manager.sqlite_repository import SqliteSessionRepository
-from services.session_manager.storage import EmbeddedSessionClient, open_repository
+from services.session_manager.storage import (
+    INTERRUPTED_REASON,
+    EmbeddedSessionClient,
+    open_repository,
+)
 
 # ── configuration ───────────────────────────────────────────────────────────
 
@@ -139,6 +143,39 @@ def test_history_survives_a_restart(tmp_path: Path) -> None:
         )
     finally:
         second.close()
+
+
+def test_runs_a_stop_cut_off_are_closed_at_the_next_start(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path}/kio1.db"
+    first = EmbeddedSessionClient(*open_repository(url))
+    cut_off = first.create_session("selam")
+    first.update_session(cut_off, status="running")
+    queued = first.create_session("Still queued")
+    finished = first.create_session("Done already")
+    first.update_session(finished, status="completed", answer="Hi.")
+    first.close()
+
+    second = EmbeddedSessionClient(*open_repository(url))
+
+    try:
+        assert second.close_interrupted() == 2
+        assert second.get_session(cut_off)["session"]["status"] == "failed"
+        assert second.get_session(cut_off)["session"]["error"] == INTERRUPTED_REASON
+        assert second.get_session(queued)["session"]["status"] == "failed"
+        assert second.get_session(finished)["session"]["status"] == "completed"
+    finally:
+        second.close()
+
+
+def test_closing_interrupted_runs_twice_closes_nothing_the_second_time(
+    embedded: EmbeddedSessionClient,
+) -> None:
+    session_id = embedded.create_session("Anything")
+    embedded.update_session(session_id, status="running")
+
+    embedded.close_interrupted()
+
+    assert embedded.close_interrupted() == 0
 
 
 # ── the launcher ────────────────────────────────────────────────────────────

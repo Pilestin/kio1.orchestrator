@@ -39,6 +39,13 @@ DATABASE_URL_ENV = "KIO1_DATABASE_URL"
 DEFAULT_DATABASE_PATH = Path("data") / "kio1.db"
 DEFAULT_DATABASE_URL = f"{SQLITE_PREFIX}{DEFAULT_DATABASE_PATH.as_posix()}"
 
+# What a run that was cut off by a stop says, in the console and to the
+# reviewer of a later request in the same conversation.
+INTERRUPTED_REASON = "KIO1 stopped while this request was running."
+
+# How many of the newest runs are checked for ones left unfinished.
+_INTERRUPTED_SCAN = 200
+
 
 def open_repository(database_url: str) -> tuple[SessionRepository, Callable[[], None]]:
     """Open the store a database URL names.
@@ -103,6 +110,44 @@ class EmbeddedSessionClient:
     def close(self) -> None:
         """Release the store."""
         self._close()
+
+    def close_interrupted(self, reason: str = INTERRUPTED_REASON) -> int:
+        """Mark the runs a previous process left unfinished as failed.
+
+        Only this process runs what this store records, so at startup
+        anything still `pending` or `running` belongs to a process that is
+        gone: it will never finish, and left alone it shows "working…"
+        forever. A remote Session Manager may serve several KIO1 instances,
+        which is why this lives here and not in the service.
+
+        Orphans are always among the newest runs — a stop leaves at most the
+        few that were in flight — so the recent list is enough to find them.
+
+        Args:
+            reason: Recorded as each run's error.
+
+        Returns:
+            How many runs were closed.
+        """
+        try:
+            recent = self._repository.list_sessions(_INTERRUPTED_SCAN)
+        except Exception:
+            logger.warning("Could not look for interrupted runs", exc_info=True)
+            return 0
+
+        unfinished = [
+            session for session in recent if session.status in ("pending", "running")
+        ]
+
+        for session in unfinished:
+            self.update_session(session.session_id, status="failed", error=reason)
+
+        if unfinished:
+            logger.info(
+                "Closed %d run(s) a previous stop left unfinished", len(unfinished)
+            )
+
+        return len(unfinished)
 
     def create_session(
         self, request_text: str, conversation_id: UUID | None = None

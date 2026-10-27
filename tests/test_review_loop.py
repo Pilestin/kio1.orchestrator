@@ -31,7 +31,7 @@ from dispatch.review import (
 from dispatch.scoreboard import Scoreboard
 from dispatch.workflow_executor import StepResult, WorkflowResult
 from dispatch.workflow_planner import ExecutionMessage, parse_plan
-from services.workflow_api.runner import WorkflowRunner
+from services.workflow_api.runner import WorkflowRunner, planner_reply
 
 REGISTRY = load_agent_registry(
     {
@@ -415,7 +415,8 @@ def test_rounds_are_bounded_whatever_the_reviewer_asks() -> None:
 
 def test_a_review_that_cannot_be_read_falls_back_to_the_results() -> None:
     model = Model(
-        plans=[plan(("s1", "Python", "version"))], reviews=["this is not json"]
+        plans=[plan(("s1", "Python", "version"))],
+        reviews=["this is not json", "still not json"],
     )
     runner, recorder, bus = make_runner(model)
     session_id = uuid4()
@@ -616,3 +617,114 @@ def test_a_failed_first_plan_fails_the_run_without_a_review() -> None:
     assert recorder.last("status") == "failed"
     assert "bad plan" in recorder.last("error")
     assert model.review_messages == []
+
+
+# ── replying without a plan ─────────────────────────────────────────────────
+
+
+def test_a_greeting_is_answered_without_running_anything() -> None:
+    model = Model(plans=[{"reply": "Merhaba! Ne yapmamı istersin?"}], reviews=[])
+    transport = Transport()
+    runner, recorder, bus = make_runner(model, transport)
+    session_id = uuid4()
+
+    runner.run(session_id, "selam")
+
+    assert transport.sent == []
+    assert model.review_messages == []
+    assert recorder.last("status") == "completed"
+    assert recorder.last("answer") == "Merhaba! Ne yapmamı istersin?"
+    assert "answer" in [event.kind for event in bus.read(str(session_id))]
+
+
+def test_a_plan_with_no_steps_but_an_explanation_is_a_reply() -> None:
+    model = Model(
+        plans=[{**plan(), "steps": [], "explanation": "No target can book flights."}],
+        reviews=[],
+    )
+    runner, recorder, _ = make_runner(model)
+
+    runner.run(uuid4(), "Book me a flight")
+
+    assert recorder.last("status") == "completed"
+    assert recorder.last("answer") == "No target can book flights."
+
+
+def test_a_reply_in_a_follow_up_round_keeps_the_answer_so_far() -> None:
+    model = Model(
+        plans=[plan(("s1", "Python", "version")), {"reply": "Nothing else to do."}],
+        reviews=[
+            {"decision": "continue", "answer": "Version only.", "next_request": "More"}
+        ],
+    )
+    runner, recorder, _ = make_runner(model)
+
+    runner.run(uuid4(), "Version and more")
+
+    assert recorder.last("answer") == "Version only."
+    assert recorder.last("status") == "completed"
+
+
+@pytest.mark.parametrize(
+    "decoded",
+    [
+        {"reply": "  "},
+        {"reply": "Hi", "steps": [{"step_id": "s1"}]},
+        {"steps": [], "explanation": ""},
+        ["reply"],
+    ],
+)
+def test_only_a_real_reply_is_taken_as_one(decoded: Any) -> None:
+    assert planner_reply(decoded) == ""
+
+
+# ── correcting an answer that cannot be read ────────────────────────────────
+
+
+def test_a_review_that_cannot_be_read_is_asked_to_correct_itself_once() -> None:
+    model = Model(
+        plans=[plan(("s1", "Python", "version"))],
+        reviews=["Sure! Here it is: {broken", {"decision": "done", "answer": "Fixed."}],
+    )
+    runner, recorder, bus = make_runner(model)
+    session_id = uuid4()
+
+    runner.run(session_id, "Which python?")
+
+    assert recorder.last("answer") == "Fixed."
+    assert "could not be used" in model.review_messages[1]
+    assert "model_retry" in [event.kind for event in bus.read(str(session_id))]
+
+
+def test_a_plan_missing_its_steps_is_asked_for_again() -> None:
+    model = Model(
+        plans=[{"workflow_id": "wf-1"}, plan(("s1", "Python", "version"))],
+        reviews=[{"decision": "done", "answer": "Done."}],
+    )
+    transport = Transport()
+    runner, recorder, _ = make_runner(model, transport)
+
+    runner.run(uuid4(), "Which python?")
+
+    assert transport.sent == ["s1"]
+    assert recorder.last("status") == "completed"
+
+
+def test_a_plan_is_corrected_only_once() -> None:
+    model = Model(plans=["not json", "not json either"], reviews=[])
+    runner, recorder, _ = make_runner(model)
+
+    runner.run(uuid4(), "Anything")
+
+    assert len(model.plan_messages) == 2
+    assert recorder.last("status") == "failed"
+
+
+def test_a_provider_failure_is_not_retried() -> None:
+    model = Model(plans=[TimeoutError("slow")], reviews=[])
+    runner, recorder, _ = make_runner(model)
+
+    runner.run(uuid4(), "Anything")
+
+    assert len(model.plan_messages) == 1
+    assert recorder.last("status") == "failed"

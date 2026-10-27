@@ -155,6 +155,11 @@ function onLiveEvent(event) {
       }
       break;
 
+    case "model_retry":
+      appendText("live-model", "\n\n— corrected —\n");
+      liveLine("The model's answer could not be read; asked it to correct it — " + esc(data.error), "warn");
+      break;
+
     case "model_answer":
       stopReadingTimer("");
       if (!live.streamed) appendText("live-model", data.text);

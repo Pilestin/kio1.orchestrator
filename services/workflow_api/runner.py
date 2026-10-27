@@ -1,7 +1,8 @@
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
 from core.approvals import ApprovalDesk
@@ -45,6 +46,8 @@ from providers.provider_client import load_provider, supports_streaming
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
+
 
 class PlanRejected(Exception):
     """A plan was cancelled, or not approved in time."""
@@ -56,6 +59,80 @@ class PlannerQuestion(Exception):
     def __init__(self, question: str) -> None:
         super().__init__(question)
         self.question = question
+
+
+class PlannerReply(Exception):
+    """The planner answered the person directly: nothing needs a target.
+
+    A greeting, a thank-you, "what can you do?", or a request nothing in the
+    catalog can serve. Planning steps for these either fails ("a plan needs
+    steps") or sends a target something it cannot do; a short reply is what
+    the person expects.
+    """
+
+    def __init__(self, reply: str) -> None:
+        super().__init__(reply)
+        self.reply = reply
+
+
+def read_plan(decoded: Any) -> WorkflowPlan:
+    """Read a planner's decoded output.
+
+    Raises:
+        PlannerQuestion: If the planner asked the person something.
+        PlannerReply: If the planner answered the person directly.
+        ValueError: If it is not a usable plan.
+    """
+    if (
+        isinstance(decoded, dict)
+        and "steps" not in decoded
+        and isinstance(decoded.get("question"), str)
+        and decoded["question"].strip()
+    ):
+        raise PlannerQuestion(decoded["question"].strip())
+
+    reply = planner_reply(decoded)
+
+    if reply:
+        raise PlannerReply(reply)
+
+    return parse_plan(decoded)
+
+
+def correction_request(error: Exception) -> str:
+    """The message that asks a model to fix an answer that could not be read."""
+    return (
+        f"That answer could not be used: {error}\n"
+        "Reply again with only the corrected JSON object, exactly in the "
+        "format the instructions describe, and nothing else."
+    )
+
+
+def planner_reply(decoded: Any) -> str:
+    """Return the direct reply a planner's output carries, or an empty string.
+
+    `{"reply": "..."}` is the form the prompt asks for. A plan with no steps
+    but an explanation says the same in the plan's own shape, which a small
+    model writes about as often, so it counts too.
+    """
+    if not isinstance(decoded, dict):
+        return ""
+
+    reply = decoded.get("reply")
+
+    if isinstance(reply, str) and reply.strip() and not decoded.get("steps"):
+        return reply.strip()
+
+    explanation = decoded.get("explanation")
+
+    if (
+        decoded.get("steps") == []
+        and isinstance(explanation, str)
+        and explanation.strip()
+    ):
+        return explanation.strip()
+
+    return ""
 
 
 @dataclass
@@ -376,6 +453,12 @@ class WorkflowRunner:
                 done = self._carry_out(
                     session_id, number, planning_request, registry, clarified, step_data
                 )
+            except PlannerReply as replied:
+                if not rounds:
+                    self._replied(session_id, replied.reply)
+                    return
+
+                break  # nothing more to do; the review's answer stands
             except PlanRejected:
                 if not rounds:
                     reason = "The plan was not approved."
@@ -483,6 +566,8 @@ class WorkflowRunner:
             plan = self._plan_asking(
                 session_id, number, planning_request, registry, clarified
             )
+        except PlannerReply:
+            raise
         except Exception as error:
             logger.exception(
                 "Planning failed: session_id=%s round=%d", session_id, number
@@ -684,6 +769,13 @@ class WorkflowRunner:
 
         return approved
 
+    def _replied(self, session_id: UUID, reply: str) -> None:
+        """Finish a run the planner answered without a plan."""
+        emit("answer", text=reply)
+        self.recorder.update_session(session_id, status="completed", answer=reply)
+        emit("status", status="completed", rounds=0, steps=[])
+        logger.info("Answered without a plan: session_id=%s", session_id)
+
     def _round_failed(self, session_id: UUID, number: int, error: Exception) -> None:
         """Record why a round could not be carried out."""
         reason = f"{type(error).__name__}: {error}"
@@ -730,14 +822,14 @@ class WorkflowRunner:
         )
 
         try:
-            content = self._ask_model(
+            review = self._ask_for_json(
                 session_id,
                 fill_catalog(self.review_template, registry),
                 review_request(request_text, rounds, final=final),
                 turn=len(rounds) * 2,
                 role=self._reviewer(),
+                read=lambda decoded: parse_review(decoded, final=final),
             )
-            review = parse_review(parse_response(content), final=final)
         except Exception as error:  # noqa: BLE001 - any failure falls back to an answer
             logger.warning(
                 "Review failed, answering from the results: session_id=%s error=%s",
@@ -789,20 +881,14 @@ class WorkflowRunner:
             streaming=observed() and supports_streaming(self.provider),
         )
 
-        content = self._ask_model(
-            session_id, system_prompt, request_text, turn=1, role=self._planner()
+        return self._ask_for_json(
+            session_id,
+            system_prompt,
+            request_text,
+            turn=1,
+            role=self._planner(),
+            read=read_plan,
         )
-        decoded = parse_response(content)
-
-        if (
-            isinstance(decoded, dict)
-            and "steps" not in decoded
-            and isinstance(decoded.get("question"), str)
-            and decoded["question"].strip()
-        ):
-            raise PlannerQuestion(decoded["question"].strip())
-
-        return parse_plan(decoded)
 
     def _planner(self) -> ModelRole:
         """Return the model that plans."""
@@ -847,6 +933,71 @@ class WorkflowRunner:
 
         return ModelRole(config, self.review_provider, self.review_client)
 
+    def _ask_for_json(
+        self,
+        session_id: UUID,
+        system_prompt: str,
+        message: str,
+        *,
+        turn: int,
+        role: ModelRole,
+        read: Callable[[Any], T],
+    ) -> T:
+        """Ask a model for JSON and read it, giving it one chance to correct it.
+
+        A small model now and then writes a stray sentence, a broken brace,
+        or a plan without its steps. Shown what it wrote and what was wrong
+        with it, it almost always fixes it — far cheaper than failing the run
+        or answering with a raw dump of the results. Only a reply that cannot
+        be read is retried: a provider that fails or times out is not asked
+        again, and neither is a question or a reply to the person.
+
+        Args:
+            session_id: The run, for trace correlation.
+            system_prompt: The system prompt.
+            message: The user message.
+            turn: Which model call of the run this is, for tracing.
+            role: The model to ask, with its provider and client.
+            read: Turns the decoded JSON into what the caller needs, raising
+                `ValueError` when it is not usable.
+
+        Returns:
+            What `read` made of the answer.
+
+        Raises:
+            ValueError: If the corrected answer cannot be read either.
+            Exception: Whatever the provider raised.
+        """
+        content = self._ask_model(
+            session_id, system_prompt, message, turn=turn, role=role
+        )
+
+        try:
+            return read(parse_response(content))
+        except ValueError as error:
+            problem = error
+            logger.warning(
+                "Model output could not be read, asking it to correct it: "
+                "session_id=%s error=%s",
+                session_id,
+                error,
+            )
+            emit("model_retry", error=str(error))
+
+        corrected = self._ask_model(
+            session_id,
+            system_prompt,
+            correction_request(problem),
+            turn=turn,
+            role=role,
+            earlier=[
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": content},
+            ],
+        )
+
+        return read(parse_response(corrected))
+
     def _ask_model(
         self,
         session_id: UUID,
@@ -855,6 +1006,7 @@ class WorkflowRunner:
         *,
         turn: int,
         role: ModelRole,
+        earlier: list[dict[str, str]] | None = None,
     ) -> str:
         """Send one request to a model and return its text.
 
@@ -867,11 +1019,12 @@ class WorkflowRunner:
             message: The user message.
             turn: Which model call of the run this is, for tracing.
             role: The model to ask, with its provider and client.
+            earlier: Messages that come before this one, for a correction.
 
         Returns:
             The model's answer.
         """
-        messages = [{"role": "user", "content": message}]
+        messages = [*(earlier or []), {"role": "user", "content": message}]
         streaming = observed() and supports_streaming(role.provider)
         relay = TokenRelay()
 
