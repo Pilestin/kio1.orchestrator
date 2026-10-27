@@ -162,6 +162,16 @@ Two things worth reading off that: `KIO5` says *why* it is not being planned
 for, and `MyLogSearch` is `unchecked` rather than `ready` because it is an
 HTTP tool with no `health_url` — nothing was probed, so nothing is claimed.
 
+### Stand-in KIOs
+
+Most KIOs are not running as services yet. **Start stand-ins** at the top of
+the page starts the ones in `kio-mocks/` — stand-ins that do a small version
+of each KIO's job — and their cards say **stand-in**, so their answers are
+never taken for the real KIO's. **Use the sample project** then points the
+workspace at a small project with one real bug to try them on. **Stop
+stand-ins** stops them, and so does stopping KIO1. They use the KIOs' usual
+ports, so if something else already answers there, starting them says so.
+
 ### Adding, editing, removing
 
 **Add an agent** asks first what is being connected, in plain words:

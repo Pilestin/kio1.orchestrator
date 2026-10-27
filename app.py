@@ -12,13 +12,14 @@ import json
 import logging
 import mimetypes
 import os
+import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from hmac import compare_digest
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
@@ -51,6 +52,7 @@ from core.prompt_loader import load_prompt
 from core.run_events import RunEvent, RunEventBus, install_log_relay
 from core.service_telemetry import TraceContextMiddleware
 from core.session_client import NullSessionClient, SessionClient, SessionClientError
+from core.stand_ins import StandInError, StandIns
 from core.system_info import hardware, needs_setup, ollama_status, suggest
 from core.telemetry import init_telemetry, shutdown_telemetry, trace_provider_preload
 from dispatch.agent_registry import AgentEndpoint, McpToolSpec, load_agent_entry
@@ -181,6 +183,7 @@ class _State:
     store: AgentStore = field(default_factory=FileAgentStore)
     attachments: AttachmentStore = field(default_factory=AttachmentStore)
     pulls: PullManager = field(default_factory=PullManager)
+    stand_ins: StandIns = field(default_factory=StandIns)
 
 
 _state: _State | None = None
@@ -323,6 +326,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         remove_log_relay()
 
         if state is not None:
+            # A fleet this KIO1 started must not outlive it on 81NN.
+            state.stand_ins.stop()
             state.directory.stop()
             state.runner.transport.close()
 
@@ -2206,3 +2211,68 @@ def pull_progress(
     _require_registry_token(request)
 
     return {"pulls": state.pulls.status()}
+
+
+class StandInsRequest(BaseModel):
+    """Start or stop the stand-in KIOs."""
+
+    action: Literal["start", "stop"]
+
+
+@app.get("/stand-ins")
+def stand_ins_status(
+    request: Request, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Say whether the stand-in KIOs are running, and which.
+
+    Args:
+        request: Checked for the registry token.
+        state: The fleet this KIO1 started, if any.
+
+    Returns:
+        Whether they are available here and running, the KIOs that came up
+        with their addresses, and the sample project's path.
+    """
+    _require_registry_token(request)
+
+    return state.stand_ins.status()
+
+
+@app.post("/stand-ins")
+def stand_ins_control(
+    body: StandInsRequest, request: Request, state: _State = Depends(get_state)
+) -> dict[str, Any]:
+    """Start or stop the stand-in KIOs in `kio-mocks/`.
+
+    Behind the registry token: starting them runs a program on this machine.
+    Once they are up the directory is probed at once, so the Agents page
+    shows them ready without waiting for the next background check.
+
+    Args:
+        body: What to do.
+        request: Checked for the registry token.
+        state: The fleet, and the directory to refresh.
+
+    Returns:
+        The fleet's status afterwards.
+
+    Raises:
+        HTTPException: 409 when they could not be started — not here, or
+            something else holds their ports.
+    """
+    _require_registry_token(request)
+
+    if body.action == "stop":
+        result = state.stand_ins.stop()
+    else:
+        try:
+            result = state.stand_ins.start()
+        except StandInError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(error)
+            ) from error
+
+    threading.Thread(target=state.directory.refresh, daemon=True).start()
+    logger.info("Stand-in KIOs: %s (running=%s)", body.action, result["running"])
+
+    return result

@@ -20,7 +20,7 @@ import "./js/palette.js";
 import { loadSettings } from "./js/settings.js";
 import { maybeOpenSetup } from "./js/setup.js";
 import { applyTheme, setRailCollapsed, showTab, storedTheme, tabFromAddress } from "./js/shell.js";
-import { loadSaveLocation, loadTargets, startAdding } from "./js/targets.js";
+import { loadSaveLocation, loadStandIns, loadTargets, startAdding } from "./js/targets.js";
 
 // ── refreshing ──────────────────────────────────────────────────────────────
 
@@ -28,6 +28,7 @@ function refresh() {
   if (state.tab === "targets") {
     loadTargets();
     loadSaveLocation();
+    loadStandIns();
   } else if (state.tab === "workflows") {
     loadChat();
     loadSteps();

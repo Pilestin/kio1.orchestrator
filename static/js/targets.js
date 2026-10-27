@@ -54,6 +54,7 @@ export function agentCard(agent) {
         ? '<svg class="icon lock" aria-label="Asks before running"><title>Asks before running</title>'
           + '<use href="#i-lock"/></svg>' : "")
       + '<span class="kind-tag ' + esc(agent.kind) + '">' + esc(KIND_NAMES[agent.kind] || agent.kind) + "</span>"
+      + (isStandIn(agent) ? '<span class="kind-tag stand-in" title="Answered by a stand-in from kio-mocks/">stand-in</span>' : "")
       + '<span class="spacer"></span>'
       + '<span class="agent-actions">'
         + '<button class="icon-button" data-edit="' + id + '" title="Edit ' + id
@@ -139,6 +140,87 @@ $("targets-body").addEventListener("toggle", function (event) {
 
   if (event.target.open) openGroups.add(group); else openGroups.delete(group);
 }, true);
+
+// ── stand-ins ───────────────────────────────────────────────────────────────
+//
+// The stand-in KIOs in kio-mocks/ do a small version of each KIO's job, so a
+// plan can run end to end before the real services exist. KIO1 starts them
+// as a program of their own; a card they answer for says "stand-in".
+
+let standIns = { available: false, running: false, kios: [], sample: null };
+let standInsBusy = false;
+
+/** "http://localhost:8102" and "http://127.0.0.1:8102" are the same place. */
+function sameAddress(first, second) {
+  const loopback = /^(localhost|127\.0\.0\.1|\[::1\])$/;
+  try {
+    const a = new URL(first);
+    const b = new URL(second);
+    const host = function (url) { return loopback.test(url.hostname) ? "loopback" : url.hostname; };
+    return host(a) === host(b) && a.port === b.port;
+  } catch {
+    return first === second;
+  }
+}
+
+/** Whether this agent is answered by a stand-in KIO1 started. */
+function isStandIn(agent) {
+  return standIns.running && standIns.kios.some(function (kio) {
+    return kio.agent_id === agent.agent_id && sameAddress(kio.endpoint, agent.endpoint || "");
+  });
+}
+
+function renderStandIns() {
+  const button = $("stand-ins");
+  const workspace = state.settings && state.settings.workspace ? state.settings.workspace.path : "";
+
+  button.classList.toggle("hidden", !standIns.available);
+  button.disabled = standInsBusy;
+  button.textContent = standInsBusy
+    ? (standIns.running ? "Stopping…" : "Starting…")
+    : (standIns.running ? "Stop stand-ins" : "Start stand-ins");
+  $("use-sample").classList.toggle("hidden", !standIns.running || !standIns.sample || workspace === standIns.sample);
+}
+
+export async function loadStandIns() {
+  try {
+    standIns = await api("/stand-ins");
+  } catch {
+    standIns = { available: false, running: false, kios: [], sample: null };
+  }
+  renderStandIns();
+}
+
+$("stand-ins").addEventListener("click", async function () {
+  const action = standIns.running ? "stop" : "start";
+  standInsBusy = true;
+  renderStandIns();
+
+  try {
+    standIns = await api("/stand-ins", { method: "POST", body: JSON.stringify({ action: action }) });
+    toast(action === "start"
+      ? standIns.kios.length + " stand-in KIOs are running."
+      : "The stand-ins are stopped.", "ok");
+  } catch (error) {
+    toast(error.message, "bad");
+  } finally {
+    standInsBusy = false;
+    renderStandIns();
+    // The directory is probing them now; give it a moment, then redraw.
+    setTimeout(loadTargets, 1500);
+  }
+});
+
+$("use-sample").addEventListener("click", async function () {
+  try {
+    await api("/settings", { method: "PUT", body: JSON.stringify({ workspace_path: standIns.sample }) });
+    if (state.settings) state.settings.workspace.path = standIns.sample;
+    toast("The workspace is the sample project.", "ok");
+  } catch (error) {
+    toast(error.message, "bad");
+  }
+  renderStandIns();
+});
 
 export async function loadTargets() {
   const warning = $("token-warning");

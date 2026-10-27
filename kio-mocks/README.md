@@ -20,6 +20,10 @@ python -m kio_mocks --print-config     # the dispatch.agents block for KIO1
 Then point KIO1's workspace at the code to work on (Settings → Advanced →
 Workspace). `sample/` is a small shop with one real defect to try it on.
 
+Or do both from KIO1's console: **Agents → Start stand-ins**, then **Use the
+sample project**. KIO1 runs this same command for you and stops it when it
+stops.
+
 ## What each one does
 
 | KIO | Capabilities | What it really does |

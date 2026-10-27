@@ -1978,3 +1978,6 @@ pre.output.bad { color: var(--bad); }
 .json-key:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
 .json-key.plain { cursor: default; }
 .json-value { color: var(--muted); }
+
+/* A card answered by a stand-in from kio-mocks/: worth knowing at a glance. */
+.kind-tag.stand-in { background: var(--warn-bg); color: var(--warn); }
