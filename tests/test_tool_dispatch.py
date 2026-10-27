@@ -27,7 +27,12 @@ from dispatch.agent_registry import (
     load_agent_registry,
 )
 from dispatch.agent_transport import AgentTransportError
-from dispatch.tool_transport import CliToolTransport, HttpToolTransport, render
+from dispatch.tool_transport import (
+    CliToolTransport,
+    HttpToolTransport,
+    decode_output,
+    render,
+)
 from dispatch.transport_factory import build_transport
 from dispatch.workflow_executor import STATUS_ERROR, STATUS_OK, execute_workflow
 from dispatch.workflow_planner import ExecutionMessage, parse_plan, route_plan
@@ -114,6 +119,30 @@ def test_a_command_that_succeeds_becomes_an_ok_step() -> None:
     assert result.results[0].status == STATUS_OK
     assert result.results[0].output is not None
     assert result.results[0].output["stdout"] == "done"
+
+
+def test_a_command_printing_utf8_is_read_as_utf8() -> None:
+    # Git writes commit messages in UTF-8 whatever the console's code page;
+    # read as the code page, every dash became mojibake.
+    assert decode_output("feat: start — and finish".encode()) == (
+        "feat: start — and finish"
+    )
+
+
+def test_a_command_printing_the_code_page_is_still_read() -> None:
+    # "şçğ" in Windows-1254 is not valid UTF-8, so the fallback decides.
+    import locale
+
+    text = "Çıktı: şçğ"
+    encoded = text.encode(locale.getpreferredencoding(False), errors="replace")
+
+    assert decode_output(encoded) == encoded.decode(
+        locale.getpreferredencoding(False), errors="replace"
+    )
+
+
+def test_output_that_is_no_encoding_at_all_is_still_returned() -> None:
+    assert decode_output(bytes([0xFF, 0xFE]) + b" broken").endswith("broken")
 
 
 def test_a_command_printing_json_reports_its_own_verdict() -> None:

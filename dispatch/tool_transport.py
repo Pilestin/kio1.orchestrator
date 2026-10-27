@@ -12,6 +12,7 @@ answers is turned back into the reply shape the executor already reads, so
 """
 
 import json
+import locale
 import logging
 import os
 import re
@@ -222,6 +223,30 @@ def protocol_reply(
         "output": output if output is not None else {},
         "error": error,
     }
+
+
+def decode_output(data: bytes | None) -> str:
+    """Read what a program printed, whichever encoding it printed in.
+
+    Git and most modern tools write UTF-8 whatever the system says; a Python
+    script or a Windows tool writes the console's code page. Reading all of
+    it as the code page turned every "—" in a commit message into "â€"", so
+    UTF-8 is tried first — text in a code page is almost never valid UTF-8 —
+    and the system's encoding is the fallback.
+
+    Args:
+        data: The captured bytes, or None when nothing was captured.
+
+    Returns:
+        The text, with anything undecodable replaced rather than raised.
+    """
+    if not data:
+        return ""
+
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode(locale.getpreferredencoding(False), errors="replace")
 
 
 def _clip(text: str) -> str:
@@ -482,7 +507,6 @@ class CliToolTransport:
                 cwd=spec.cwd or None,
                 env=environment,
                 capture_output=True,
-                text=True,
                 timeout=timeout,
                 shell=False,
                 check=False,
@@ -506,8 +530,8 @@ class CliToolTransport:
                 f"{agent.agent_id} could not run {command[0]!r}: {error}"
             ) from error
 
-        stdout = completed.stdout or ""
-        stderr = completed.stderr or ""
+        stdout = decode_output(completed.stdout)
+        stderr = decode_output(completed.stderr)
 
         if completed.returncode != 0:
             logger.info(
