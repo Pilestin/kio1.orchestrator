@@ -1,0 +1,176 @@
+"""KIO1 against the stand-in KIOs in kio-mocks/, over real HTTP.
+
+The stand-ins are only worth having if KIO1 cannot tell them from the real
+services. So this drives them with KIO1's own executor and transports, not
+with calls of their own: a plan of UC-UC1-03 — KIO11 runs the tests, KIO2
+localises from what KIO11 reported, KIO7 fixes from what KIO2 found — goes
+through `execute_workflow`, results passed on as `data.upstream`; and a job
+KIO is polled by KIO1's `KioJobTransport` exactly as KIO9 is.
+
+kio-mocks imports nothing from KIO1; only this test reaches the other way.
+"""
+
+import shutil
+import sys
+import threading
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from core.config_loader import DispatchConfig
+from dispatch.agent_registry import load_agent_registry
+from dispatch.transport_factory import build_transport
+from dispatch.workflow_executor import STATUS_OK, execute_workflow
+from dispatch.workflow_planner import parse_plan
+
+MOCKS = Path(__file__).resolve().parents[1] / "kio-mocks"
+sys.path.insert(0, str(MOCKS))
+
+from kio_mocks.protocol import Capability, Kio, serve
+
+
+def start(kio: Kio) -> tuple[Any, str]:
+    server = serve(kio, "127.0.0.1", 0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}"
+
+
+@pytest.fixture
+def fleet() -> Iterator[dict[str, str]]:
+    from kio_mocks.kio2 import KIO as KIO2
+    from kio_mocks.kio7 import KIO as KIO7
+    from kio_mocks.kio11 import KIO as KIO11
+
+    running = {kio.kio_id: start(kio) for kio in (KIO2, KIO7, KIO11)}
+    yield {kio_id: address for kio_id, (_, address) in running.items()}
+
+    for server, _ in running.values():
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def project(tmp_path: Path) -> Path:
+    copy = tmp_path / "shop-project"
+    shutil.copytree(MOCKS / "sample", copy)
+    return copy
+
+
+def test_uc1_03_runs_through_kio1s_own_executor(
+    fleet: dict[str, str], project: Path
+) -> None:
+    registry = load_agent_registry(
+        {
+            "KIO11": {"endpoint": fleet["KIO11"], "capabilities": ["test_automation"]},
+            "KIO2": {"endpoint": fleet["KIO2"], "capabilities": ["diagnosis"]},
+            "KIO7": {"endpoint": fleet["KIO7"], "capabilities": ["code_generation"]},
+        }
+    )
+    plan = parse_plan(
+        {
+            "workflow_id": "wf-uc1-03",
+            "execution_mode": "sequential",
+            "steps": [
+                {
+                    "step_id": "s1",
+                    "agent_id": "KIO11",
+                    "capability": "test_automation",
+                    "task": "Run the tests",
+                },
+                {
+                    "step_id": "s2",
+                    "agent_id": "KIO2",
+                    "capability": "diagnosis",
+                    "task": "Localise the failure",
+                    "depends_on": ["s1"],
+                },
+                {
+                    "step_id": "s3",
+                    "agent_id": "KIO7",
+                    "capability": "code_generation",
+                    "task": "Propose a fix",
+                    "depends_on": ["s2"],
+                },
+            ],
+        }
+    )
+
+    result = execute_workflow(
+        plan,
+        registry,
+        build_transport(DispatchConfig(enabled=True, registry=registry)),
+        timeout=120,
+        max_parallel_steps=1,
+        workspace_data={"repository": {"path": str(project)}},
+    )
+
+    tests, diagnosis, fix = result.results
+    assert [step.status for step in result.results] == [STATUS_OK] * 3
+    assert tests.verdict == "defect"
+    assert diagnosis.output is not None and diagnosis.output["fault"]["line"] == 25
+    assert fix.output is not None and fix.output["verified"]["failed"] == []
+    assert fix.verdict == "clean"
+
+
+def slow_review(request: Any) -> dict[str, Any]:
+    return {"summary": f"Reviewed: {request.task}", "gate": "pass"}
+
+
+def test_a_job_kio_is_polled_by_kio1_as_kio9_is() -> None:
+    server, address = start(
+        Kio(
+            kio_id="KIO9",
+            title="A reviewer that takes its time",
+            description="Reviews.",
+            capabilities=[Capability("compliance_review", "Reviews.", slow_review)],
+            jobs=True,
+            job_delay=1.0,
+        )
+    )
+    registry = load_agent_registry(
+        {
+            "KIO9": {
+                "endpoint": address,
+                "path": "/jobs",
+                "protocol": "kio1-jobs",
+                "poll": {"path": "/jobs/{job_id}", "interval_s": 0.2, "timeout_s": 30},
+                "capabilities": ["compliance_review"],
+            }
+        }
+    )
+    plan = parse_plan(
+        {
+            "workflow_id": "wf-job",
+            "execution_mode": "sequential",
+            "steps": [
+                {
+                    "step_id": "s1",
+                    "agent_id": "KIO9",
+                    "capability": "compliance_review",
+                    "task": "Review the report",
+                }
+            ],
+        }
+    )
+
+    try:
+        result = execute_workflow(
+            plan,
+            registry,
+            build_transport(DispatchConfig(enabled=True, registry=registry)),
+            timeout=60,
+            max_parallel_steps=1,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    step = result.results[0]
+    assert step.status == STATUS_OK
+    assert (
+        step.output is not None
+        and step.output["summary"] == "Reviewed: Review the report"
+    )
+    assert step.verdict == "clean"  # gate: pass

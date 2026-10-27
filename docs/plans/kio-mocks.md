@@ -1,6 +1,6 @@
 # Plan — Göreve uygun çalışan sahte KIO'lar
 
-> Durum: **onaylandı, uygulanıyor** · Hazırlanma: 2026-10-28
+> Durum: **1–2. adımlar bitti (KIO2, KIO7, KIO10, KIO11)** · Hazırlanma: 2026-10-28
 > Dayanak: DoA Annex 1 Part B (§1.1, KIO tanımları) ve **D2.6** (§4.1 KIO
 > gereksinimleri, §5.2–5.3 use case akışları). İkisi çeliştiğinde D2.6 geçerli:
 > **KIO2 hata düzeltmez, yerini bulur**; düzeltmeyi UC-UC1-03'te KIO7 önerir.
@@ -84,13 +84,20 @@ Her adım tek commit; testler geçer; KIO1 ile canlı denenir.
 
 | # | İş | Kabul |
 |---|---|---|
-| 1 | İskelet: protokol, iş arayüzü, çalışma klasörü, filo; uygunluk testleri | 12 KIO ayağa kalkar, KIO1 hepsini "ready" görür; bilinmeyen yetenek açık hatayla döner |
-| 2 | UC-UC1-03 zinciri: KIO11 (test, fuzz), KIO2 (iz, dilim, yer bulma), KIO7 (anlama, düzeltme önerisi), KIO10 (enerji) | Gerçek bir hatalı fonksiyonda KIO2 doğru dosya:satırı verir, KIO7 yamayı önerir, KIO11 düzeltmeden sonra yeşil der |
+| 1 ✅ | İskelet: protokol, iş arayüzü, çalışma klasörü, filo; uygunluk testleri | 12 KIO ayağa kalkar, KIO1 hepsini "ready" görür; bilinmeyen yetenek açık hatayla döner |
+| 2 ✅ | UC-UC1-03 zinciri: KIO11 (test, fuzz), KIO2 (iz, dilim, yer bulma), KIO7 (anlama, düzeltme önerisi), KIO10 (enerji) | Gerçek bir hatalı fonksiyonda KIO2 doğru dosya:satırı verir, KIO7 yamayı önerir, KIO11 düzeltmeden sonra yeşil der |
 | 3 | UC-UC1-01/02: KIO3, KIO4, KIO7 (üretim), KIO6 (uyum) | Bir özellik isteği gereksinim → mimari → iskelet → uyum zincirinden geçer |
 | 4 | Güvenlik ve uyum: KIO12, KIO9 (iş arayüzü) | KIO9 `block` dediğinde politika kapısı dağıtımı durdurur |
 | 5 | KIO8, KIO5, KIO6 (veri), KIO10 (TinyML), KIO13 | UC-UC1-04 uçtan uca; KIO5'in ürettiğini KIO6 doğrular |
 | 6 | İsteğe bağlı model | Model açıkken KIO3/KIO4/KIO7/KIO13 metni zenginleşir; kapalıyken her şey çalışır |
 | 7 | KIO1 tarafı: `start.py --demo`, konsolda "demo" etiketi, belgeler | Temiz kurulumda tek komutla 12 KIO |
+
+**Canlı (2026-10-28, openrouter/free):** "Testleri çalıştır, başarısız olan testin
+hatasının yerini bul, bir düzeltme öner ve enerji etkisini ölç" → KIO11 (4/5,
+`shop/pricing.py:25`) → KIO2 (`total_quantity = 0`, `items = []`) → KIO7 (koruma,
+kopyada 5/5) → KIO10 (−%20 J), 61 sn. Not: KIO1'in kendi `Pytest` komut agent'ı
+açıkken planlayıcı onu seçti ve KIO1 deposunun testlerini çalıştırdı; demo
+yapılandırmasında (7. adım) kapalı olmalı.
 
 `tools/dummy_agent.py`, KIO1'in kendi protokol testlerinde kullanıldığı için
 kalır. `examples/uc1/agents.py`'nin gerçek iş mantığı buraya taşınır.

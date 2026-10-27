@@ -151,7 +151,12 @@ class Workspace:
         return decode(path.read_bytes()[:max_bytes])
 
     def run(
-        self, command: list[str], *, timeout: float = 40.0, cwd: Path | None = None
+        self,
+        command: list[str],
+        *,
+        timeout: float = 40.0,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
     ) -> Completed:
         """Run a command in the workspace, bounded, and say what it did."""
         root = cwd or self.require()
@@ -159,41 +164,85 @@ class Workspace:
         before = _children_cpu()
 
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 cwd=root,
-                capture_output=True,
-                timeout=timeout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 shell=False,
-                check=False,
                 env={
                     **os.environ,
                     "PYTHONIOENCODING": "utf-8",
                     "PYTHONDONTWRITEBYTECODE": "1",
+                    **(env or {}),
                 },
             )
         except FileNotFoundError as error:
             raise KioError(
                 f"{command[0]!r} is not installed where this service runs."
             ) from error
+
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as error:
+            process.kill()
+            process.communicate()
             raise KioError(
                 f"{' '.join(command)} did not finish within {timeout:g}s."
             ) from error
 
+        # Per process where the system says (Windows); otherwise what all
+        # finished children used meanwhile, which is this one when alone.
+        cpu = _process_cpu(process)
+        if cpu is None:
+            cpu = max(0.0, _children_cpu() - before)
+
         return Completed(
             command=command,
-            returncode=completed.returncode,
-            stdout=decode(completed.stdout),
-            stderr=decode(completed.stderr),
+            returncode=process.returncode,
+            stdout=decode(stdout),
+            stderr=decode(stderr),
             seconds=round(time.perf_counter() - started, 3),
-            cpu_seconds=round(max(0.0, _children_cpu() - before), 3),
+            cpu_seconds=round(cpu, 3),
         )
 
 
 def python() -> str:
     """The interpreter to run project code with: the one running this service."""
     return sys.executable
+
+
+def _process_cpu(process: subprocess.Popen[bytes]) -> float | None:
+    """A finished process's own CPU seconds, on Windows, which keeps them.
+
+    `os.times()` reports no child CPU time on Windows, so without this every
+    measurement there would fall back to wall time — startup included.
+    """
+    if os.name != "nt":
+        return None
+
+    import ctypes
+    from ctypes import wintypes
+
+    handle = getattr(process, "_handle", None)
+    if handle is None:
+        return None
+
+    creation, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+    ok = ctypes.windll.kernel32.GetProcessTimes(  # type: ignore[attr-defined]
+        wintypes.HANDLE(int(handle)),
+        ctypes.byref(creation),
+        ctypes.byref(exited),
+        ctypes.byref(kernel),
+        ctypes.byref(user),
+    )
+    if not ok:
+        return None
+
+    def seconds(value: wintypes.FILETIME) -> float:
+        return ((value.dwHighDateTime << 32) + value.dwLowDateTime) / 10_000_000
+
+    return seconds(kernel) + seconds(user)
 
 
 def _children_cpu() -> float:
