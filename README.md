@@ -1,6 +1,14 @@
 # KIO1: Orchestrator
 
+
+
 A terminal application that turns software-development requests into structured JSON workflow plans.
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=-p7JMi4_iGg ">
+    <img width="1351" height="763" alt="image" src="https://github.com/user-attachments/assets/73af5be9-f67a-46c2-b1e1-4e30cf7013d5" />
+  </a>
+</p>
 
 KIO1 supports multiple model providers:
 
