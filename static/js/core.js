@@ -105,10 +105,11 @@ export async function api(path, options) {
   return payload;
 }
 
+/** Colour the dot in the top bar; the word goes in its tooltip. */
 export function setConnection(kind, label) {
-  const chip = $("conn");
-  chip.className = "chip " + kind;
-  chip.textContent = label;
+  $("conn").className = "dot " + kind;
+  $("conn").dataset.label = label;
+  $("status").title = label + ($("status").dataset.detail ? "\n" + $("status").dataset.detail : "");
 }
 
 export function statusChip(value) {

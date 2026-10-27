@@ -61,10 +61,9 @@
   </div>
 
   <nav>
-    <button id="tab-workflows" aria-selected="true" title="Run"><svg class="icon"><use href="#i-run"/></svg><span class="label">Run</span></button>
-    <button id="tab-targets" aria-selected="false" title="Targets"><svg class="icon"><use href="#i-targets"/></svg><span class="label">Targets</span></button>
+    <button id="tab-workflows" aria-selected="true" title="Chat"><svg class="icon"><use href="#i-run"/></svg><span class="label">Chat</span></button>
+    <button id="tab-targets" aria-selected="false" title="Agents"><svg class="icon"><use href="#i-targets"/></svg><span class="label">Agents</span></button>
     <button id="tab-settings" aria-selected="false" title="Settings"><svg class="icon"><use href="#i-settings"/></svg><span class="label">Settings</span></button>
-    <button id="tab-help" aria-selected="false" title="How to use"><svg class="icon"><use href="#i-help"/></svg><span class="label">How to use</span></button>
   </nav>
 
   <div class="foot">
@@ -73,7 +72,6 @@
       <button role="radio" data-theme-choice="system" title="Follow the system" aria-label="Follow the system"><svg class="icon"><use href="#i-system"/></svg></button>
       <button role="radio" data-theme-choice="dark" title="Dark" aria-label="Dark"><svg class="icon"><use href="#i-moon"/></svg></button>
     </div>
-    <button class="rail-link" id="set-token" title="Administration token"><svg class="icon"><use href="#i-key"/></svg><span class="label">Registry token</span></button>
   </div>
 </aside>
 
@@ -81,14 +79,17 @@
 
 <header class="topbar">
   <button class="icon-button chat-only" id="threads-toggle" title="Conversations" aria-label="Conversations"><svg class="icon"><use href="#i-list"/></svg></button>
-  <h1 id="page-title" class="page-title">Run</h1>
+  <h1 id="page-title" class="page-title">Chat</h1>
   <span class="spacer"></span>
-  <span id="planner-chip" class="chip idle" title="Which model writes the plan">planner</span>
-  <span id="conn" class="chip idle">connecting</span>
-  <button class="icon-button chat-only" id="details-toggle" title="Run details" aria-label="Run details" aria-expanded="false"><svg class="icon"><use href="#i-panel"/></svg></button>
-  <button class="palette-button" id="open-palette" title="Commands (Ctrl+K)">
-    <svg class="icon"><use href="#i-search"/></svg><span class="label">Search or jump to…</span><kbd>Ctrl K</kbd>
+  <!-- One dot for "is it working", the model beside it; the rest on hover. -->
+  <button class="status" id="status" title="Connecting…">
+    <span id="conn" class="dot idle"></span><span id="planner-chip" class="status-model"></span>
   </button>
+  <button class="icon-button chat-only" id="details-toggle" title="Run details" aria-label="Run details" aria-expanded="false"><svg class="icon"><use href="#i-panel"/></svg></button>
+  <button class="palette-button" id="open-palette" title="Search or jump to (Ctrl+K)" aria-label="Search or jump to">
+    <svg class="icon"><use href="#i-search"/></svg><kbd>Ctrl K</kbd>
+  </button>
+  <button class="icon-button" id="tab-help" aria-selected="false" title="How to use" aria-label="How to use"><svg class="icon"><use href="#i-help"/></svg></button>
 </header>
 
 <main>
@@ -106,10 +107,10 @@
             <svg class="icon big"><use href="#i-sparkle"/></svg>
             <p><strong>What should be done?</strong></p>
             <div class="examples" id="run-examples" aria-label="Examples">
-              <button class="example" data-example="Show me the recent commit history of this repository and which python version is installed.">Commits &amp; Python version</button>
-              <button class="example" data-example="Run the policy gate tests and report what failed.">Run the tests</button>
-              <button class="example" data-example="What is the current weather at latitude 41.01, longitude 28.97 (Istanbul)?">Weather in Istanbul</button>
-              <button class="example" data-example="There is a null pointer exception in the payment module. Diagnose it, fix it, then run the tests.">Diagnose &amp; fix a bug</button>
+              <button class="example" data-needs="repository_history" data-example="Show me the recent commit history of this repository and which python version is installed.">Commits &amp; Python version</button>
+              <button class="example" data-needs="test_execution test_automation" data-example="Run the policy gate tests and report what failed.">Run the tests</button>
+              <button class="example" data-needs="weather_check" data-example="What is the current weather at latitude 41.01, longitude 28.97 (Istanbul)?">Weather in Istanbul</button>
+              <button class="example" data-needs="bug_localization diagnosis" data-example="There is a null pointer exception in the payment module. Diagnose it, fix it, then run the tests.">Diagnose &amp; fix a bug</button>
             </div>
           </div>
 
@@ -156,12 +157,16 @@
     </section>
   </div>
 
-  <!-- ── Targets ─────────────────────────────────────────────────────── -->
+  <!-- ── Agents (targets) ─────────────────────────────────────────────────────── -->
   <div id="view-targets" class="view hidden">
     <div class="view-head">
-      <p class="lede">Everything a plan can be sent to, and whether it is
-        answering. Only enabled, reachable targets are shown to the planner.</p>
-      <button class="action primary" id="add-target"><svg class="icon"><use href="#i-plus"/></svg>Add a target</button>
+      <label class="search">
+        <svg class="icon"><use href="#i-search"/></svg>
+        <input type="search" id="targets-search" placeholder="Find an agent" aria-label="Find an agent">
+      </label>
+      <span id="targets-count" class="muted small"></span>
+      <span class="spacer"></span>
+      <button class="action primary" id="add-target"><svg class="icon"><use href="#i-plus"/></svg>Add an agent</button>
     </div>
 
     <div id="token-warning" class="notice bad hidden"></div>
@@ -169,7 +174,7 @@
 
     <section class="card flush editor hidden" id="editor-panel">
       <div class="card-head">
-        <h2 id="editor-title">Add a target</h2>
+        <h2 id="editor-title">Add an agent</h2>
         <span class="spacer"></span>
         <span id="save-location" class="muted small mono"></span>
         <button class="icon-button" id="close-editor" title="Close" aria-label="Close the editor"><svg class="icon"><use href="#i-close"/></svg></button>
@@ -226,51 +231,16 @@
       </div>
     </section>
 
-    <section class="card flush">
-      <div class="card-head">
-        <h2>Targets</h2>
-        <span id="targets-count" class="muted small"></span>
-        <span class="spacer"></span>
-        <div class="segmented small" id="targets-kind" role="radiogroup" aria-label="Kind">
-          <button data-kind="" aria-checked="true" role="radio">All</button>
-          <button data-kind="kio" aria-checked="false" role="radio">KIO</button>
-          <button data-kind="http" aria-checked="false" role="radio">HTTP</button>
-          <button data-kind="cli" aria-checked="false" role="radio">CLI</button>
-          <button data-kind="mcp" aria-checked="false" role="radio">MCP</button>
-        </div>
-        <label class="search small">
-          <svg class="icon"><use href="#i-search"/></svg>
-          <input type="search" id="targets-search" placeholder="Filter targets" aria-label="Filter targets">
-        </label>
-      </div>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Target</th><th>Status</th>
-              <th>Capabilities</th><th class="wide-only">Recent</th><th class="num">On</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="targets-body"></tbody>
-        </table>
-      </div>
-    </section>
+    <div id="targets-body" class="agent-groups"></div>
   </div>
 
   <!-- ── Settings ────────────────────────────────────────────── -->
   <div id="view-settings" class="view hidden">
-    <p class="lede">Which model writes the plan, how freely it writes it, and
-      which code the agents work on. Saved to
-      <code id="settings-path" class="mono">config.json</code> and in force from
-      the next run — no restart.</p>
-
     <div id="settings-readonly" class="notice warn hidden"></div>
 
+    <!-- The one decision most people make here: where the model runs. -->
     <section class="card">
-      <h2 class="card-title">Planning model</h2>
-      <p class="hint">Choose where the model runs. A larger model follows the
-        planning rules more reliably; if plans come out in the wrong order, try
-        one before changing anything else.</p>
+      <h2 class="card-title">Model</h2>
 
       <div class="provider-cards" id="provider-cards" role="radiogroup" aria-label="Provider"></div>
       <select id="settings-provider-select" class="visually-hidden" tabindex="-1" aria-hidden="true"></select>
@@ -281,8 +251,6 @@
           <span id="settings-key-label">API key</span>
           <input type="password" id="settings-key" autocomplete="off" spellcheck="false"
                  placeholder="paste the key here">
-          <span class="hint">Tried first, then saved to <code>.env</code>, which
-            git ignores. Leave empty to keep the key already set.</span>
         </label>
 
         <label class="field">
@@ -293,74 +261,81 @@
           <datalist id="settings-model-list"></datalist>
           <span class="hint" id="settings-model-note"></span>
         </label>
-
-        <label class="field">
-          Temperature
-          <input type="number" id="settings-temperature" min="0" max="2" step="0.1">
-          <span class="hint">Lower is more repeatable; 0–0.3 suits planning.</span>
-        </label>
-
-        <label class="field">
-          Planning timeout (seconds)
-          <input type="number" id="settings-timeout" min="5" max="3600" step="5">
-          <span class="hint">How long the model gets to answer. On a computer
-            without a GPU a local model needs 60–300.</span>
-        </label>
-      </div>
-
-      <div class="row in-use">
-        <span class="muted small">In use</span>
-        <span id="settings-provider" class="tag"></span>
-        <span class="muted small">System prompt</span>
-        <span id="settings-prompt" class="tag"></span>
       </div>
     </section>
 
-    <section class="card">
-      <h2 class="card-title">Answer model</h2>
-      <div class="grid-2">
-        <label class="field">
-          Provider
-          <select id="review-provider"></select>
-        </label>
+    <!-- Everything else, folded: right for whoever tunes it, noise for the rest. -->
+    <details class="card advanced" id="settings-advanced">
+      <summary><h2 class="card-title">Advanced</h2><span class="muted small">answer model, workspace, timeouts, token</span></summary>
 
-        <label class="field" id="review-model-field">
-          Model
-          <input type="text" id="review-model" list="review-model-list"
-                 class="mono" spellcheck="false" autocomplete="off"
-                 placeholder="type to search">
-          <datalist id="review-model-list"></datalist>
-          <span class="hint" id="review-model-note"></span>
-        </label>
+      <div class="advanced-body">
+        <h3 class="sub-title">Planning</h3>
+        <div class="grid-2">
+          <label class="field">
+            Temperature
+            <input type="number" id="settings-temperature" min="0" max="2" step="0.1">
+            <span class="hint">0–0.3 suits planning.</span>
+          </label>
 
-        <label class="field hidden" id="review-key-field">
-          <span id="review-key-label">API key</span>
-          <input type="password" id="review-key" autocomplete="off" spellcheck="false">
-        </label>
+          <label class="field">
+            Timeout (seconds)
+            <input type="number" id="settings-timeout" min="5" max="3600" step="5">
+            <span class="hint">A local model without a GPU needs 60–300.</span>
+          </label>
+        </div>
+        <div class="row in-use">
+          <span class="muted small">In use</span>
+          <span id="settings-provider" class="tag"></span>
+          <span class="muted small">System prompt</span>
+          <span id="settings-prompt" class="tag"></span>
+          <span class="muted small">Saved to</span>
+          <code id="settings-path" class="tag mono">config.json</code>
+        </div>
+
+        <h3 class="sub-title">Answer model</h3>
+        <div class="grid-2">
+          <label class="field">
+            Provider
+            <select id="review-provider"></select>
+          </label>
+
+          <label class="field" id="review-model-field">
+            Model
+            <input type="text" id="review-model" list="review-model-list"
+                   class="mono" spellcheck="false" autocomplete="off"
+                   placeholder="type to search">
+            <datalist id="review-model-list"></datalist>
+            <span class="hint" id="review-model-note"></span>
+          </label>
+
+          <label class="field hidden" id="review-key-field">
+            <span id="review-key-label">API key</span>
+            <input type="password" id="review-key" autocomplete="off" spellcheck="false">
+          </label>
+        </div>
+
+        <h3 class="sub-title">Workspace</h3>
+        <div class="grid-2">
+          <label class="field">
+            Repository path
+            <input type="text" id="settings-workspace-path" class="mono"
+                   placeholder="/work" spellcheck="false">
+            <span class="hint">As the agents see it.</span>
+          </label>
+
+          <label class="field">
+            Entry point
+            <input type="text" id="settings-workspace-entry" class="mono"
+                   placeholder="main.py" spellcheck="false">
+          </label>
+        </div>
+
+        <h3 class="sub-title">Access</h3>
+        <div class="row">
+          <button class="action" id="set-token"><svg class="icon"><use href="#i-key"/></svg>Administration token</button>
+        </div>
       </div>
-    </section>
-
-    <section class="card">
-      <h2 class="card-title">Workspace</h2>
-      <p class="hint">The code the agents analyse. It travels in every message,
-        and <strong>it is resolved by the agent, not by KIO1</strong>: an agent
-        in its own container needs the path as that container sees it.</p>
-
-      <div class="grid-2">
-        <label class="field">
-          Repository path
-          <input type="text" id="settings-workspace-path" class="mono"
-                 placeholder="/work" spellcheck="false">
-        </label>
-
-        <label class="field">
-          Entry point
-          <input type="text" id="settings-workspace-entry" class="mono"
-                 placeholder="main.py" spellcheck="false">
-          <span class="hint">The runnable script, relative to the path above.</span>
-        </label>
-      </div>
-    </section>
+    </details>
 
     <div class="save-bar">
       <span id="settings-result" class="small"></span>
@@ -373,12 +348,12 @@
   <!-- ── How to use ──────────────────────────────────────────────────── -->
   <div id="view-help" class="view hidden">
     <p class="lede">What a target is, how a request becomes a plan, and what
-      to write on the Targets tab.</p>
+      to write on the Agents page.</p>
 
     <section class="card">
       <h2 class="card-title">How a request becomes a plan</h2>
       <div class="prose">
-        <p>The box on the <strong>Run</strong> tab is not a chat with an agent.
+        <p>The box on the <strong>Chat</strong> page is not a chat with an agent.
           What you write goes to the planning model, once, together with a
           generated catalog of every usable target and the rules in the system
           prompt. The model answers with JSON: a list of steps, each naming a
@@ -399,7 +374,7 @@
           <li><strong>Code you paste into the box is not sent to an
             agent.</strong> It becomes part of the request the model reads. The
             code an agent analyses comes from the workspace on the
-            <strong>Settings</strong> tab, which travels in every message.</li>
+            <strong>Settings</strong> page (under Advanced), which travels in every message.</li>
         </ol>
 
         <p>So a request that names what you want in the catalog&rsquo;s own words
@@ -421,7 +396,7 @@
           two things every target must declare are the capabilities it offers and a
           description the planner can read when deciding whether it fits.</p>
 
-        <p><strong>Adding one is the Targets tab.</strong> Paste a definition, press
+        <p><strong>Adding one is the Agents page.</strong> Paste a definition, press
           Add. It is probed straight away, and by default written into the
           configuration file so it is still there after a restart. You never have to
           edit code.</p>

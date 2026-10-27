@@ -2,6 +2,7 @@
 // agents work.
 
 import { $, api, esc, setConnection, setRows, state, toast } from "./core.js";
+import { showTab } from "./shell.js";
 
 // ── settings ───────────────────────────────────────────────────
 
@@ -176,20 +177,24 @@ $("settings-provider-select").addEventListener("change", async function () {
   }
 });
 
-/** Show which model and workspace the next run will use, on the Run page. */
+/** Show which model and workspace the next run will use, in the top bar. */
 export function renderPlannerSummary(settings) {
-  const chip = $("planner-chip");
-  chip.className = "chip idle";
-  chip.textContent = settings.provider + " · " + settings.model;
+  // Only the model: "openrouter · openrouter/free" said the provider twice.
+  // The provider and the workspace go in the tooltip, where someone
+  // wondering "which model, on what code?" looks.
+  $("planner-chip").textContent = settings.model;
 
-  // The workspace goes in the tooltip: the chat keeps its screen for the
-  // conversation, and this is where someone wondering "on what code?" looks.
   const workspace = settings.workspace;
-  chip.title = "Which model writes the plan" + (workspace.path
-    ? "\nWorkspace: " + workspace.path
-      + (workspace.entry_point ? " · " + workspace.entry_point : "")
-    : "");
+  const status = $("status");
+  status.dataset.detail = "Plans with " + settings.provider + " · " + settings.model
+    + (workspace.path
+      ? "\nWorkspace: " + workspace.path + (workspace.entry_point ? " · " + workspace.entry_point : "")
+      : "");
+  status.title = ($("conn").dataset.label || "connecting") + "\n" + status.dataset.detail;
 }
+
+// The model is what a run most often goes wrong on; one click to change it.
+$("status").addEventListener("click", function () { showTab("settings"); });
 
 export async function loadSettings(options) {
   const quiet = options && options.quiet;
@@ -231,7 +236,11 @@ export async function loadSettings(options) {
       $("settings-save").disabled = !settings.writable;
     }
   } catch (error) {
-    setConnection("bad", error.status === 401 ? "token" : "error");
+    setConnection("bad", error.status === 401 ? "token needed" : "error");
+
+    // The token button lives under Advanced; a missing token should not
+    // send anyone hunting for it.
+    if (error.status === 401) $("settings-advanced").open = true;
 
     if (!quiet) {
       $("settings-result").textContent = error.message;

@@ -5,7 +5,7 @@
 // "now add type hints" is understood. What the model writes and the log lines
 // stay in the run details drawer; the chat keeps only what a person needs.
 
-import { attachmentIds, clearAttachments, uploading } from "./composer.js";
+import { attachmentIds, clearAttachments, readyCapabilities, uploading } from "./composer.js";
 import { $, api, ask, copyText, esc, hooks, relativeTime, setRows, state, statusChip, toast } from "./core.js";
 import { followRun, live, loadSteps, setDrawer, subscribe } from "./live.js";
 import { addressDetail, setAddress, setTitle, showTab } from "./shell.js";
@@ -90,7 +90,10 @@ function shortDuration(ms) {
   return Math.round(ms / 60000) + " min";
 }
 
+/** How long a run took — except one a restart cut off, which was closed when
+ * KIO1 came back, so the gap measures the downtime, not the run. */
 function durationOf(session) {
+  if (/KIO1 stopped while/.test(session.error || "")) return "";
   return shortDuration(new Date(session.updated_at) - new Date(session.created_at));
 }
 
@@ -158,12 +161,35 @@ function recordedSteps(item) {
   });
 }
 
-/** Why a run that failed failed, in one line, or nothing. */
+// What a run's error means for the person reading it, most specific first.
+// The raw text stays one click away: it is what a bug report needs.
+const EXPLAINED = [
+  [/KIO1 stopped while/, "KIO1 was restarted while this was running. Ask again."],
+  [/plan was not approved/i, "The plan was cancelled."],
+  [/question was not answered/i, "The question got no answer, so the request stopped."],
+  [/needs more information|still needs more/i, "KIO1 needed more details. Ask again with them."],
+  [/max_output_tokens|context window/i, "The model ran out of room before it finished. Ask again, or choose another model in Settings."],
+  [/timed? ?out|TimeoutError/i, "The model took too long. A smaller or a cloud model is faster — see Settings."],
+  [/\b401\b|\b403\b|api key|unauthori[sz]ed|authentication/i, "The model provider refused the key. Check it in Settings."],
+  [/connection refused|actively refused|URLError|ConnectError|10061|unreachable/i, "The model could not be reached. Is Ollama running? See Settings."],
+  [/json|plan requires|Workflow plan|A review must/i, "The model did not write a usable plan. Ask again, or try a larger model."],
+];
+
+/** A run's error as one plain sentence, with the raw text folded below it. */
+function explainError(raw) {
+  const found = EXPLAINED.find(function (entry) { return entry[0].test(raw); });
+  const text = found ? found[1] : "Something went wrong.";
+
+  return esc(text)
+    + '<details class="error-detail"><summary>Details</summary><pre class="output">' + esc(raw) + "</pre></details>";
+}
+
+/** Why a run that failed failed, as markup, or nothing. */
 function failureNote(item) {
   const session = item.session;
   const steps = item.steps || [];
 
-  if (session.error) return session.error;
+  if (session.error) return explainError(session.error);
   if (session.status !== "failed") return "";
   if (!steps.length) return "This run failed before any step was recorded.";
 
@@ -184,9 +210,10 @@ function planCard(item, isLast) {
   const phase = active
     ? (following && live.phase) || (session.status === "pending" ? "queued" : "working…")
     : durationOf(session);
-  // A plan of several steps stays open: how the work was split up is the
-  // point of showing it. One step folds away once something newer is below.
-  const open = chat.open.has(id) ? chat.open.get(id) : isLast || steps.length > 1;
+  // Open while it runs, so the steps can be watched, and when it failed, so
+  // the step that broke is in view. A run that went well is one line: the
+  // answer below it is what the reader came for.
+  const open = chat.open.has(id) ? chat.open.get(id) : active || session.status === "failed";
   const numbers = {};
   steps.forEach(function (step, index) { numbers[step.step_id] = index + 1; });
 
@@ -218,7 +245,7 @@ function turnHtml(item, isLast) {
     + '<div class="msg-kio">'
       + '<div class="who"><span class="mark">K1</span>KIO1</div>'
       + planCard(item, isLast)
-      + (note ? '<div class="notice bad small">' + esc(note) + "</div>" : "")
+      + (note ? '<div class="notice bad small">' + note + "</div>" : "")
       + (session.answer ? '<div class="answer-bubble">' + formatAnswer(session.answer) + "</div>" : "")
       + actions
     + "</div>";
@@ -246,6 +273,18 @@ function pendingHtml(request) {
     + '<div class="msg-kio"><div class="who"><span class="mark">K1</span>KIO1</div>'
     + '<div class="plan-card"><div class="summary">' + statusChip("pending")
     + '<span class="small muted">sending…</span></div></div></div>';
+}
+
+/** Offer only the examples something ready can do: a weather example with
+ * no weather agent ends in an error, which is a poor first run. When the
+ * agents cannot be listed, every example stays. */
+async function showUsableExamples() {
+  const ready = await readyCapabilities();
+
+  document.querySelectorAll("#run-examples [data-needs]").forEach(function (button) {
+    const usable = !ready || button.dataset.needs.split(" ").some(function (need) { return ready.has(need); });
+    button.classList.toggle("hidden", !usable);
+  });
 }
 
 /** Draw the turns, each in an element of its own.
@@ -282,6 +321,7 @@ function renderTurns() {
   while (box.children.length > turns.length) box.lastElementChild.remove();
 
   $("chat-empty").classList.toggle("hidden", turns.length > 0);
+  if (!turns.length) showUsableExamples();
   if (state.tab === "workflows") {
     setTitle(chat.detail ? chat.detail.conversation.title || "New chat" : "New chat");
   }

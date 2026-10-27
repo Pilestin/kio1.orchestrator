@@ -1319,6 +1319,11 @@ pre.live-text:empty::before { content: "—"; color: var(--muted); }
 .notice.warn { background: var(--warn-bg); border-color: transparent; color: var(--warn); }
 .notice.bad { background: var(--bad-bg); border-color: transparent; color: var(--bad); }
 
+/* The raw error under a plain sentence: there for a bug report, out of the way. */
+.error-detail { margin-top: 0.35rem; white-space: normal; }
+.error-detail summary { cursor: pointer; color: var(--muted); font-size: 0.78rem; }
+.error-detail pre { margin: 0.35rem 0 0; color: var(--ink); font-size: 0.78rem; }
+
 .prose { max-width: 76ch; }
 .prose p { margin: 0 0 0.7rem; }
 .prose p:last-child { margin-bottom: 0; }
@@ -1530,3 +1535,200 @@ dialog.setup { width: min(40rem, calc(100vw - 2rem)); }
   .card { padding: 1rem; }
   th, td { padding: 0.6rem 0.8rem; }
 }
+
+/* ── the status dot in the top bar ──────────────────────────────────────── */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 16rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: 500 0.82rem/1.2 var(--sans);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.status:hover { background: var(--surface-2); border-color: var(--line); color: var(--ink); }
+.status-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--idle);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-bg); }
+.dot.bad { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-bg); }
+.dot.idle { animation: pulse 1.4s ease-in-out infinite; }
+
+.palette-button { min-width: 0; }
+
+/* ── agents ─────────────────────────────────────────────────────────────── */
+
+.agent-groups { display: flex; flex-direction: column; gap: 1.4rem; }
+.agent-group { display: flex; flex-direction: column; gap: 0.7rem; }
+
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.group-title .count {
+  padding: 0 0.4rem;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font: 600 0.72rem/1.6 var(--mono);
+  letter-spacing: 0;
+}
+
+summary.group-title { cursor: pointer; list-style: none; user-select: none; }
+summary.group-title::-webkit-details-marker { display: none; }
+summary.group-title::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.18s ease;
+}
+details[open] > summary.group-title::before { transform: rotate(45deg); }
+details.agent-group[open] > .agent-grid { animation: enter 0.2s ease; }
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+  gap: 0.8rem;
+}
+
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.2s ease;
+}
+
+.agent-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow); transform: translateY(-1px); }
+.agent-card.is-off { opacity: 0.6; }
+.agent-card.is-off:hover { opacity: 1; }
+
+.agent-head { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.agent-head .target-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-head .kind-tag { flex: none; }
+
+/* Edit and remove appear with the pointer: the card stays calm otherwise. */
+.agent-actions { display: flex; opacity: 0; transition: opacity 0.15s ease; }
+.agent-card:hover .agent-actions, .agent-card:focus-within .agent-actions { opacity: 1; }
+.agent-actions .icon-button { width: 28px; height: 28px; }
+.agent-actions .icon { width: 15px; height: 15px; }
+
+.agent-about {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.agent-card .caps { max-width: none; }
+.cap.more { background: transparent; color: var(--muted); }
+
+.agent-card .reason {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: none) { .agent-actions { opacity: 1; } }
+
+/* ── settings: the folded part ──────────────────────────────────────────── */
+
+.card.advanced { gap: 0; }
+
+.card.advanced > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.card.advanced > summary::-webkit-details-marker { display: none; }
+.card.advanced > summary::after {
+  content: "";
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 0.18s ease;
+}
+.card.advanced[open] > summary::after { transform: rotate(-135deg); }
+
+.advanced-body { display: flex; flex-direction: column; gap: 1rem; padding-top: 1.1rem; }
+.card.advanced[open] .advanced-body { animation: enter 0.2s ease; }
+
+.sub-title {
+  margin: 0.4rem 0 -0.3rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── chat: small movements ──────────────────────────────────────────────── */
+
+/* A new turn rises into place. Only the turn itself moves: it is created
+   once, while what is inside it is rewritten every second as a run goes on,
+   and anything animated in there would flicker with each rewrite. */
+.turn { animation: rise 0.24s ease-out; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.plan-card { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+.plan-card:hover { border-color: var(--line-strong); }
+
+/* A chevron says a folded card opens. */
+.plan-card summary { cursor: pointer; }
+.plan-card summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.18s ease;
+}
+.plan-card[open] summary::after { transform: rotate(45deg); }
+

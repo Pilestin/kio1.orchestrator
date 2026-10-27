@@ -41,6 +41,21 @@ async function loadAgents() {
   composer.agentsAt = Date.now();
 }
 
+/** The capabilities agents that are switched on and answering offer, or
+ * null when the list cannot be read (without the token, say). */
+export async function readyCapabilities() {
+  await loadAgents();
+  if (composer.agentsError) return null;
+
+  const ready = new Set();
+  composer.agents.forEach(function (agent) {
+    if (agent.status === "unreachable") return;
+    (agent.capabilities || []).forEach(function (capability) { ready.add(capability); });
+  });
+
+  return ready;
+}
+
 /** The "@partial" just before the caret, or null when there is none. */
 function mentionAtCaret() {
   const box = $("request");

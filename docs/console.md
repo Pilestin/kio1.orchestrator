@@ -19,8 +19,10 @@ uvicorn app:app --port 8000
 
 | | |
 |---|---|
+| **Menu** | Three pages: **Chat**, **Agents**, **Settings**. *How to use* is the `?` at the top right. |
+| **Status** | The dot at the top right is green when the service answers, red when it does not; beside it, the model that plans. Hover for the provider and the workspace; click to change the model. |
 | **Theme** | Light, dark, or *follow the system*, from the switch at the bottom of the menu. Remembered in this browser and applied before the page paints, so there is no white flash in dark mode. |
-| **Menu** | The button beside the logo collapses it to icons; also remembered. |
+| **Collapse** | The button beside the logo collapses the menu to icons; also remembered. |
 | **Ctrl K** | Opens the command palette: go to a page, start a new chat, open a conversation, add or edit a target, switch theme. Type to filter, arrows to choose, Enter to run. |
 | **Enter** | Sends the message; Shift+Enter starts a new line. |
 | **Addresses** | Each page has its own — `#/run`, `#/targets`, `#/settings`, `#/help` — and an open conversation adds its id, `#/run/<id>`, so a reload or a shared link opens the same place. |
@@ -29,7 +31,9 @@ uvicorn app:app --port 8000
 Confirmations and results appear as dialogs and short messages in the
 corner, rather than as browser pop-ups.
 
-## Run
+## Chat
+
+The page is still addressed as `#/run`.
 
 A chat. The conversations are on the left, newest first; **New chat** starts
 one. On a narrow screen the list is behind the button at the top left.
@@ -41,7 +45,9 @@ its capabilities — and KIO1 dispatches it. Under your message:
 
 - **The plan card** — the run's status, its steps as they start and finish,
   and what it is doing meanwhile ("reading the request · 23 s", "waiting for
-  your approval"). Older cards fold; click one to open it.
+  your approval"). It is open while the run works and when it failed; a
+  run that went well folds to one line ("completed · 8 steps · 90 s"), and a
+  click opens it.
 - **Approve this plan?** or **a question**, when the run needs you. They
   appear below the last message, and the run waits for them.
 - **The answer**, with the targets it came from as small tags.
@@ -50,7 +56,14 @@ A later message continues the conversation: the last three runs go with it,
 so "now add type hints" knows which function. How much goes along, and why,
 is in [review.md](review.md#follow-up-requests).
 
+The examples on an empty chat are only the ones a ready agent can do.
+
 Below an answer: copy it, ask the same again, or open the run details.
+
+A run that failed says why in one plain sentence ("The model took too long.
+A smaller or a cloud model is faster — see Settings."); the error itself is
+under **Details**. A run that was in progress when KIO1 stopped is closed at
+the next start and says so, instead of showing "working…" for ever.
 
 ### Choosing targets and attaching files
 
@@ -112,11 +125,19 @@ disk is what runs: `chat.js` (this page), `live.js` (the drawer and the
 stream), `targets.js`, `settings.js`, `setup.js`, `palette.js`, `shell.js`
 (menu, tabs, theme), and `core.js` (requests, escaping, toasts, dialogs).
 
-## Targets
+## Agents
 
-Everything the [live directory](live-directory.md) knows: each one's kind,
-where it came from, whether it is answering, what it declares, and what it
-has recently done per capability.
+Everything the [live directory](live-directory.md) knows, as cards in three
+groups: **Ready**, and folded below it **Not answering** and **Switched off**.
+A card shows the agent's name, what kind it is (KIO, Web API, Command, Tool
+server, AI), what it does, and up to four of its capabilities. The dot is its
+state; hovering it gives the last check's error, and hovering the name gives
+where it came from and how often each capability worked lately. Edit and
+remove appear when the pointer is on the card; the switch takes it out of the
+catalog without forgetting it. The search box opens every group. The page is
+still addressed as `#/targets`, and the API still says target.
+
+Under the cards, the same information as the directory reports it:
 
 ```text
 Id           Kind  Origin        Status        Capabilities              Recent
@@ -240,9 +261,10 @@ page first.
 
 ## Settings
 
-Three things decide how a run goes that are not targets, and all three used to
-be hand-edits into `config.json`. They are on this tab, they are saved to the
-same file, and they take effect from the next run — nothing restarts.
+Only the model is in view; everything else is folded under **Advanced**
+(answer model, temperature and timeout, workspace, the administration token).
+All of it is saved to `config.json` and takes effect from the next run —
+nothing restarts.
 
 **Planning model.** Which provider and which model write the plan. Pick a
 provider — Ollama on this computer, OpenRouter, OpenAI, or Anthropic — and the
@@ -276,11 +298,12 @@ so an agent knows what code to analyse without being told in prose.
 ## The registry token
 
 The registry endpoints are closed until `KIO1_REGISTRY_TOKEN` is set on the
-server. The console asks for it with the **Registry token** button and keeps
+server. The console asks for it with the **Administration token** button
+(Settings → Advanced, opened by itself when the token is missing) and keeps
 it in `sessionStorage` — this browser tab only, gone when the tab closes,
 never written to disk and never sent anywhere but this service.
 
-Without a token the Targets tab shows the server's own explanation of what to
+Without a token the Agents page shows the server's own explanation of what to
 set. Running workflows does not need one.
 
 ## What it is not

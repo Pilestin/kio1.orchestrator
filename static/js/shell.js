@@ -6,7 +6,7 @@ import { $, TOKEN_KEY, ask, hooks, state, toast, token } from "./core.js";
 // ── shell ───────────────────────────────────────────────────────────────────
 
 const TABS = ["workflows", "targets", "settings", "help"];
-const TITLES = { workflows: "Run", targets: "Targets", settings: "Settings", help: "How to use" };
+const TITLES = { workflows: "Chat", targets: "Agents", settings: "Settings", help: "How to use" };
 // The address names the page, so a reload or a shared link lands where it was.
 // A page may add to it: the chat keeps the open conversation there.
 const ROUTES = { workflows: "run", targets: "targets", settings: "settings", help: "help" };

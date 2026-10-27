@@ -13,68 +13,79 @@ const NEW_ENTRY = `{
 
 // ── targets ─────────────────────────────────────────────────────────────────
 
-export function renderHistory(history) {
-  if (!history || !history.length) return '<span class="muted small">—</span>';
+// What each kind is, in words someone who never read the docs would use.
+const KIND_NAMES = {
+  kio: "KIO", http: "Web API", cli: "Command", mcp: "Tool server", llm: "AI",
+};
 
-  return history.map(function (item) {
-    const mean = item.mean_success_ms === null || item.mean_success_ms === undefined
-      ? "" : " · " + esc(item.mean_success_ms) + " ms";
-    return '<div class="small mono">' + esc(item.capability) + ": "
-      + esc(item.successes) + "/" + esc(item.attempts)
-      + " · rate " + esc(item.rate) + mean + "</div>";
-  }).join("");
+// How many capabilities a card shows before "+3": the rest are in its tooltip.
+const CAPS_SHOWN = 4;
+
+/** How often each capability worked lately, for a tooltip. */
+export function historyLine(history) {
+  return (history || []).map(function (item) {
+    return item.capability + ": " + item.successes + "/" + item.attempts + " worked";
+  }).join("\n");
 }
 
-export function targetRow(agent) {
-  const caps = (agent.capabilities || [])
-    .map(function (c) { return '<span class="cap">' + esc(c) + "</span>"; }).join("");
+/** "No answer from 127.0.0.1:8104" rather than the operating system's whole
+ * sentence, which is in the tooltip for whoever needs it. */
+export function noAnswer(error) {
+  const address = /https?:\/\/([^/\s]+)/.exec(error);
+  return address ? "No answer from " + address[1] : "Not answering";
+}
+
+export function agentCard(agent) {
   const id = esc(agent.agent_id);
   const off = agent.enabled === false;
+  const down = !off && agent.status === "unreachable";
+  const caps = agent.capabilities || [];
+  const dot = off ? "idle" : down ? "bad" : agent.last_error ? "warn" : "ok";
+  const status = off ? "switched off" : agent.status + (agent.last_error ? " — " + agent.last_error : "");
+  const about = [agent.origin ? "From " + agent.origin : "", historyLine(agent.history)]
+    .filter(Boolean).join("\n");
 
-  return '<tr class="' + (off ? "is-off" : "") + '">'
-    + '<td class="target-cell"><span class="target-name">' + id + "</span>"
+  return '<article class="agent-card' + (off ? " is-off" : "") + '">'
+    + '<div class="agent-head">'
+      + '<span class="dot ' + dot + '" title="' + esc(status) + '"></span>'
+      + '<span class="target-name" title="' + esc(about) + '">' + id + "</span>"
       + (agent.approval
         ? '<svg class="icon lock" aria-label="Asks before running"><title>Asks before running</title>'
           + '<use href="#i-lock"/></svg>' : "")
-      + '<span class="kind-tag ' + esc(agent.kind) + '">' + esc(agent.kind) + "</span>"
-      + '<span class="target-origin muted small" title="Where this target came from">'
-      + esc(agent.origin) + "</span>"
-      + (agent.description ? '<div class="muted small description">' + esc(agent.description) + "</div>" : "")
-    + "</td>"
-    + "<td>" + (off ? statusChip("disabled") : statusChip(agent.status))
-      // An error under a target that is still offered is a warning — one
-      // failed check is not withdrawal — and reads as one.
-      + (!off && agent.last_error
-        ? '<div class="reason' + (agent.status === "unreachable" ? "" : " soft") + '" title="'
-          + esc(agent.last_error) + '">'
-          + (agent.status === "unreachable" ? "" : "Last check failed: ")
-          + esc(agent.last_error) + "</div>"
-        : "")
-    + "</td>"
-    + '<td><div class="caps">' + caps + "</div></td>"
-    + '<td class="wide-only">' + renderHistory(agent.history) + "</td>"
-    + '<td class="toggle"><label class="switch" title="' + (off ? "Enable" : "Disable") + " " + id + '">'
-      + '<input type="checkbox" data-toggle="' + id + '"' + (off ? "" : " checked")
-      + ' aria-label="Use ' + id + '"><span class="track"></span></label></td>'
-    // Icons rather than words: the actions column has to fit a laptop screen
-    // beside the capabilities, and the titles still say what each does.
-    + '<td class="actions">'
-      + '<button class="icon-button" data-edit="' + id + '" title="Edit ' + id
-        + '" aria-label="Edit ' + id + '"><svg class="icon"><use href="#i-edit"/></svg></button>'
-      + '<button class="icon-button danger" data-remove="' + id + '" title="Remove ' + id
-        + '" aria-label="Remove ' + id + '"><svg class="icon"><use href="#i-trash"/></svg></button>'
-    + "</td></tr>";
+      + '<span class="kind-tag ' + esc(agent.kind) + '">' + esc(KIND_NAMES[agent.kind] || agent.kind) + "</span>"
+      + '<span class="spacer"></span>'
+      + '<span class="agent-actions">'
+        + '<button class="icon-button" data-edit="' + id + '" title="Edit ' + id
+          + '" aria-label="Edit ' + id + '"><svg class="icon"><use href="#i-edit"/></svg></button>'
+        + '<button class="icon-button danger" data-remove="' + id + '" title="Remove ' + id
+          + '" aria-label="Remove ' + id + '"><svg class="icon"><use href="#i-trash"/></svg></button>'
+      + "</span>"
+      + '<label class="switch" title="' + (off ? "Switch on" : "Switch off") + '">'
+        + '<input type="checkbox" data-toggle="' + id + '"' + (off ? "" : " checked")
+        + ' aria-label="Use ' + id + '"><span class="track"></span></label>'
+    + "</div>"
+    + (agent.description ? '<p class="agent-about">' + esc(agent.description) + "</p>" : "")
+    + (caps.length
+      ? '<div class="caps" title="' + esc(caps.join(", ")) + '">'
+        + caps.slice(0, CAPS_SHOWN).map(function (c) { return '<span class="cap">' + esc(c) + "</span>"; }).join("")
+        + (caps.length > CAPS_SHOWN ? '<span class="cap more">+' + (caps.length - CAPS_SHOWN) + "</span>" : "")
+        + "</div>"
+      : "")
+    + (down && agent.last_error
+      ? '<p class="reason" title="' + esc(agent.last_error) + '">' + esc(noAnswer(agent.last_error)) + "</p>" : "")
+    + "</article>";
 }
 
 export let lastAgents = [];
-const targetFilter = { text: "", kind: "" };
+const targetFilter = { text: "" };
+// Which folded groups the reader opened, so a refresh does not shut them.
+const openGroups = new Set();
 
-/** The targets the search box and kind filter leave visible. */
+/** The targets the search box leaves visible. */
 export function visibleAgents() {
   const text = targetFilter.text.toLowerCase();
 
   return lastAgents.filter(function (agent) {
-    if (targetFilter.kind && agent.kind !== targetFilter.kind) return false;
     if (!text) return true;
 
     return [agent.agent_id, agent.description, (agent.capabilities || []).join(" ")]
@@ -82,20 +93,37 @@ export function visibleAgents() {
   });
 }
 
+/** One group of cards; the ones nobody needs every day are folded. */
+function agentGroup(key, title, agents, folded) {
+  if (!agents.length) return "";
+
+  const cards = '<div class="agent-grid">' + agents.map(agentCard).join("") + "</div>";
+  const heading = esc(title) + ' <span class="count">' + agents.length + "</span>";
+
+  if (!folded) return '<section class="agent-group"><h2 class="group-title">' + heading + "</h2>" + cards + "</section>";
+
+  // A search opens everything: what was searched for must not hide in a fold.
+  const open = targetFilter.text || openGroups.has(key);
+
+  return '<details class="agent-group" data-group="' + key + '"' + (open ? " open" : "") + ">"
+    + '<summary class="group-title">' + heading + "</summary>" + cards + "</details>";
+}
+
 export function renderTargets() {
   const shown = visibleAgents();
-  const empty = lastAgents.length
-    ? "Nothing matches the filter."
-    : "No targets yet. Use “Add a target” to register one.";
+  const off = shown.filter(function (a) { return a.enabled === false; });
+  const down = shown.filter(function (a) { return a.enabled !== false && a.status === "unreachable"; });
+  const ready = shown.filter(function (a) { return off.indexOf(a) === -1 && down.indexOf(a) === -1; });
 
-  setRows($("targets-body"), shown.map(targetRow).join("")
-    || '<tr><td colspan="6"><div class="empty-state"><svg class="icon"><use href="#i-empty"/></svg>'
-      + esc(empty) + "</div></td></tr>");
+  const html = agentGroup("ready", "Ready", ready, false)
+    + agentGroup("down", "Not answering", down, true)
+    + agentGroup("off", "Switched off", off, true);
 
-  const usable = lastAgents.filter(function (a) {
-    return a.enabled !== false && a.status !== "unreachable";
-  }).length;
-  $("targets-count").textContent = lastAgents.length + " known · " + usable + " usable";
+  setRows($("targets-body"), html || '<div class="empty-state"><svg class="icon"><use href="#i-empty"/></svg>'
+    + esc(lastAgents.length ? "Nothing matches." : "No agents yet. Add one to get started.") + "</div>");
+
+  $("targets-count").textContent = lastAgents.length
+    ? ready.length + " of " + lastAgents.length + " ready" : "";
 }
 
 $("targets-search").addEventListener("input", function () {
@@ -103,16 +131,13 @@ $("targets-search").addEventListener("input", function () {
   renderTargets();
 });
 
-$("targets-kind").addEventListener("click", function (event) {
-  const button = event.target.closest("button[data-kind]");
-  if (!button) return;
+// `toggle` does not bubble, so it is caught on the way down.
+$("targets-body").addEventListener("toggle", function (event) {
+  const group = event.target.dataset && event.target.dataset.group;
+  if (!group || targetFilter.text) return;
 
-  targetFilter.kind = button.dataset.kind;
-  $("targets-kind").querySelectorAll("button").forEach(function (candidate) {
-    candidate.setAttribute("aria-checked", String(candidate === button));
-  });
-  renderTargets();
-});
+  if (event.target.open) openGroups.add(group); else openGroups.delete(group);
+}, true);
 
 export async function loadTargets() {
   const warning = $("token-warning");
@@ -184,7 +209,7 @@ export function closeEditor() {
 
 export function startAdding() {
   state.editing = null;
-  $("editor-title").textContent = "Add a target";
+  $("editor-title").textContent = "Add an agent";
   $("save-entry").textContent = "Add";
   $("cancel-edit").classList.add("hidden");
   $("entry").value = NEW_ENTRY;
@@ -650,10 +675,10 @@ $("to-help").addEventListener("click", function (event) {
 });
 
 hooks.paletteSources.push(function () {
-  return [{ label: "Add a target", hint: "targets", run: function () { showTab("targets"); startAdding(); openEditor(); } }]
+  return [{ label: "Add an agent", hint: "agents", run: function () { showTab("targets"); startAdding(); openEditor(); } }]
     .concat(lastAgents.map(function (agent) {
       return {
-        label: "Edit target " + agent.agent_id,
+        label: "Edit agent " + agent.agent_id,
         hint: agent.kind,
         run: function () { showTab("targets"); startEditing(agent.agent_id); },
       };
