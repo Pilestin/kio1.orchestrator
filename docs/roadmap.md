@@ -110,12 +110,12 @@ Düzen: **sol** sohbetler ve projeler · **orta** sohbet · **sağ** canlı çal
 "Agent Ekle" sihirbazı; her türün kendi formu ve **"Dene"** alanı vardır:
 
 - [x] **LLM agent** — 2026-10-22: `type: llm`; ad, açıklama, talimat, yetenek; isteğe bağlı model. Konsolda form (Agent / JSON). Canlı: şablondan oluşturulan CodeReviewer planlayıcı tarafından seçildi, gerçek hatayı buldu. Bkz. `docs/llm-agents.md`. *(Kalan: agent'ın kendi araç çağırması.)*
-- [ ] **Web API**: URL yapıştır → "Dene" → gelen yanıttan sonuç alanına tıklayarak `result_path` seçilir. **OpenAPI/Swagger içe aktarma**: her endpoint otomatik olarak argüman şemasıyla capability olur.
+- [ ] **Web API** *(kısmen — 2026-10-27: adres + yöntem formu, `{arguments.x}` girdiye dönüşür, Try ile denenir; kalan: yanıttan tıklayarak `result_path`, OpenAPI)*: URL yapıştır → "Dene" → gelen yanıttan sonuç alanına tıklayarak `result_path` seçilir. **OpenAPI/Swagger içe aktarma**: her endpoint otomatik olarak argüman şemasıyla capability olur.
 - [ ] **MCP galerisi**: filesystem, git, fetch, GitHub, SQLite gibi yaygın sunucular tek tıkla eklenir; gereken `npx` ya da `uvx` yoksa nasıl kurulacağı gösterilir.
-- [ ] **Komut / script**: komut, klasör, izin verilen argümanlar; "bu komut dosya değiştirir mi?" onay ayarı.
+- [ ] **Komut / script** *(kısmen — 2026-10-27: tek satır komut formu ve Try; kalan: klasör, onay ayarı)*: komut, klasör, izin verilen argümanlar; "bu komut dosya değiştirir mi?" onay ayarı.
 - [x] **Şablondan başla** — 2026-10-22: üç hazır şablon (kod inceleyici, gereksinim yazarı, dokümantasyon yazarı); dışa aktarma `GET /registry/export`. *(Kalan: tek agent'ı dosya olarak paylaşma/içe alma.)*
 - [ ] **Geliştiriciler için SDK**: `kio1_sdk` ile 10 satırda Python agent'ı yazılır; kendini KIO1'e otomatik kaydeder (manifest + heartbeat).
-- [ ] **Agent test alanı**: tek bir agent'ı plan olmadan, verilen girdiyle doğrudan çalıştırıp çıktıyı görme.
+- [x] **Agent test alanı** — 2026-10-27: "Try" kutusu, `POST /registry/agents/try`; kaydetmeden, plan olmadan tek görev. Canlı: git geçmişi, Open-Meteo, CodeReviewer.
 
 ### Adım 7 — Profesyonelleştirme  `M–L`
 

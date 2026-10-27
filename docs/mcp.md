@@ -183,11 +183,11 @@ stops every server it started.
 
 ## Trying one before you save it
 
-The console's **Test connection** button reports what an MCP entry can do
+The console's **Check connection** button (and **Show its tools** in the Try box) reports what an MCP entry can do
 before it is added:
 
 ```
-Workspace parses as a mcp target offering 14 tools it reported itself
+Workspace (Tool server) offers 14 tools it reported itself.
 Tried: npx -y @modelcontextprotocol/server-filesystem /work
 It answered.
 

@@ -154,26 +154,54 @@ HTTP tool with no `health_url` — nothing was probed, so nothing is claimed.
 
 ### Adding, editing, removing
 
-**Add** takes a definition — the same document an agent serves at
-`/manifest`, or a `dispatch.agents` entry. It is probed straight away and the
-result comes back: `MyAgent → ready`, or `MyAgent → unreachable` with the
-reason.
+**Add an agent** asks first what is being connected, in plain words:
 
-**Edit** puts a target's current definition in the same box. The whole entry
+| Card | Kind | The form asks for |
+|------|------|-------------------|
+| **Instructions** | `llm` | a name, what it does, its instructions |
+| **Web address** | `http` | a name, what it does, the address and method |
+| **Tool server** | `mcp` | a name, and the command that starts it or its address |
+| **Command** | `cli` | a name, what it does, the command as one line |
+
+Each card has examples that fill the form in one click — a code reviewer,
+the Open-Meteo weather API, git history, a filesystem server — so a first
+agent needs nothing to be known. In an address, `{arguments.city}` marks an
+input: the form turns each one into an argument the planner fills, and the
+Try box gets a field for it. The capability is made from the name; **More**
+changes it, and for a web address picks the part of the reply to keep. A
+command is written on one line, as in a terminal, and split into the list
+the entry needs. **Form / JSON** switches to the definition itself, and
+anything else — a KIO service, headers, a body template — starts from
+*paste a JSON definition*.
+
+Saving probes it straight away and the result comes back:
+`MyAgent → ready`, or `MyAgent → unreachable` with the reason.
+
+### Try
+
+The box under the form asks the agent one thing, the way a plan's step
+would — workspace and arguments included — and shows what came back, or
+why it failed. Nothing is saved and nothing is recorded against it, so a
+draft can be tried until it does what it should
+(`POST /registry/agents/try`). For a tool server the box lists the tools it
+reports instead; when the program that starts it (`npx`, `uvx`) is not
+installed, it says where to get it.
+
+**Edit** opens a target in the same form — or as JSON, for a kind the
+form does not show. The whole entry
 is replaced rather than merged, because a merge cannot express *removing* a
 field — dropping a tool's `health_url` would be impossible.
 
 **Remove** takes it out of the directory, and out of the configuration file
 when that is where it came from.
 
-### Test connection
+### Check connection
 
-**Test connection** answers "would this work?" without adding anything. It
+**Check connection** answers "would this work?" without adding anything. It
 reads what is in the box, checks that it parses, and dials the address —
 then reports three things:
 
-- what it understood: `WeatherForecast parses as a http target offering
-  weather_check`,
+- what it understood: `WeatherForecast (Web API) offers weather_check.`,
 - **which address it actually dialled**, and
 - whether that address answered.
 
@@ -198,7 +226,7 @@ An `mcp` entry gets the most out of this button, because probing one is a
 takes, which is the list that becomes the entry's capabilities:
 
 ```
-Workspace parses as a mcp target offering 14 tools it reported itself
+Workspace (Tool server) offers 14 tools it reported itself.
 Tried: npx -y @modelcontextprotocol/server-filesystem /work
 It answered.
 

@@ -685,6 +685,26 @@ def _preview(output: dict[str, Any] | None) -> str | None:
     return f"{text[:_PREVIEW_CHARS]}\n… [{len(text)} chars]"
 
 
+def try_step(
+    message: ExecutionMessage,
+    agent: AgentEndpoint,
+    transport: AgentTransport,
+    *,
+    timeout: float,
+) -> StepResult:
+    """Carry out one message on one target, outside any plan.
+
+    What the console's "Try" box runs: a person checking that an agent does
+    what they think before saving it. No failover — the target being tried is
+    the point — no gates, and nothing is recorded on the scoreboard, so trying
+    a draft cannot make a saved target look worse.
+
+    Returns:
+        The outcome, a failure included rather than raised.
+    """
+    return _attempt_step(message, agent, transport, timeout=timeout)
+
+
 def _attempt_step(
     message: ExecutionMessage,
     agent: AgentEndpoint,

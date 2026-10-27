@@ -1,6 +1,6 @@
 # Plan — Agent eklemeyi kolaylaştırmak ve arayüzü sadeleştirmek
 
-> Durum: **taslak, kararlar bekliyor** · Hazırlanma: 2026-10-27
+> Durum: **1, 3 ve 7. adımlar bitti (2026-10-27)**; 2 (demo filo) ertelendi · Hazırlanma: 2026-10-27
 > Yol haritasında: Adım 6 (kodsuz agent oluşturucu) ve Adım 5'in kalanları.
 
 ## Sorun
@@ -102,13 +102,13 @@ Her adım tek bir commit; testler geçer; arayüz adımları ekran görüntüsü
 
 | # | İş | Boyut | Kabul |
 |---|---|---|---|
-| 1 | **Agent test alanı:** `POST /registry/agents/try` — kaydedilmemiş bir tanımı tek bir görevle plan olmadan çalıştırır; formlarda "Dene" kutusu | M | Dört tür için test; canlı: CodeReviewer şablonu denenir |
+| 1 ✅ | **Agent test alanı:** `POST /registry/agents/try` — kaydedilmemiş bir tanımı tek bir görevle plan olmadan çalıştırır; formlarda "Dene" kutusu | M | Dört tür için test; canlı: CodeReviewer şablonu denenir |
 | 2 | **Demo filo:** `start.py --demo`, kurulumda seçenek, "demo" etiketi | S | Temiz başlangıçta 11 demo agent "ready" |
-| 3 | **Agent ekle sihirbazı (kartlar):** tür seçimi, 3 alan, "Gelişmiş" katlı; JSON modu "Gelişmiş"e taşınır | L | Ekran görüntüleri; mevcut `targets` testleri geçer |
+| 3 ✅ | **Agent ekle sihirbazı (kartlar):** tür seçimi, 3 alan, "Gelişmiş" katlı; JSON modu "Gelişmiş"e taşınır | L | Ekran görüntüleri; mevcut `targets` testleri geçer |
 | 4 | **Web adresi:** URL → örnek çağrı → sonuç alanını tıklayarak seçme; OpenAPI içe aktarma | M | Open-Meteo ve bir OpenAPI örneğiyle canlı |
 | 5 | **Hazır araç galerisi (MCP):** 5 sunucu, `npx`/`uvx` kontrolü | M | Dosya sistemi sunucusu tek tıkla eklenip sohbette kullanılır |
 | 6 | **"Anlat, taslak çıksın":** cümleden tanım taslağı (LLM, JSON düzeltme turuyla) | M | 5 örnek cümleden 4'ü doğru türü seçer |
-| 7 | **Arayüz sadeleştirme** (yukarıdaki 1–6, onaylananlar) | M | Ekran görüntüleri; yeni kullanıcıyla 5 dakikalık deneme |
+| 7 ✅ | **Arayüz sadeleştirme** (yukarıdaki 1–6, onaylananlar) | M | Ekran görüntüleri; yeni kullanıcıyla 5 dakikalık deneme |
 | 8 | **SDK:** `kio1_sdk` — 10 satırda Python agent'ı, kendini kaydeder | M | Örnek agent sohbette seçilir |
 
 Önerilen sıra: 1 → 2 → 7 → 3 → 4 → 5 → 6 → 8. Test alanı her şeyin temeli;

@@ -199,7 +199,6 @@ export async function loadSaveLocation() {
 export function openEditor() {
   $("editor-panel").classList.remove("hidden");
   $("editor-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-  $("entry").focus({ preventScroll: true });
 }
 
 export function closeEditor() {
@@ -216,7 +215,7 @@ export function startAdding() {
   $("editor-result").textContent = "";
   $("probe-result").className = "notice hidden";
   fillAgentForm({});
-  setEditorMode("agent");
+  showKindPicker();
   $("history-row").classList.add("hidden");
 }
 
@@ -265,34 +264,90 @@ $("history-restore").addEventListener("click", async function () {
 
 // ── the agent form ──────────────────────────────────────────────────────────
 //
-// Adding an agent without writing JSON: a name, what it does, and its
-// instructions make an `llm` target, run by the configured model.
+// Adding an agent without writing JSON. The first question is what is being
+// connected, in plain words; the form then asks only what that kind needs,
+// and the JSON it makes is one click away for whoever wants to go further.
 
-const AGENT_TEMPLATES = {
-  reviewer: {
-    agent_id: "CodeReviewer",
-    skill: "code_review",
-    description: "Reviews code for bugs and risky patterns, and explains each finding briefly.",
-    instructions: "You are a careful senior code reviewer. Read the code or diff in the inputs "
-      + "and list concrete problems: bugs, unsafe patterns, missing error handling. For each, "
-      + "give where it is and a one-line fix. If the inputs contain no code, say so.",
-  },
-  requirements: {
-    agent_id: "RequirementsWriter",
-    skill: "requirements_writing",
-    description: "Turns a feature idea into user stories with acceptance criteria.",
-    instructions: "You are a business analyst. Turn the idea in the task into three to six "
-      + "user stories (As a … I want … so that …), each with two or three testable acceptance "
-      + "criteria. Ask nothing; state any assumption you make.",
-  },
-  docs: {
-    agent_id: "DocWriter",
-    skill: "documentation",
-    description: "Writes clear documentation for code or a feature, in the language of the task.",
-    instructions: "You are a technical writer. Write short, clear documentation for what the "
-      + "task describes: what it is for, how to use it, and one example. Write in the language "
-      + "of the task. Use only facts from the task and its inputs.",
-  },
+// The kinds the form can describe. Anything else — a KIO service, an entry
+// with headers or a body template — opens as JSON.
+const FORM_KINDS = ["llm", "http", "mcp", "cli"];
+
+// One click to a working agent, so trying one needs nothing to be known.
+const EXAMPLES = {
+  llm: [
+    {
+      label: "Code reviewer",
+      agent_id: "CodeReviewer",
+      skill: "code_review",
+      description: "Reviews code for bugs and risky patterns, and explains each finding briefly.",
+      instructions: "You are a careful senior code reviewer. Read the code or diff in the inputs "
+        + "and list concrete problems: bugs, unsafe patterns, missing error handling. For each, "
+        + "give where it is and a one-line fix. If the inputs contain no code, say so.",
+      try: "def average(values): return sum(values) / len(values)",
+    },
+    {
+      label: "Requirements writer",
+      agent_id: "RequirementsWriter",
+      skill: "requirements_writing",
+      description: "Turns a feature idea into user stories with acceptance criteria.",
+      instructions: "You are a business analyst. Turn the idea in the task into three to six "
+        + "user stories (As a … I want … so that …), each with two or three testable acceptance "
+        + "criteria. Ask nothing; state any assumption you make.",
+      try: "Customers should be able to save items to a wish list.",
+    },
+    {
+      label: "Documentation writer",
+      agent_id: "DocWriter",
+      skill: "documentation",
+      description: "Writes clear documentation for code or a feature, in the language of the task.",
+      instructions: "You are a technical writer. Write short, clear documentation for what the "
+        + "task describes: what it is for, how to use it, and one example. Write in the language "
+        + "of the task. Use only facts from the task and its inputs.",
+      try: "A function slug(text) that turns 'Code Reviewer!' into 'code_reviewer'.",
+    },
+  ],
+  http: [
+    {
+      label: "Weather (Open-Meteo)",
+      agent_id: "Weather",
+      skill: "weather_check",
+      description: "Current temperature and weather at a latitude and longitude.",
+      url: "https://api.open-meteo.com/v1/forecast?latitude={arguments.latitude}"
+        + "&longitude={arguments.longitude}&current_weather=true",
+      method: "GET",
+      result_path: "current_weather",
+      try: "What is the weather?",
+      args: { latitude: "41.01", longitude: "28.97" },
+    },
+  ],
+  mcp: [
+    { label: "Files", agent_id: "Files", command: "npx -y @modelcontextprotocol/server-filesystem {workspace}" },
+    { label: "Git", agent_id: "Git", command: "uvx mcp-server-git --repository {workspace}" },
+    { label: "Web pages", agent_id: "Fetch", command: "uvx mcp-server-fetch" },
+  ],
+  cli: [
+    {
+      label: "Git history",
+      agent_id: "GitHistory",
+      skill: "repository_history",
+      description: "Reads the recent commit history of this repository.",
+      command: "git log --oneline -20",
+      try: "Show the recent commits",
+    },
+    {
+      label: "Python version",
+      agent_id: "PythonVersion",
+      skill: "python_version_check",
+      description: "Which Python version is installed on this machine.",
+      command: "python --version",
+      try: "Which Python is installed?",
+    },
+  ],
+};
+
+const COMMAND_PLACEHOLDERS = {
+  cli: "git log --oneline -20",
+  mcp: "npx -y @modelcontextprotocol/server-filesystem C:\\work   or   https://…/mcp",
 };
 
 /** "Code Reviewer!" → "code_reviewer": a capability from a name. */
@@ -304,51 +359,182 @@ export function slug(text) {
     .replace(/^_+|_+$/g, "");
 }
 
+/** `git log -n "two words"` → ["git", "log", "-n", "two words"]: a command
+ * as one line, the way people write it, split as a shell would. */
+export function splitCommand(text) {
+  const parts = [];
+  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match;
+
+  while ((match = pattern.exec(String(text || ""))) !== null) {
+    parts.push(match[1] !== undefined ? match[1] : match[2] !== undefined ? match[2] : match[3]);
+  }
+
+  return parts;
+}
+
+/** The reverse: a command list as one line, quoting what has spaces. */
+export function joinCommand(parts) {
+  return (parts || []).map(function (part) {
+    return /\s/.test(part) ? '"' + part + '"' : part;
+  }).join(" ");
+}
+
+/** The inputs an address names: `{arguments.city}` → "city". */
+export function argumentNames(url) {
+  const names = [];
+  const pattern = /\{arguments\.([A-Za-z_][A-Za-z0-9_]*)\}/g;
+  let match;
+
+  while ((match = pattern.exec(String(url || ""))) !== null) {
+    if (names.indexOf(match[1]) === -1) names.push(match[1]);
+  }
+
+  return names;
+}
+
+function workspacePath() {
+  return (state.settings && state.settings.workspace && state.settings.workspace.path) || ".";
+}
+
 export function fillAgentForm(values) {
   $("agent-name").value = values.agent_id || "";
   $("agent-skill").value = values.skill || "";
   $("agent-description").value = values.description || "";
   $("agent-instructions").value = values.instructions || "";
+  $("agent-url").value = values.url || "";
+  $("agent-method").value = values.method || "GET";
+  $("agent-result-path").value = values.result_path || "";
+  $("agent-command").value = String(values.command || "").replace("{workspace}", workspacePath());
   $("agent-name").disabled = Boolean(state.editing);
+  $("try-task").value = values.try || "";
+  renderTryArgs(values.args || {});
+}
+
+/** Show the fields one kind uses, and the examples for it. */
+export function pickKind(kind) {
+  state.agentKind = kind;
+
+  $("kind-picker").classList.add("hidden");
+  $("agent-form").classList.remove("hidden");
+  $("try-box").classList.remove("hidden");
+  $("editor-actions").classList.remove("hidden");
+  $("kind-back").classList.toggle("hidden", Boolean(state.editing));
+
+  document.querySelectorAll("#agent-form [data-for]").forEach(function (field) {
+    field.classList.toggle("hidden", field.dataset.for.split(" ").indexOf(kind) === -1);
+  });
+
+  $("agent-command-label").textContent = kind === "mcp" ? "Command or address" : "Command";
+  $("agent-command").placeholder = COMMAND_PLACEHOLDERS[kind] || "";
+
+  setRows($("agent-templates"), (EXAMPLES[kind] || []).map(function (example, index) {
+    return '<button class="example" data-example-index="' + index + '">' + esc(example.label) + "</button>";
+  }).join(""));
+  $("agent-templates").classList.toggle("hidden", Boolean(state.editing) || !(EXAMPLES[kind] || []).length);
+
+  // An MCP server is asked what it offers; the box lists that instead.
+  $("try-task").classList.toggle("hidden", kind === "mcp");
+  $("try-run").lastChild.textContent = kind === "mcp" ? "Show its tools" : "Try";
+  $("try-result").className = "try-result hidden";
+
+  // A kind the form cannot show is edited as JSON, and only as JSON.
+  $("editor-mode").classList.toggle("hidden", FORM_KINDS.indexOf(kind) === -1);
+  setEditorMode(FORM_KINDS.indexOf(kind) === -1 ? "json" : "agent");
+}
+
+/** Back to the first question. */
+export function showKindPicker() {
+  state.agentKind = "";
+  $("kind-picker").classList.remove("hidden");
+  $("agent-form").classList.add("hidden");
+  $("json-form").classList.add("hidden");
+  $("try-box").classList.add("hidden");
+  $("editor-actions").classList.add("hidden");
+  $("probe-result").className = "notice hidden";
 }
 
 export function setEditorMode(mode) {
   state.editorMode = mode;
-  $("agent-form").classList.toggle("hidden", mode !== "agent");
+  $("agent-form").classList.toggle("json-mode", mode === "json");
   $("json-form").classList.toggle("hidden", mode !== "json");
   $("editor-mode").querySelectorAll("button").forEach(function (button) {
     button.setAttribute("aria-checked", String(button.dataset.mode === mode));
   });
+  renderTryArgs();
 }
 
-/** The `llm` entry the form describes, or an error naming what is missing. */
+/** The entry the form describes, or an error naming what is missing. */
 export function entryFromForm() {
+  const kind = state.agentKind;
   const name = $("agent-name").value.trim();
-  const instructions = $("agent-instructions").value.trim();
+  const description = $("agent-description").value.trim();
 
   if (!name) throw new Error("Give the agent a name.");
   if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(name)) {
     throw new Error("Use letters, digits, - or _ in the name, starting with a letter.");
   }
-  if (!instructions) throw new Error("Write its instructions: what it is and what it does.");
+  if (kind !== "mcp" && !description) {
+    throw new Error("Say in a sentence what it does: that is what the planner reads.");
+  }
 
-  const skill = slug($("agent-skill").value) || slug(name);
   const existing = state.editing
     ? (lastAgents.find(function (item) { return item.agent_id === state.editing; }) || {}).source || {}
     : {};
+  // Fields the form does not show — a model, headers, approval — are kept
+  // from the saved definition rather than dropped by an edit.
+  const entry = Object.assign({}, existing, { agent_id: name, type: kind });
+  const skill = slug($("agent-skill").value) || slug(name);
 
-  // Fields the form does not show — a model, a temperature, approval — are
-  // kept from the saved definition rather than dropped by an edit.
-  return Object.assign({}, existing, {
-    agent_id: name,
-    type: "llm",
-    description: $("agent-description").value.trim(),
-    instructions: instructions,
-    capabilities: [skill],
-  });
+  if (description) entry.description = description;
+
+  if (kind === "llm") {
+    entry.instructions = $("agent-instructions").value.trim();
+    if (!entry.instructions) throw new Error("Write its instructions: what it is and what it does.");
+    entry.capabilities = [skill];
+  } else if (kind === "http") {
+    entry.url = $("agent-url").value.trim();
+    if (!/^https?:\/\//.test(entry.url)) throw new Error("The address starts with http:// or https://.");
+    entry.method = $("agent-method").value;
+    entry.capabilities = [skill];
+
+    // Each {arguments.x} becomes an input the planner fills; one already
+    // described keeps its type and description.
+    const names = argumentNames(entry.url);
+    const known = existing.arguments || {};
+    if (names.length) {
+      entry.arguments = {};
+      names.forEach(function (argName) {
+        entry.arguments[argName] = known[argName] || { type: "string", required: true };
+      });
+    } else {
+      delete entry.arguments;
+    }
+
+    const path = $("agent-result-path").value.trim();
+    if (path) entry.result_path = path.split("."); else delete entry.result_path;
+  } else {
+    const command = $("agent-command").value.trim();
+    if (!command) {
+      throw new Error(kind === "mcp" ? "Write the command that starts it, or its address." : "Write the command to run.");
+    }
+
+    if (kind === "mcp" && /^https?:\/\//.test(command)) {
+      entry.url = command;
+      delete entry.command;
+    } else {
+      entry.command = splitCommand(command);
+      delete entry.url;
+    }
+
+    // A tool server names its own tools; a command does one thing.
+    if (kind === "cli") entry.capabilities = [skill];
+  }
+
+  return entry;
 }
 
-/** In agent mode, write the form into the JSON box the save path reads. */
+/** In form mode, write the form into the JSON box the save path reads. */
 export function syncFormToJson(result) {
   if (state.editorMode !== "agent") return true;
 
@@ -362,13 +548,27 @@ export function syncFormToJson(result) {
   }
 }
 
+$("kind-picker").addEventListener("click", function (event) {
+  const card = event.target.closest("[data-pick]");
+  if (!card) return;
+
+  pickKind(card.dataset.pick);
+  $("agent-name").focus();
+});
+
+$("pick-json").addEventListener("click", function () {
+  pickKind("json");
+  $("entry").focus();
+});
+
+$("kind-back").addEventListener("click", showKindPicker);
+
 $("editor-mode").addEventListener("click", function (event) {
   const button = event.target.closest("button[data-mode]");
   if (!button) return;
 
   // Switching to JSON shows what the form makes, so it can be taken further.
-  if (button.dataset.mode === "json" && state.editorMode === "agent"
-      && $("agent-name").value.trim()) {
+  if (button.dataset.mode === "json" && state.editorMode === "agent" && $("agent-name").value.trim()) {
     syncFormToJson($("editor-result"));
   }
 
@@ -376,11 +576,115 @@ $("editor-mode").addEventListener("click", function (event) {
 });
 
 $("agent-templates").addEventListener("click", function (event) {
-  const button = event.target.closest("[data-template]");
+  const button = event.target.closest("[data-example-index]");
   if (!button) return;
 
-  fillAgentForm(AGENT_TEMPLATES[button.dataset.template] || {});
-  $("agent-instructions").focus();
+  fillAgentForm((EXAMPLES[state.agentKind] || [])[Number(button.dataset.exampleIndex)] || {});
+});
+
+$("agent-url").addEventListener("input", function () { renderTryArgs(); });
+
+// ── trying it ───────────────────────────────────────────────────────────────
+
+/** An input per {arguments.x} in the address, keeping what was typed. */
+export function renderTryArgs(values) {
+  const box = $("try-args");
+  const typed = {};
+
+  box.querySelectorAll("[data-arg]").forEach(function (input) { typed[input.dataset.arg] = input.value; });
+  Object.assign(typed, values || {});
+
+  const names = state.agentKind === "http" && state.editorMode !== "json"
+    ? argumentNames($("agent-url").value) : [];
+
+  setRows(box, names.map(function (argName) {
+    return '<label class="field">' + esc(argName)
+      + '<input type="text" data-arg="' + esc(argName) + '" value="' + esc(typed[argName] || "") + '"></label>';
+  }).join(""));
+  box.classList.toggle("hidden", !names.length);
+}
+
+/** What came back, the way a person reads it: the text when there is one,
+ * the JSON otherwise. */
+function tryResultHtml(result) {
+  const head = statusChip(result.status)
+    + '<span class="small muted">' + esc(result.capability) + " · " + esc(result.duration_ms) + " ms</span>"
+    + (result.verdict ? '<span class="small muted">· ' + esc(result.verdict) + "</span>" : "");
+
+  if (result.status !== "ok") {
+    return '<div class="try-head">' + head + '</div><pre class="output bad">' + esc(result.error || "") + "</pre>";
+  }
+
+  const output = result.output || {};
+  const text = ["answer", "text", "stdout", "summary", "result"]
+    .map(function (key) { return output[key]; })
+    .find(function (value) { return typeof value === "string" && value.trim(); });
+
+  return '<div class="try-head">' + head + "</div>"
+    + '<pre class="output">' + esc(text || JSON.stringify(output, null, 2)) + "</pre>";
+}
+
+export async function runTry() {
+  const box = $("try-result");
+  const button = $("try-run");
+
+  // A tool server's answer to "try" is the list of what it offers.
+  if (state.agentKind === "mcp") {
+    testEntry();
+    return;
+  }
+
+  if (!syncFormToJson(box)) {
+    box.className = "try-result notice bad";
+    return;
+  }
+
+  let entry;
+  try {
+    entry = JSON.parse($("entry").value);
+  } catch (error) {
+    box.className = "try-result notice bad";
+    box.textContent = "That is not valid JSON: " + error.message;
+    return;
+  }
+
+  const task = $("try-task").value.trim();
+  if (!task) {
+    $("try-task").focus();
+    return;
+  }
+
+  const args = {};
+  $("try-args").querySelectorAll("[data-arg]").forEach(function (input) {
+    if (input.value.trim()) args[input.dataset.arg] = input.value.trim();
+  });
+
+  button.disabled = true;
+  box.className = "try-result";
+  box.innerHTML = '<div class="try-head">' + statusChip("running") + '<span class="small muted">asking…</span></div>';
+
+  try {
+    const result = await api("/registry/agents/try", {
+      method: "POST",
+      body: JSON.stringify({
+        entry: entry,
+        agent_id: state.editing || entry.agent_id || "",
+        task: task,
+        arguments: args,
+      }),
+    });
+    box.innerHTML = tryResultHtml(result);
+  } catch (error) {
+    box.className = "try-result notice bad";
+    box.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("try-run").addEventListener("click", runTry);
+$("try-task").addEventListener("keydown", function (event) {
+  if (event.key === "Enter") { event.preventDefault(); runTry(); }
 });
 
 export function startEditing(agentId) {
@@ -412,26 +716,27 @@ export function startEditing(agentId) {
   $("cancel-edit").classList.remove("hidden");
   $("entry").value = JSON.stringify(definition, null, 2);
   $("editor-result").textContent = "";
+
+  const resultPath = Array.isArray(definition.result_path)
+    ? definition.result_path.join(".") : definition.result_path;
+  fillAgentForm({
+    agent_id: agentId,
+    skill: (definition.capabilities || [])[0] || "",
+    description: definition.description || "",
+    instructions: definition.instructions || "",
+    url: agent.kind === "http" ? definition.url || "" : "",
+    method: definition.method || "GET",
+    result_path: resultPath || "",
+    command: definition.command ? joinCommand(definition.command) : definition.url || "",
+  });
+  pickKind(agent.kind);
+
   $("probe-result").className = misnamed ? "notice warn" : "notice hidden";
   $("probe-result").textContent = misnamed
     ? "This was saved with " + misnamed + "'s definition. Check the URL and capabilities before saving."
     : "";
 
   loadHistory(agentId);
-
-  // An LLM agent opens in the form it was made with; anything else in JSON.
-  if (agent.kind === "llm") {
-    fillAgentForm({
-      agent_id: agentId,
-      skill: (definition.capabilities || [])[0] || "",
-      description: definition.description || "",
-      instructions: definition.instructions || "",
-    });
-    setEditorMode("agent");
-  } else {
-    setEditorMode("json");
-  }
-
   openEditor();
 }
 
@@ -588,11 +893,10 @@ export async function testEntry() {
     // readable for every kind of target.
     const offers = result.tools && result.tools.length
       ? result.tools.length + " tools it reported itself"
-      : (result.capabilities.join(", ") || "no capabilities");
+      : (result.capabilities.join(", ") || "nothing yet");
 
     const lines = [
-      result.agent_id + " parses as a " + result.kind + " target offering "
-        + offers,
+      result.agent_id + " (" + (KIND_NAMES[result.kind] || result.kind) + ") offers " + offers + ".",
     ];
 
     if (result.probed) {
@@ -618,6 +922,14 @@ export async function testEntry() {
       panel.className = "notice warn";
     } else {
       lines.push(result.detail);
+      // The usual reason a tool server will not start: what launches it is
+      // not installed. Saying where to get it saves a search.
+      const missing = /could not start '(npx|uvx)'/.exec(result.detail || "");
+      if (missing) {
+        lines.push(missing[1] === "npx"
+          ? "npx comes with Node.js: install it from nodejs.org, then try again."
+          : "uvx comes with uv: install it from docs.astral.sh/uv, then try again.");
+      }
       panel.className = "notice bad";
     }
 
@@ -663,6 +975,8 @@ document.querySelectorAll(".use-sample").forEach(function (button) {
     const sample = document.querySelector('[data-sample="' + button.dataset.for + '"]');
     state.editing = null;
     startAdding();
+    // A sample is JSON, so it opens as JSON.
+    pickKind("json");
     $("entry").value = sample.textContent;
     showTab("targets");
     openEditor();

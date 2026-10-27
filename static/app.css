@@ -1732,3 +1732,72 @@ details.agent-group[open] > .agent-grid { animation: enter 0.2s ease; }
 }
 .plan-card[open] summary::after { transform: rotate(45deg); }
 
+
+/* ── adding an agent ────────────────────────────────────────────────────── */
+
+.kind-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.7rem;
+  animation: enter 0.2s ease;
+}
+
+.kind-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.kind-card:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); box-shadow: var(--shadow); }
+.kind-card:focus-visible { outline: none; box-shadow: var(--ring); }
+.kind-card .icon { width: 22px; height: 22px; color: var(--accent-text); margin-bottom: 0.2rem; }
+.kind-card strong { font-size: 0.95rem; }
+.kind-card span { color: var(--muted); font-size: 0.82rem; line-height: 1.4; }
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.link-button:hover { color: var(--accent-text); text-decoration: underline; }
+.kind-picker .link-button { grid-column: 1 / -1; }
+
+#agent-form { animation: enter 0.2s ease; }
+.form-top { align-items: center; }
+
+/* JSON mode keeps the top row (back, Form/JSON) and hides the fields. */
+#agent-form.json-mode > :not(.form-top) { display: none; }
+
+.more > summary { cursor: pointer; width: max-content; }
+.more[open] > .grid-2 { margin-top: 0.8rem; animation: enter 0.2s ease; }
+
+.try-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.try-result { display: flex; flex-direction: column; gap: 0.5rem; animation: enter 0.2s ease; }
+.try-head { display: flex; align-items: center; gap: 0.5rem; }
+.try-result pre.output { margin: 0; max-height: 18rem; background: var(--surface); }
+pre.output.bad { color: var(--bad); }

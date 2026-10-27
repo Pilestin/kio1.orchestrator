@@ -19,7 +19,7 @@ from functools import lru_cache
 from hmac import compare_digest
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -64,7 +64,11 @@ from dispatch.directory import (
     probe_target,
 )
 from dispatch.discovery import DiscoveryError, ManifestSource, entries_from_manifest
+from dispatch.mcp_client import McpSessionPool
 from dispatch.scoreboard import Scoreboard
+from dispatch.transport_factory import build_transport
+from dispatch.workflow_executor import try_step
+from dispatch.workflow_planner import ExecutionMessage
 from providers.provider_client import describe_provider, load_provider
 from services.session_manager.storage import (
     DATABASE_URL_ENV,
@@ -136,6 +140,18 @@ class ProbeAgentRequest(BaseModel):
 
     entry: dict[str, Any]
     agent_id: str = ""
+
+
+class TryAgentRequest(BaseModel):
+    """A definition, saved or not, and one thing to ask it."""
+
+    entry: dict[str, Any]
+    agent_id: str = ""
+    task: str = Field(min_length=1, max_length=20_000)
+    # Empty takes the target's first capability, which for most is its only one.
+    capability: str = ""
+    # For a target that takes named inputs, such as an HTTP API's `{arguments.x}`.
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpdateAgentRequest(BaseModel):
@@ -1679,6 +1695,105 @@ def probe_agent(
         "probed": address,
         "rehosted_from": as_written if as_written != address else "",
         "tools": _described_tools(endpoint),
+    }
+
+
+@app.post("/registry/agents/try")
+def try_agent(
+    body: TryAgentRequest,
+    request: Request,
+    state: _State = Depends(get_state),
+) -> dict[str, Any]:
+    """Ask a definition to do one thing, without a plan and without saving it.
+
+    "Test connection" says whether something answers; this says whether it
+    does what its author thinks — the question that matters before saving.
+    The step goes out exactly as a plan's would, workspace included, so what
+    works here works in a run.
+
+    Behind the registry token: a `cli` definition runs a program here, and an
+    `http` one makes this service call an address the caller chose.
+
+    Args:
+        body: The definition, what to ask, and with which capability.
+        request: Checked for the registry token.
+        state: For the configuration and the probe settings.
+
+    Returns:
+        The step's outcome: status, how long it took, its output or error.
+
+    Raises:
+        HTTPException: 400 when the definition is malformed or does not
+            offer the capability asked for.
+    """
+    _require_registry_token(request)
+
+    agent_id = body.agent_id or str(body.entry.get("agent_id") or "Draft")
+    entry = {
+        key: value for key, value in body.entry.items() if key not in {"agent_id", "id"}
+    }
+
+    try:
+        endpoint = load_agent_entry(agent_id, rehost_entry(agent_id, entry))
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    # An MCP server names its own tools; until it is asked there is nothing
+    # to call.
+    if endpoint.kind == "mcp" and not endpoint.capabilities:
+        endpoint = probe_target(endpoint, state.directory.health).endpoint
+
+    offered = sorted(endpoint.capabilities)
+    capability = body.capability or (offered[0] if offered else "")
+
+    if not capability or (offered and capability not in offered):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{agent_id} does not offer {capability!r}; it offers "
+                f"{', '.join(offered)}."
+                if capability
+                else f"Say which capability of {agent_id} to try."
+            ),
+        )
+
+    config = state.runner.config
+    data = config.dispatch.workspace.to_data()
+
+    if body.arguments:
+        data["arguments"] = dict(body.arguments)
+
+    message = ExecutionMessage(
+        workflow_id=f"try-{uuid4().hex[:8]}",
+        step_id="try",
+        agent_id=agent_id,
+        capability=capability,
+        endpoint=endpoint.endpoint,
+        task=body.task.strip(),
+        data=data,
+    )
+    # A pool of its own: a draft MCP server must not be left running among
+    # the ones real steps are dispatched through.
+    transport = build_transport(config.dispatch, McpSessionPool(), config)
+
+    try:
+        result = try_step(
+            message, endpoint, transport, timeout=config.dispatch.request_timeout
+        )
+    finally:
+        transport.close()
+
+    return {
+        "agent_id": agent_id,
+        "capability": capability,
+        "capabilities": offered,
+        "status": result.status,
+        "duration_ms": result.duration_ms,
+        "output": result.output,
+        "error": result.error,
+        "verdict": result.verdict,
     }
 
 
