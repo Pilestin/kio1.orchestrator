@@ -852,8 +852,12 @@ def _attempt_step(
         status=STATUS_OK,
         duration_ms=elapsed_ms,
         output=output if isinstance(output, dict) else None,
-        verdict=_verdict_of(output),
-        review_required=_review_required_of(output),
+        # A transport that translates another protocol says what the answer
+        # means beside the output, leaving the agent's own fields as they
+        # are: KIO9's `output.verdict` is a conformance verdict, and what it
+        # means for the step is read from its gate.
+        verdict=_verdict_of(reply) or _verdict_of(output),
+        review_required=_review_required_of(reply) or _review_required_of(output),
     )
 
 

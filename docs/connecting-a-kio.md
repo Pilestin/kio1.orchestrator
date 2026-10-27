@@ -189,17 +189,93 @@ Set `dispatch.transport` to `nats` in KIO1's config to switch. Note that this
 is core NATS request/reply, not JetStream: nothing is persisted, so your
 service must be listening when the message is sent.
 
+## If your work takes longer than one request: the job interface
+
+A KIO that cannot answer inside one HTTP request can speak the KIO1 job
+interface (BITNET §3.5) instead. KIO9 does: a compliance review takes 15–50
+seconds, and it works through one at a time.
+
+```json
+"KIO9": {
+    "endpoint": "https://cloud.erarge.com.tr/ai4sweng/kio9",
+    "path": "/jobs",
+    "protocol": "kio1-jobs",
+    "poll": {"path": "/jobs/{job_id}", "interval_s": 2, "timeout_s": 240},
+    "data": "{data.upstream.s1.data}",
+    "headers": {"Authorization": "Bearer ${KIO9_TOKEN}"},
+    "capabilities": ["compliance_review", "contract_specification"]
+}
+```
+
+What KIO1 does with such an entry:
+
+1. **Posts a job request**, not the execution message: `schema_version`
+   `"1.0"`, `workflow_id`, `step_id`, `capability`, `task`, `data`, and an
+   `idempotency_key`. `agent_id` and `endpoint` are not sent — the URL names
+   the agent.
+2. **Polls** `poll.path` every `interval_s` while the status is `accepted`
+   (or anything else that is not final), until it is `success`,
+   `needs_clarification` or `failure`, or `timeout_s` runs out. That timeout
+   is the entry's own; `dispatch.request_timeout` does not apply.
+3. **Reads the outcome** into the step:
+
+   | Job | Step |
+   |---|---|
+   | `success`, `output.gate` `pass` | ok, verdict `clean` |
+   | `success`, `output.gate` `block` | ok, verdict `defect` |
+   | `success`, `output.gate` `warn` or a value KIO1 does not know | ok, `hitl_required` |
+   | `success` with no `gate` (`contract_specification`) | ok |
+   | `needs_clarification` | ok, verdict `inconclusive`, `hitl_required` |
+   | `failure` | error, naming `failure_class` and the diagnostics message |
+   | timed out, unreachable, refused | error |
+
+   A negative review is a successful step with verdict `defect`, not a failed
+   one. Nothing short of a final `pass` reads as clean. The job's `output`
+   reaches later steps unchanged; the verdict is set beside it, so KIO9's own
+   `output.verdict` (`conformant`, `non_conformant`, …) is kept.
+
+**`data`.** Without it, the step's `data` is sent as it is. KIO9 needs a
+payload in its own protocol's form — a contract reference, the report with its
+`content_hash`, evidence pointers, attestations — which no planner can write.
+So it comes from an earlier step, and `data` names where:
+`"{data.upstream.s1.data}"` takes the `data` object out of what step `s1`
+returned. The KIO9 step must `depends_on` that step; if the placeholder finds
+nothing, the step fails saying so instead of sending the placeholder text.
+
+**Ids.** The interface allows `[A-Za-z0-9._-]`, at most 64 characters. KIO1
+also appends a digest of the request's content to `step_id`. KIO9 answers a
+repeated `workflow_id` + `step_id` with the job it already has, and planners
+reuse workflow ids across runs — so without the digest a second report could be
+answered with the first one's review. With it, a retry of the same step finds
+the same job, and a different request is a new one.
+
+`headers` works on every `kio` entry, job or not; `${NAME}` is read from KIO1's
+environment, and an unset one fails the step before anything is sent. A job
+entry is reached over HTTP even when `dispatch.transport` is `nats`.
+
+Trying it without ERGTECH: UC2's mock answers `accepted` once and then the
+review, from `UC2-portal`:
+
+```bash
+python -m kio_mocks.server --port 8109
+```
+
+and `UC2-portal/docs/kio9-samples/` has a conformant and a defect request
+recorded from the real pipeline.
+
 ## Things worth knowing
 
 - **Timeouts.** KIO1 waits `dispatch.request_timeout` seconds (60 by default)
   and then records the step as failed. Long-running work should either finish
-  inside that window or the timeout should be raised for everyone.
+  inside that window or use the job interface above, whose entry carries its
+  own timeout.
 - **Trace context.** Requests carry a W3C `traceparent` header. Reading it
   puts your spans in the same trace as KIO1's; ignoring it costs you nothing
   except that correlation.
 - **Parallel calls.** In a plan where several steps are independent, KIO1 may
   call you more than once at the same time. Handle concurrent requests.
-- **No retries.** A failed call is reported, not retried.
+- **No retries.** A failed call is reported, not retried. (A job is polled,
+  which is not a retry: the job is submitted once.)
 - **Work that needs an earlier step's output.** If your capability only makes
   sense after another step ran — replaying a recording, comparing two runs —
   say so, so KIO1's planning prompt can require a `depends_on` and hand you the

@@ -359,6 +359,37 @@ def test_result_path_keeps_only_the_part_that_matters(api: str) -> None:
     assert reply["output"] == {"verdict": "defect", "count": 3}
 
 
+def test_a_json_object_written_as_text_at_result_path_is_decoded(api: str) -> None:
+    # Ollama's /api/chat: the model's structured answer arrives as a string.
+    RecordingHandler.body = json.dumps(
+        {
+            "model": "kio12",
+            "message": {
+                "role": "assistant",
+                "content": '\n{"verdict": "defect", "findings": [{"title": "CWE-502"}]}\n',
+            },
+            "done": True,
+        }
+    )
+
+    reply = call_api(
+        http_registry(url=f"{api}/api/chat", result_path=["message", "content"])
+    )
+
+    assert reply["output"] == {"verdict": "defect", "findings": [{"title": "CWE-502"}]}
+
+
+def test_text_at_result_path_that_is_not_a_json_object_stays_text(api: str) -> None:
+    for content in ("All clear, nothing found.", "[1, 2, 3]", '{"verdict": "clean"'):
+        RecordingHandler.body = json.dumps({"message": {"content": content}})
+
+        reply = call_api(
+            http_registry(url=f"{api}/api/chat", result_path=["message", "content"])
+        )
+
+        assert reply["output"] == {"result": content}
+
+
 def test_a_plain_text_response_is_still_usable(api: str) -> None:
     RecordingHandler.body = "everything is fine"
     RecordingHandler.content_type = "text/plain"
@@ -445,6 +476,22 @@ def test_a_cli_command_given_as_one_string_is_rejected() -> None:
 def test_an_http_entry_needs_a_url() -> None:
     with pytest.raises(ValueError, match="url must be a non-empty HTTP"):
         load_agent_registry({"Api": {"type": "http", "capabilities": ["x"]}})
+
+
+def test_an_http_url_placeholder_nothing_fills_is_rejected_with_the_right_spelling() -> None:
+    url = "https://timeapi.io/api/time?latitude={latitude}"
+
+    with pytest.raises(ValueError, match=r"\{arguments\.latitude\}"):
+        load_agent_registry({"TimeLookup": {"type": "http", "url": url}})
+
+
+def test_an_http_url_may_use_arguments_and_message_fields() -> None:
+    url = "https://api.example.org/{capability}?q={task}&lat={arguments.latitude}"
+    registry = load_agent_registry({"Api": {"type": "http", "url": url}})
+    agent = registry.resolve("Api")
+
+    assert agent is not None
+    assert agent.tool.url == url
 
 
 def test_an_unknown_type_is_rejected() -> None:

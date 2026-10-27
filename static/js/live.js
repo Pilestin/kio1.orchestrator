@@ -289,16 +289,101 @@ export function drawerOpen() {
 
 export function setDrawer(open) {
   $("drawer").classList.toggle("open", open);
+  placeDrawer();
   $("details-toggle").setAttribute("aria-expanded", String(open));
   if (open) loadSteps();
 }
+
+// ── beside the chat, or over it ─────────────────────────────────────────────
+
+const DRAWER_WIDTH_KEY = "kio1.drawer.width";
+const DRAWER_MIN = 340;
+const DRAWER_MAX = 1100;
+// Narrower than this and an answer breaks a word per line.
+const CHAT_MIN = 420;
+const DOCK_FROM = 1200;
+
+/** Tell the stylesheet whether the open drawer sits beside the chat or over it.
+ *
+ * Beside it while the chat keeps a readable width, so the drawer hides
+ * nothing. Widened past that — someone reading a long output — it goes over
+ * the chat, as it does on a narrow screen.
+ */
+function placeDrawer() {
+  const root = document.documentElement;
+
+  if (!drawerOpen()) {
+    delete root.dataset.drawer;
+    return;
+  }
+
+  const chatStart = $("threads").getBoundingClientRect().right;
+  const fits = window.innerWidth >= DOCK_FROM
+    && window.innerWidth - chatStart - $("drawer").getBoundingClientRect().width >= CHAT_MIN;
+
+  root.dataset.drawer = fits ? "docked" : "over";
+}
+
+/** Set the drawer's width, between a readable minimum and nearly the window. */
+function setDrawerWidth(width, remember) {
+  const max = Math.max(DRAWER_MIN, Math.min(DRAWER_MAX, window.innerWidth - 48));
+  const clamped = Math.round(Math.min(max, Math.max(DRAWER_MIN, width)));
+
+  document.documentElement.style.setProperty("--drawer-width", clamped + "px");
+  placeDrawer();
+  if (remember) {
+    try { localStorage.setItem(DRAWER_WIDTH_KEY, String(clamped)); } catch { /* storage blocked */ }
+  }
+  return clamped;
+}
+
+window.addEventListener("resize", placeDrawer);
+
+function drawerWidth() {
+  return $("drawer").getBoundingClientRect().width;
+}
+
+try {
+  const saved = Number(localStorage.getItem(DRAWER_WIDTH_KEY));
+  if (saved) setDrawerWidth(saved, false);
+} catch { /* storage blocked: the default width */ }
+
+$("drawer-resize").addEventListener("pointerdown", function (event) {
+  event.preventDefault();
+  const handle = event.currentTarget;
+  // Captured so the drag keeps going when the pointer leaves the thin edge.
+  try { handle.setPointerCapture(event.pointerId); } catch { /* a synthetic event */ }
+  document.documentElement.classList.add("drawer-resizing");
+
+  function move(moved) { setDrawerWidth(window.innerWidth - moved.clientX, false); }
+  function stop() {
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", stop);
+    handle.removeEventListener("pointercancel", stop);
+    document.documentElement.classList.remove("drawer-resizing");
+    setDrawerWidth(drawerWidth(), true);
+  }
+
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+});
+
+// The keyboard way to do the same: arrows widen and narrow it.
+$("drawer-resize").addEventListener("keydown", function (event) {
+  const step = event.shiftKey ? 120 : 40;
+  if (event.key === "ArrowLeft") setDrawerWidth(drawerWidth() + step, true);
+  else if (event.key === "ArrowRight") setDrawerWidth(drawerWidth() - step, true);
+  else return;
+  event.preventDefault();
+});
 
 /** Fill the drawer's step table with what was recorded for the run. */
 export async function loadSteps() {
   if (!drawerOpen()) return;
 
   if (!state.selected) {
-    setRows($("steps-body"), '<tr><td colspan="5" class="muted small">No run yet.</td></tr>');
+    setRows($("steps-body"), '<tr><td colspan="4" class="muted small">No run yet.</td></tr>');
     return;
   }
 
@@ -311,20 +396,24 @@ export async function loadSteps() {
         ? '<details><summary>Output</summary><pre class="output">'
           + esc(JSON.stringify(step.output, null, 2)) + "</pre></details>"
         : "";
-      return "<tr>"
+      const error = step.error ? '<div class="reason">' + esc(step.error) + "</div>" : "";
+      // Error and output go on a row of their own, as wide as the table.
+      const more = error || output
+        ? '<tr class="step-more"><td colspan="4">' + error + output + "</td></tr>"
+        : "";
+
+      return '<tr class="' + (more ? "step-main" : "") + '">'
         + '<td class="mono small">' + esc(step.step_id) + "</td>"
         + '<td><span class="target-name">' + esc(step.agent_id) + "</span>"
           + '<div class="mono small muted">' + esc(step.capability) + "</div></td>"
         + "<td>" + statusChip(step.status) + "</td>"
         + '<td class="num small">' + esc(step.duration_ms) + " ms</td>"
-        + "<td>" + (step.error ? '<div class="reason">' + esc(step.error) + "</div>" : "")
-          + output + "</td>"
-        + "</tr>";
-    }).join("") || '<tr><td colspan="5" class="muted small">No steps recorded yet.</td></tr>');
+        + "</tr>" + more;
+    }).join("") || '<tr><td colspan="4" class="muted small">No steps recorded yet.</td></tr>');
 
     addCopyButtons($("steps-body"));
   } catch (error) {
-    setRows($("steps-body"), '<tr><td colspan="5" class="reason">' + esc(error.message) + "</td></tr>");
+    setRows($("steps-body"), '<tr><td colspan="4" class="reason">' + esc(error.message) + "</td></tr>");
   }
 }
 

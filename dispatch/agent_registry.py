@@ -1,4 +1,5 @@
 import logging
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import urlparse
@@ -33,6 +34,15 @@ ALLOWED_KINDS = frozenset({KIND_KIO, KIND_HTTP, KIND_CLI, KIND_MCP, KIND_LLM})
 _MAX_INSTRUCTIONS = 8000
 
 _ALLOWED_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
+
+# Anything in braces in a URL. Literal braces are not valid in a URL, so every
+# one is meant as a placeholder and can be checked when the entry is saved.
+_URL_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
+
+# The execution-message fields `tool_transport.render` substitutes by name.
+_MESSAGE_FIELDS = frozenset(
+    {"task", "workflow_id", "step_id", "agent_id", "capability", "endpoint", "data"}
+)
 
 
 @dataclass(frozen=True)
@@ -170,6 +180,44 @@ class LlmToolSpec:
     temperature: float | None = None
 
 
+# How a `kio` entry is spoken to. `kio` posts the execution message and reads
+# the reply from the same response. `kio1-jobs` is the KIO1 job interface
+# (BITNET §3.5): the post is acknowledged with a job id, and the result is
+# polled for — what a KIO that takes longer than one HTTP request answers.
+PROTOCOL_KIO = "kio"
+PROTOCOL_KIO1_JOBS = "kio1-jobs"
+ALLOWED_PROTOCOLS = frozenset({PROTOCOL_KIO, PROTOCOL_KIO1_JOBS})
+
+
+@dataclass(frozen=True)
+class KioJobSpec:
+    """How to run a KIO agent that answers with a job rather than a result.
+
+    KIO9 takes 15–40 seconds per review and works one at a time, so its post
+    returns `accepted` and a job id at once, and the review arrives later at
+    the poll path. The step's timeout is this entry's, not the global
+    `dispatch.request_timeout`: a queue behind a slow reviewer is normal, and
+    a global value long enough for it would let every other target hang.
+
+    Attributes:
+        poll_path: Path polled for the job's state, appended to the entry's
+            endpoint, with `{job_id}` where the id goes.
+        interval: Seconds between polls.
+        timeout: Seconds the whole job may take, from the post to a final
+            state.
+        data: What to send as the job request's `data`, with placeholders.
+            A KIO such as KIO9 needs a payload in its own protocol's form
+            that no planner can write — a contract id, a report and its
+            hash — so it comes from an earlier step, typically
+            `"{data.upstream.s1.data}"`. None sends the message's `data`.
+    """
+
+    poll_path: str = "/jobs/{job_id}"
+    interval: float = 2.0
+    timeout: float = 240.0
+    data: Any = None
+
+
 @dataclass(frozen=True)
 class AgentEndpoint:
     """A single target KIO1 is able to dispatch work to.
@@ -204,6 +252,11 @@ class AgentEndpoint:
         requires_approval: Whether a plan that may run this target waits for
             a person to approve it first. For targets that change things — a
             command that writes files, an API that deploys.
+        headers: Extra HTTP headers for a `kio` entry, such as an
+            `Authorization` value read from `${ENV}`. Empty for every other
+            kind, whose headers belong to its tool.
+        jobs: Set when a `kio` entry speaks the KIO1 job interface instead of
+            answering in the same response. None otherwise.
     """
 
     agent_id: str
@@ -216,6 +269,8 @@ class AgentEndpoint:
     tool: HttpToolSpec | CliToolSpec | McpToolSpec | LlmToolSpec | None = None
     enabled: bool = True
     requires_approval: bool = False
+    headers: dict[str, str] = field(default_factory=dict)
+    jobs: KioJobSpec | None = None
 
     @property
     def url(self) -> str:
@@ -407,6 +462,107 @@ def _read_string_map(
 _ARGUMENT_TYPES = frozenset(
     {"string", "number", "integer", "boolean", "array", "object"}
 )
+
+
+def _check_url_placeholders(agent_id: str, url: str) -> None:
+    """Refuse a URL placeholder that nothing would ever substitute.
+
+    An unknown placeholder is sent as it is, so `{latitude}` reaches the API
+    literally and comes back as the API's own validation error, which names
+    the field but not the cause. Caught here, the entry is refused when it is
+    saved, with the spelling that would have worked.
+
+    Args:
+        agent_id: Identifier of the entry, for error messages.
+        url: The configured URL.
+
+    Raises:
+        ValueError: If a placeholder names no execution-message field.
+    """
+    for name in _URL_PLACEHOLDER.findall(url):
+        root = name.split(".", 1)[0]
+
+        if root in _MESSAGE_FIELDS or root == "arguments":
+            continue
+
+        raise ValueError(
+            f"dispatch.agents.{agent_id}.url has the placeholder {{{name}}}, "
+            "which nothing fills in. A value the plan supplies is written "
+            f"{{arguments.{name}}}; the other names are "
+            f"{', '.join(f'{{{field}}}' for field in sorted(_MESSAGE_FIELDS))}."
+        )
+
+
+def _read_job_spec(agent_id: str, agent_data: dict[str, Any]) -> KioJobSpec | None:
+    """Read how a `kio` entry's jobs are polled, when it speaks the job interface.
+
+    The entry says so with `"protocol": "kio1-jobs"`. Its optional `poll`
+    object names the poll path and the timing:
+
+        "poll": {"path": "/jobs/{job_id}", "interval_s": 2, "timeout_s": 240}
+
+    Args:
+        agent_id: Identifier of the entry, for error messages.
+        agent_data: The raw entry object.
+
+    Returns:
+        The job settings, or None for an entry that answers in one response.
+
+    Raises:
+        ValueError: If the protocol is unknown or the poll settings are
+            malformed.
+    """
+    where = f"dispatch.agents.{agent_id}"
+    protocol = agent_data.get("protocol", PROTOCOL_KIO)
+
+    if protocol not in ALLOWED_PROTOCOLS:
+        raise ValueError(
+            f"{where}.protocol must be one of {sorted(ALLOWED_PROTOCOLS)}."
+        )
+
+    if protocol == PROTOCOL_KIO:
+        for name in ("poll", "data"):
+            if name in agent_data:
+                raise ValueError(
+                    f'{where}.{name} applies only with "protocol": '
+                    f'"{PROTOCOL_KIO1_JOBS}".'
+                )
+        return None
+
+    poll = agent_data.get("poll", {})
+    if not isinstance(poll, dict):
+        raise ValueError(f"{where}.poll must be an object.")
+
+    defaults = KioJobSpec()
+    path = poll.get("path", defaults.poll_path)
+    if not isinstance(path, str) or not path.startswith("/") or "{job_id}" not in path:
+        raise ValueError(
+            f"{where}.poll.path must start with '/' and contain {{job_id}}, "
+            "such as '/jobs/{job_id}'."
+        )
+
+    def seconds(name: str, default: float) -> float:
+        value = poll.get(name, default)
+
+        if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+            raise ValueError(
+                f"{where}.poll.{name} must be a positive number of seconds."
+            )
+
+        return float(value)
+
+    interval = seconds("interval_s", defaults.interval)
+    timeout = seconds("timeout_s", defaults.timeout)
+
+    if interval >= timeout:
+        raise ValueError(f"{where}.poll.interval_s must be shorter than timeout_s.")
+
+    return KioJobSpec(
+        poll_path=path,
+        interval=interval,
+        timeout=timeout,
+        data=agent_data.get("data"),
+    )
 
 
 def _read_arguments_schema(agent_id: str, agent_data: dict[str, Any]) -> dict[str, Any]:
@@ -770,6 +926,8 @@ def _read_tool_entry(
                 f"dispatch.agents.{agent_id}.url must be a non-empty HTTP(S) URL."
             )
 
+        _check_url_placeholders(agent_id, url)
+
         method = agent_data.get("method", "POST")
         if not isinstance(method, str) or method.upper() not in _ALLOWED_HTTP_METHODS:
             raise ValueError(
@@ -954,6 +1112,8 @@ def load_agent_registry(
             description=description.strip(),
             enabled=enabled,
             requires_approval=approval,
+            headers=_read_string_map(agent_id, agent_data, "headers"),
+            jobs=_read_job_spec(agent_id, agent_data),
         )
 
     if announce:

@@ -252,6 +252,7 @@
         <div id="json-form" class="stack hidden">
           <p class="hint" id="editor-hint">
             Any kind of agent, as JSON. <a href="#" id="to-help">What can go in here?</a>
+            · <a href="#/help/examples" data-open-examples>Examples</a>
           </p>
           <textarea id="entry" spellcheck="false"></textarea>
         </div>
@@ -401,8 +402,12 @@
 
   <!-- ── How to use ──────────────────────────────────────────────────── -->
   <div id="view-help" class="view hidden">
-    <p class="lede">What a target is, how a request becomes a plan, and what
-      to write on the Agents page.</p>
+   <div id="help-guide" class="help-page">
+    <div class="view-head">
+      <p class="lede">What a target is, how a request becomes a plan, and what
+        to write on the Agents page.</p>
+      <button class="action" data-open-examples>Browse examples</button>
+    </div>
 
     <section class="card">
       <h2 class="card-title">How a request becomes a plan</h2>
@@ -459,6 +464,8 @@
 
     <section class="card">
       <h2 class="card-title">The three kinds</h2>
+      <p class="hint">Ready-made definitions of every kind, to add as they are:
+        <a href="#/help/examples" data-open-examples>Examples</a>.</p>
       <div class="stack">
 
         <div class="kind">
@@ -661,6 +668,35 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
           failing when you press Add.</p>
       </div>
     </section>
+   </div>
+
+   <div id="help-examples" class="help-page hidden">
+    <div class="view-head">
+      <p class="lede">Definitions to add as they are, each tried against the
+        real service. <a href="#/help" id="examples-back">Back to How to use</a></p>
+    </div>
+
+    <section class="card flush">
+      <div class="card-head">
+        <h2>Examples</h2>
+        <span id="examples-count" class="muted small"></span>
+        <span class="spacer"></span>
+        <div class="segmented small" id="examples-kind" role="radiogroup" aria-label="Kind">
+          <button data-kind="" aria-checked="true" role="radio">All</button>
+          <button data-kind="http" aria-checked="false" role="radio">HTTP</button>
+          <button data-kind="cli" aria-checked="false" role="radio">CLI</button>
+          <button data-kind="mcp" aria-checked="false" role="radio">MCP</button>
+          <button data-kind="llm" aria-checked="false" role="radio">Agent</button>
+          <button data-kind="kio" aria-checked="false" role="radio">KIO</button>
+        </div>
+        <label class="search small">
+          <svg class="icon"><use href="#i-search"/></svg>
+          <input type="search" id="examples-search" placeholder="Filter examples" aria-label="Filter examples">
+        </label>
+      </div>
+      <div class="card-body stack" id="examples-list"></div>
+    </section>
+   </div>
 
   </div>
 
@@ -671,6 +707,8 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
 <!-- Transient messages: saved, failed, copied. -->
 <!-- What a run is doing, for whoever wants to look: beside the chat, not in it. -->
 <aside class="drawer" id="drawer" aria-label="Run details">
+  <div class="drawer-resize" id="drawer-resize" role="separator" aria-orientation="vertical"
+    aria-label="Resize the run details" title="Drag to resize" tabindex="0"></div>
   <div class="drawer-head">
     <strong>Run details</strong>
     <span id="live-state" class="chip idle">live</span>
@@ -703,7 +741,7 @@ http://host.docker.internal:11434/ instead (KIO1_AGENT_HOST).</code></pre>
     <div class="scroll">
       <table class="steps">
         <thead>
-          <tr><th>Step</th><th>Target</th><th>Status</th><th class="num">Time</th><th>Detail</th></tr>
+          <tr><th>Step</th><th>Target</th><th>Status</th><th class="num">Time</th></tr>
         </thead>
         <tbody id="steps-body"></tbody>
       </table>

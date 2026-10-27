@@ -904,14 +904,15 @@ export async function removeTarget(agentId) {
 }
 
 document.addEventListener("click", function (event) {
-  const target = event.target;
-  if (!target.getAttribute) return;
+  // `closest`, not the target itself: most of a 30px icon button is its 16px
+  // icon, and a click there lands on the <svg> or <use>, not the button.
+  const target = event.target.closest && event.target.closest("[data-edit], [data-remove]");
+  if (!target) return;
 
   const editId = target.getAttribute("data-edit");
   if (editId) { startEditing(editId); return; }
 
-  const removeId = target.getAttribute("data-remove");
-  if (removeId) removeTarget(removeId);
+  removeTarget(target.getAttribute("data-remove"));
 });
 
 document.addEventListener("change", function (event) {
@@ -1030,16 +1031,22 @@ $("cancel-edit").addEventListener("click", startAdding);
 
 // ── help ────────────────────────────────────────────────────────────────────
 
+/** Open the Add form on the Agents page with a definition already in it.
+ *
+ * As JSON: `startAdding` shows the kind picker, where a definition written
+ * into the hidden JSON box would not be seen at all.
+ */
+export function putInForm(text) {
+  startAdding();
+  pickKind("json");
+  $("entry").value = text;
+  showTab("targets");
+  openEditor();
+}
+
 document.querySelectorAll(".use-sample").forEach(function (button) {
   button.addEventListener("click", function () {
-    const sample = document.querySelector('[data-sample="' + button.dataset.for + '"]');
-    state.editing = null;
-    startAdding();
-    // A sample is JSON, so it opens as JSON.
-    pickKind("json");
-    $("entry").value = sample.textContent;
-    showTab("targets");
-    openEditor();
+    putInForm(document.querySelector('[data-sample="' + button.dataset.for + '"]').textContent);
   });
 });
 

@@ -249,6 +249,30 @@ def decode_output(data: bytes | None) -> str:
         return data.decode(locale.getpreferredencoding(False), errors="replace")
 
 
+def _object_in_text(text: str) -> Any:
+    """Return the JSON object a string holds, or the string unchanged.
+
+    A model served over HTTP (Ollama's ``message.content``, OpenAI's
+    ``choices[0].message.content``) returns its structured answer as text.
+    Without decoding it, a ``verdict`` the model wrote is a few characters
+    inside a string, and nothing downstream can gate on it. Only a whole JSON
+    *object* is decoded: an array, a number or prose stays text, because the
+    step's output is an object and guessing at a wrapper would invent a shape
+    the API never sent.
+    """
+    candidate = text.strip()
+
+    if not candidate.startswith("{"):
+        return text
+
+    try:
+        decoded = json.loads(candidate)
+    except json.JSONDecodeError:
+        return text
+
+    return decoded if isinstance(decoded, dict) else text
+
+
 def _clip(text: str) -> str:
     """Return text bounded to a size worth storing and passing downstream.
 
@@ -434,6 +458,9 @@ class HttpToolTransport:
                     ),
                 }
             decoded = decoded[key]
+
+        if spec.result_path and isinstance(decoded, str):
+            decoded = _object_in_text(decoded)
 
         if isinstance(decoded, dict):
             return decoded

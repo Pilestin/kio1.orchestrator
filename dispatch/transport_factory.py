@@ -15,6 +15,7 @@ from dispatch.agent_transport import (
     AgentTransportError,
     HttpAgentTransport,
 )
+from dispatch.job_transport import KioJobTransport
 from dispatch.llm_transport import LlmTransport
 from dispatch.mcp_client import McpSessionPool
 from dispatch.mcp_transport import McpToolTransport
@@ -23,6 +24,11 @@ from dispatch.tool_transport import CliToolTransport, HttpToolTransport
 from dispatch.workflow_planner import ExecutionMessage
 
 logger = logging.getLogger(__name__)
+
+# The routing key for `kio` entries on the KIO1 job interface. Not a kind of
+# its own: such an entry is a KIO in every other respect — probed at its
+# health path, offered by its capabilities.
+ROUTE_KIO_JOBS = "kio1-jobs"
 
 
 class RoutingTransport:
@@ -75,7 +81,10 @@ class RoutingTransport:
             AgentTransportError: If no transport handles the entry's kind, or
                 the chosen transport failed.
         """
-        transport = self._transports.get(agent.kind)
+        # A KIO on the job interface is reached over HTTP whatever
+        # `dispatch.transport` says: polling a job has no NATS equivalent.
+        route = ROUTE_KIO_JOBS if agent.kind == KIND_KIO and agent.jobs else agent.kind
+        transport = self._transports.get(route)
 
         if transport is None:  # pragma: no cover - kinds are validated on load
             raise AgentTransportError(
@@ -134,6 +143,7 @@ def build_transport(
 
     transports: dict[str, AgentTransport] = {
         KIND_KIO: kio_transport,
+        ROUTE_KIO_JOBS: KioJobTransport(),
         KIND_HTTP: HttpToolTransport(),
         KIND_CLI: CliToolTransport(),
         KIND_MCP: McpToolTransport(

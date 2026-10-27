@@ -7,12 +7,14 @@
 //   js/composer.js  the message box: @Name and attached files
 //   js/live.js      the run details drawer and the event stream
 //   js/targets.js   the Targets page, and the samples on How to use
+//   js/examples.js  How to use → Examples, from static/examples.json
 //   js/settings.js  the Settings page
 //   js/setup.js     first-run setup
 //   js/palette.js   the command palette (Ctrl+K)
 
 import { loadChat } from "./js/chat.js";
 import { $, REFRESH_MS, addCopyButtons, hooks, state } from "./js/core.js";
+import "./js/examples.js";
 import { loadSteps } from "./js/live.js";
 import "./js/palette.js";
 import { loadSettings } from "./js/settings.js";
