@@ -95,15 +95,17 @@ KIO1'in "orkestratör" olarak asıl değeri burada.
 
 Düzen: **sol** sohbetler ve projeler · **orta** sohbet · **sağ** canlı çalıştırma paneli.
 
-- [ ] **Sohbet**: mesaj balonları, Markdown ve kod bloğu görünümü, kopyala düğmesi, akan yanıt (streaming), önceki turlara atıf, düzenleyip yeniden gönderme.
-- [ ] **Plan kartı**: sohbet içinde, adımlar ve agent ikonlarıyla; onay düğmeleri burada.
+- [x] **Sohbet** — 2026-10-27: sohbet listesi, mesaj balonları, Markdown (liste, tablo, kod bloğu ve kopyala düğmesi), önceki turlara atıf, Stop. *(Kalan: cevabın akarak gelmesi, düzenleyip yeniden gönderme.)*
+- [x] **Plan kartı** — 2026-10-27: adımlar numaralı bir zaman çizelgesi olarak; çalışırken açık, bitince tek satır; onay ve soru kutusu sohbette.
 - [ ] **Canlı DAG görünümü**: adımlar kutu, bağımlılıklar ok; durum renkleri (bekliyor, çalışıyor, tamam, hata, atlandı); tıklayınca girdi/çıktı, süre, deneme sayısı.
 - [ ] **Çıktı görüntüleyiciler**: metin, JSON ağacı, kod, dosya listesi, diff, tablo; üretilen dosyalara bağlantı.
-- [ ] **`@agent` ve `/komut`**: `@Pytest testleri çalıştır` belirli bir agent'ı zorlar; `/plan`, `/agents`, `/yeni-agent` kısayolları.
-- [ ] **Dosya ekleme**: sohbete dosya sürükle-bırak; dosya çalışma klasörüne kopyalanır ve adımlara `data` olarak geçer.
-- [ ] **Anlaşılır hatalar**: teknik hata altta katlanmış durur; üstte "Ne oldu, ne yapabilirsiniz" yazar.
+- [ ] **`@agent` ve `/komut`** *(kısmen — `@Agent` var; kalan: `/komut` kısayolları)*: `@Pytest testleri çalıştır` belirli bir agent'ı zorlar; `/plan`, `/agents`, `/yeni-agent` kısayolları.
+- [x] **Dosya ekleme**: sohbete dosya sürükle-bırak; dosya çalışma klasörüne kopyalanır ve adımlara `data` olarak geçer.
+- [x] **Anlaşılır hatalar** — 2026-10-27: teknik hata altta katlanmış durur; üstte "Ne oldu, ne yapabilirsiniz" yazar.
 - [ ] Türkçe/İngilizce arayüz, açık/koyu tema, klavye kısayolları, mobil genişlikte kullanılabilirlik.
 - [ ] Teknik karar: derleme adımı olmayan hafif bir yapı (yerel dosyalardan Preact + htm ya da Alpine.js); internetsiz çalışmaya devam eder, Node.js gerektirmez.
+
+- [x] **Sahte KIO'lar (`kio-mocks/`)** — 2026-10-28: KIO'lar hazır olana kadar yerlerini tutan, D2.6'daki görevlerini küçük ölçekte gerçekten yapan hizmetler. KIO2, KIO7, KIO10, KIO11 hazır; UC-UC1-03 gerçek modelle uçtan uca çalıştı. Plan: [plans/kio-mocks.md](plans/kio-mocks.md).
 
 ### Adım 6 — Kodsuz agent oluşturucu  `L`
 

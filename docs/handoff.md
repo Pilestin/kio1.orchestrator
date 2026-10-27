@@ -20,7 +20,7 @@
 
 ## Bugünkü durum
 
-928 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler).
+1024 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler); bunların bir kısmı `kio-mocks/tests`'ten.
 
 2026-10-27'de eklenenler: açılışta yarım kalan çalışmalar kapatılıyor
 (`EmbeddedSessionClient.close_interrupted`); hedef gerektirmeyen istekler
@@ -33,6 +33,13 @@ tıklayarak `result_path`); cevaplarda Markdown (`static/js/markdown.js`);
 Stop (`core/cancellation.py`, `POST /workflow/{id}/cancel`); adımlar arası
 değer aktarımı `${s1.latitude}` (`dispatch/step_references.py`); komut çıktısı
 önce UTF-8 okunuyor; kurulum diyaloğu sunucunun `needs_setup` kararına göre açılıyor.
+
+2026-10-28: **`kio-mocks/`** — KIO'ların yerini tutan, D2.6'daki görevlerini
+gerçekten yapan sahte hizmetler (KIO1'den bağımsız, yalnızca HTTP). KIO2, KIO7,
+KIO10, KIO11 hazır; sıradaki KIO3/4/6 ([plans/kio-mocks.md](plans/kio-mocks.md)).
+Denemek için `cd kio-mocks && python -m kio_mocks`, çalışma klasörü
+`kio-mocks/sample`. KIO1'in kendi `Pytest` agent'ı açıkken planlayıcı onu
+seçebiliyor; o agent KIO1'in deposunu test ediyor.
 
 | Özellik | Dosyalar | Doküman |
 |---|---|---|

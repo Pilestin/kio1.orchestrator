@@ -2,7 +2,9 @@
 
 
 
-A terminal application that turns software-development requests into structured JSON workflow plans.
+KIO1 turns a software-development request, written in plain language, into a plan; runs
+that plan on the agents that can carry it out; and answers in the language you asked in —
+in a chat in your browser, or from a terminal.
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=-p7JMi4_iGg ">
@@ -15,13 +17,14 @@ KIO1 supports multiple model providers:
 - Ollama
 - OpenAI
 - Anthropic
+- OpenRouter
 
 Providers are loaded dynamically from `<provider>_client.py`, keeping the main application and configuration loader provider-neutral.
 
 ## Requirements
 
 - Python 3.10 or newer
-- An Ollama installation, OpenAI API key, or Anthropic API key
+- An Ollama installation, or an OpenAI, Anthropic or OpenRouter API key
 - Access to the model configured in `config.json`
 - Docker with Docker Compose (optional, for local trace and metric storage)
 
@@ -63,6 +66,13 @@ from `config.example.json` on first run and is not tracked by git. API keys are 
 
 ## Usage
 
+Start it as above and write your request on the **Chat** page. KIO1 shows the plan as it
+builds it, asks when it needs something only you know, and ends with an answer that names
+the agent each fact came from. **Agents** is where you add your own: describe one in a few
+fields and try it before saving.
+
+From a terminal instead:
+
 ```bash
 python3 main.py
 ```
@@ -85,19 +95,21 @@ See the [Observability Guide](docs/observability.md) for configuration, querying
 
 KIO1 sends the steps of a generated plan to whatever carries them out. A target can be a KIO agent following the `KIO1 - KIO10` integration protocol, an ordinary REST API of your own, or a command line tool on this machine. All three are listed under `dispatch.agents` in `config.json`, each with a `type`, and a single plan can mix them.
 
-Only KIO2 exists as a real service today, so most plan steps have nowhere to go and are
-reported as `skipped`. To watch a whole plan execute, start a stand-in for every KIO:
+Most KIOs are not running as services yet. Until they are, `kio-mocks/` stands in for
+them — and each stand-in does its job rather than answering with a canned reply: KIO11 runs
+the tests, KIO2 records the failing one and names the line that broke, KIO7 proposes a fix
+and checks it on a copy, KIO10 measures what the fix costs. They speak the same protocol as
+the real services, so a real KIO takes a stand-in's place by changing an address.
 
 ```bash
-python tools/dummy_fleet.py
+cd kio-mocks && python -m kio_mocks
 ```
 
-Their answers are canned — nothing does real work — but the plan runs end to end, results
-flow between steps, and everything is recorded. A single stub is also available:
+Point KIO1's workspace at `kio-mocks/sample` to try them on a small project with one real
+bug. See [the stand-ins' README](kio-mocks/README.md) for what each one does.
 
-```bash
-python tools/dummy_agent.py --agent-id KIO2 --port 8102
-```
+For testing the protocol alone, `tools/dummy_fleet.py` starts a stub for every KIO with
+canned answers, and `tools/dummy_agent.py --agent-id KIO2 --port 8102` starts one.
 
 Steps can declare dependencies with an optional `depends_on` field, and a step's output is fed to the steps that depend on it through the protocol's own `data` field. Messages travel over HTTP by default, or over NATS with `dispatch.transport`; the message body is identical either way.
 
@@ -115,9 +127,9 @@ program. [Usage](docs/usage.md) walks through both.
 
 ### Seeing it do real work
 
-`tools/dummy_fleet.py` stands in for every KIO with canned replies — right for
-proving the protocol, and nothing it claims to produce exists. For an agent
-that genuinely writes code with the model `config.json` configures:
+The stand-ins in `kio-mocks/` work without a model, so the code they generate
+is a skeleton or a rule-based fix. For an agent that writes code with the model
+`config.json` configures:
 
 ```bash
 python tools/codegen_agent.py --port 8107 --workspace ./generated
@@ -175,7 +187,13 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Policy gates](docs/policy-gates.md) — Stopping a step until the checks it depends on have passed
 - [Failover](docs/failover.md) — Running a step on another target when the one the plan named cannot
 - [Choosing by history](docs/selection.md) — Asking the target that has actually been working, not the one listed first
-- [The console](docs/console.md) — The web page for watching targets and runs, and registering agents
+- [The console](docs/console.md) — The chat, the agents, and the settings, in your browser
+- [First-time setup](docs/setup.md) — Choosing and downloading a model that suits the computer
+- [Approving a plan](docs/approval.md) — Plans that wait for a person, and questions KIO1 asks first
+- [Reviewing and answering](docs/review.md) — How a run reads its results and writes the answer
+- [Agents made of instructions](docs/llm-agents.md) — An agent written in plain language, run by a model
+- [Where agents are kept](docs/agent-store.md) — The agent database, its history, and export
+- [Stand-in KIOs](kio-mocks/README.md) — KIO2–KIO13 stand-ins that do their job, for running KIO1 end to end
 - [Usage](docs/usage.md) — From a clone to a lifecycle running in your browser
 - [Use-Case 1, end to end](examples/uc1/README.md) — A runnable lifecycle: real files, a real failing test, a refused release
 - [Discovery](docs/discovery.md) — Letting agents publish their own capabilities instead of listing them by hand

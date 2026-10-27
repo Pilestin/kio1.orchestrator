@@ -58,17 +58,17 @@ python examples/uc1/serve.py
 ```
 
 Open **http://127.0.0.1:8000/**. The banner in your terminal prints a
-registry token; click **Registry token** in the console and paste it.
+registry token; paste it under **Settings → Advanced → Administration token**.
 
 ### What you are looking at
 
-**Targets** lists everything KIO1 can reach. Nothing was written into
+**Agents** lists everything KIO1 can reach. Nothing was written into
 `config.json` — each agent was found by fetching its `/manifest`, which is
-the path an external deployment takes. Each row shows what it declares,
-whether it is answering, and what it has recently done.
+the path an external deployment takes. Each card shows what it declares
+and whether it is answering.
 
-**Workflows** is where you drive it. Type these four requests in order,
-waiting for each to finish:
+**Chat** is where you drive it. Type these requests in order, waiting for
+each to finish:
 
 | Type this | What happens |
 |-----------|--------------|
@@ -78,7 +78,7 @@ waiting for each to finish:
 | `Fix the failing test` | KIO11 runs `pytest`, KIO2 reads the traceback, KIO7 patches the file, KIO11 re-runs — green |
 | `Release it to staging` | Now it goes out |
 
-Recent runs then reads:
+The conversation then reads, newest first:
 
 ```text
 COMPLETED  wf-uc1-04  Release it to staging
@@ -88,8 +88,8 @@ COMPLETED  wf-uc1-02  Generate the code and tests for the approved issue
 COMPLETED  wf-uc1-01  Customers want bulk pricing discounts, write...
 ```
 
-Click any run to see its steps: which target ran each one, how long it took,
-what it concluded, and the agent's output.
+Click any plan to see its steps: which target ran each one, how long it took,
+and what it concluded; the run details beside the chat show each agent's output.
 
 ### What is real here
 
@@ -120,8 +120,31 @@ is treated as untrusted: paths are resolved against the workspace and anything
 escaping it is refused, file count and size are capped, and the result carries
 `hitl_required` because nothing compiled or ran it.
 
-`tools/dummy_fleet.py` covers the other KIOs, and its replies are canned — a
-file list from it is fiction.
+### Stand-in KIOs that do their job
+
+The walkthrough's agents live inside the example. To run KIO1 itself against
+agents that behave like the KIOs it will meet, start the stand-ins:
+
+```bash
+cd kio-mocks && python -m kio_mocks
+```
+
+They answer on the usual ports (KIO2 on 8102, KIO11 on 8111, …), so the agents
+already in `config.json` find them. Set the workspace to `kio-mocks/sample` —
+a small shop whose average price divides by zero for an empty cart — and ask:
+
+> Run the tests, find where the failing one breaks, propose a fix and measure
+> its energy impact.
+
+KIO11 runs the tests and reports the failure, KIO2 records it and names the
+line and the values that broke it, KIO7 writes a guard and checks it against
+every test on a copy of the project, and KIO10 compares the energy of the two.
+Every result comes from a real run; every output says `simulator: kio-mocks`
+so it is never taken for the real KIO's. What each stand-in does is in
+[their README](../kio-mocks/README.md).
+
+`tools/dummy_fleet.py` is still there for testing the protocol alone; its
+replies are canned.
 
 ### Without a browser
 

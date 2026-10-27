@@ -2,7 +2,9 @@
 
 ## Overview
 
-KIO1 Orchestrator is a terminal application that accepts natural-language user requests, produces structured JSON workflow plans, and optionally dispatches each plan step to the KIO agent that carries it out. It supports Ollama, OpenAI, and Anthropic through dynamically loaded provider modules. Optional OpenTelemetry instrumentation exports privacy-safe traces and metrics.
+KIO1 Orchestrator accepts natural-language requests — in a chat in the browser (`app.py`) or from a terminal (`main.py`) — produces structured JSON workflow plans, dispatches each plan step to the agent that carries it out, reads the results, and answers. It supports Ollama, OpenAI, Anthropic and OpenRouter through dynamically loaded provider modules. Optional OpenTelemetry instrumentation exports privacy-safe traces and metrics.
+
+The KIOs it dispatches to are separate services. Until they all exist, `kio-mocks/` provides stand-ins that speak the same protocol and do a small version of each KIO's job; KIO1 does not import them, and they do not import KIO1.
 
 ## System Diagram
 

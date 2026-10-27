@@ -177,6 +177,9 @@ Workflow wf-bug01-pricing (sequential): 2 ok, 0 error, 0 not dispatched
 
 If your KIO is not ready yet, `tools/dummy_agent.py` stands in for it and
 answers the same contract, so the rest of the chain can be tested without you.
+For a stand-in that also does something like your KIO's job, see
+`kio-mocks/` — and its `protocol.py`, which follows this page and the real
+KIO2, is a short working example of everything above.
 
 ## If you prefer NATS
 

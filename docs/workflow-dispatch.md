@@ -365,6 +365,23 @@ The canned answers deliberately disagree with each other — some report a
 defect, one asks for human review — so the verdict handling is visible rather
 than every step looking alike.
 
+## Stand-ins that do their job
+
+Canned answers prove the protocol, but nothing downstream can use them: a
+fix built on a fictional file list is fiction too. `kio-mocks/` holds
+stand-ins that do the work their KIO is defined to do in D2.6, on a small
+scale and without a model — KIO11 runs the tests, KIO2 records the failing
+one and names the line, KIO7 checks its fix against every test on a copy,
+KIO10 measures the energy. Each step's output is what the next one reads,
+through `data.upstream`, as it will be with the real services.
+
+```bash
+cd kio-mocks && python -m kio_mocks
+```
+
+They use the same ports as the stubs, so the same `dispatch.agents` entries
+reach them. See [their README](../kio-mocks/README.md).
+
 ## Known gaps
 
 These are deliberate omissions, listed so they are not mistaken for
