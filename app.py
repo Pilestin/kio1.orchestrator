@@ -23,10 +23,17 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from core import console_auth
 from core.agent_store import (
     ACTION_RESTORED,
     STORE_FILE,
@@ -399,6 +406,118 @@ async def _revalidate_console_assets(request: Request, call_next: Any) -> Any:
         response.headers["Cache-Control"] = _NO_CACHE
 
     return response
+
+
+# Reachable without signing in: the health check, the sign-in page itself.
+_OPEN_PATHS = frozenset({"/health", "/login"})
+
+
+def _signed_in(request: Request) -> bool:
+    """Whether the request carries a live session or the administration token."""
+    if console_auth.GATE.check_session(request.cookies.get(console_auth.COOKIE, "")):
+        return True
+    expected = os.environ.get(REGISTRY_TOKEN_ENV, "").strip()
+    header = request.headers.get("Authorization", "")
+    offered = header[len("Bearer ") :].strip() if header.startswith("Bearer ") else ""
+    return bool(expected) and compare_digest(offered, expected)
+
+
+@app.middleware("http")
+async def _require_sign_in(request: Request, call_next: Any) -> Any:
+    """With a console password set, nothing but the sign-in page answers a stranger.
+
+    Declared after the other middleware, so it runs first: a scanner asking
+    for `/.env`, `/config.json` or `/docs` gets the same 401 as anything
+    else, and nothing that runs a model or reads a conversation is reached.
+    """
+    if not console_auth.enabled() or request.url.path in _OPEN_PATHS:
+        return await call_next(request)
+
+    if _signed_in(request):
+        request.state.signed_in = True
+        return await call_next(request)
+
+    if request.method == "GET" and "text/html" in request.headers.get("Accept", ""):
+        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+    return JSONResponse(
+        {"detail": "Sign in first.", "sign_in": "/login"},
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        headers={"Cache-Control": _NO_CACHE},
+    )
+
+
+class SignInRequest(BaseModel):
+    password: str = Field(max_length=1024)
+
+
+@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+def login_page(request: Request) -> Response:
+    """The sign-in page; the console itself for someone already signed in."""
+    if not console_auth.enabled() or _signed_in(request):
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    return HTMLResponse(
+        console_auth.LOGIN_PAGE,
+        headers={"Cache-Control": _NO_CACHE, "X-Frame-Options": "DENY"},
+    )
+
+
+@app.post("/login", include_in_schema=False)
+def login(body: SignInRequest, request: Request) -> JSONResponse:
+    """Check the password and give the browser a session cookie.
+
+    Failures are counted per address and overall; past the limit every
+    attempt waits, right or wrong, so guessing is no faster than typing.
+    """
+    if not console_auth.enabled():
+        return JSONResponse({"signed_in": True})
+
+    address = request.client.host if request.client else "unknown"
+    wait = console_auth.GATE.wait_before_trying(address)
+    if wait:
+        return JSONResponse(
+            {"detail": f"Too many attempts. Try again in {max(1, wait // 60)} min."},
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(wait)},
+        )
+
+    if not console_auth.verify_password(body.password, console_auth.configured_hash()):
+        console_auth.GATE.failed(address)
+        logger.warning("Console sign-in failed from %s", address)
+        return JSONResponse(
+            {"detail": "Wrong password."}, status_code=status.HTTP_401_UNAUTHORIZED
+        )
+
+    console_auth.GATE.succeeded(address)
+    response = JSONResponse({"signed_in": True})
+    secure = (
+        request.url.scheme == "https"
+        or request.headers.get("X-Forwarded-Proto", "") == "https"
+    )
+    response.set_cookie(
+        console_auth.COOKIE,
+        console_auth.GATE.open_session(),
+        max_age=console_auth.SESSION_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.post("/logout", include_in_schema=False)
+def logout(request: Request) -> JSONResponse:
+    """End this browser's session."""
+    console_auth.GATE.close_session(request.cookies.get(console_auth.COOKIE, ""))
+    response = JSONResponse({"signed_in": False})
+    response.delete_cookie(console_auth.COOKIE, path="/")
+    return response
+
+
+@app.get("/auth", include_in_schema=False)
+def auth_status() -> dict[str, bool]:
+    """Whether the console has a password, so it can offer to sign out."""
+    return {"password": console_auth.enabled()}
 
 
 @lru_cache(maxsize=4)
@@ -1003,6 +1122,14 @@ def _require_registry_token(request: Request) -> None:
             closed on a deployment that never opted in; 401 when the header
             does not match.
     """
+    # Behind the console password, signing in is the administration: there
+    # is one person with the password, and asking them for a second secret
+    # would only send them looking for it on the server.
+    if getattr(request.state, "signed_in", False) and request.cookies.get(
+        console_auth.COOKIE
+    ):
+        return
+
     expected = os.environ.get(REGISTRY_TOKEN_ENV, "").strip()
 
     if not expected:

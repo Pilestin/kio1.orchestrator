@@ -33,7 +33,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from core.dotenv import load_dotenv
+from core.console_auth import PASSWORD_HASH_ENV, hash_password
+from core.dotenv import load_dotenv, save_dotenv_value
 
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
@@ -229,6 +230,36 @@ def wait_until_up(url: str, process: subprocess.Popen, seconds: float) -> bool:
     return False
 
 
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def set_password() -> None:
+    """Ask for the console password twice and keep only its hash in `.env`."""
+    import getpass
+
+    first = getpass.getpass("New console password (12+ characters): ")
+    if len(first) < 12:
+        say("Too short: use at least 12 characters.")
+        sys.exit(1)
+    if getpass.getpass("Again: ") != first:
+        say("The two did not match.")
+        sys.exit(1)
+
+    save_dotenv_value(PASSWORD_HASH_ENV, hash_password(first), ROOT / ".env")
+    protect_dotenv()
+    say("Saved. The console asks for this password from the next start.")
+
+
+def protect_dotenv() -> None:
+    """Make `.env` readable by its owner only, where the system allows it.
+
+    It holds API keys and the password's hash; on a shared server another
+    account should not read it.
+    """
+    if os.name == "posix" and (ROOT / ".env").exists():
+        os.chmod(ROOT / ".env", 0o600)
+
+
 def main() -> None:
     """Prepare everything and run KIO1 until interrupted."""
     parser = argparse.ArgumentParser(description="Start the KIO1 console.")
@@ -238,6 +269,11 @@ def main() -> None:
         "--no-browser", action="store_true", help="do not open a browser"
     )
     parser.add_argument(
+        "--set-password",
+        action="store_true",
+        help="set the console password (needed to listen beyond this machine)",
+    )
+    parser.add_argument(
         "--skip-install",
         action="store_true",
         help="use .venv as it is, without checking requirements",
@@ -245,6 +281,11 @@ def main() -> None:
     arguments = parser.parse_args()
 
     os.chdir(ROOT)
+
+    if arguments.set_password:
+        set_password()
+        return
+
     ensure_python()
     # Before the token is decided, so a KIO1_REGISTRY_TOKEN in .env is the
     # one used rather than a generated one.
@@ -252,6 +293,17 @@ def main() -> None:
     python = ensure_environment(arguments.skip_install)
     config = ensure_config()
     token = ensure_token()
+    protect_dotenv()
+
+    # Beyond this machine, a KIO1 without a password runs workflows — paid
+    # model calls, commands on the server — for anyone who finds the port.
+    if (
+        arguments.host not in LOOPBACK
+        and not os.environ.get(PASSWORD_HASH_ENV, "").strip()
+    ):
+        say(f"Not starting on {arguments.host}: there is no console password.")
+        say("Set one with:  python start.py --set-password")
+        sys.exit(1)
 
     if config.get("provider") == "ollama":
         check_ollama(config)

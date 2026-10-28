@@ -97,6 +97,13 @@ export async function api(path, options) {
   let payload = null;
   try { payload = text ? JSON.parse(text) : null; } catch { payload = { detail: text }; }
 
+  // The session ended (or KIO1 restarted): back to the sign-in page, keeping
+  // the address so the same page opens after.
+  if (response.status === 401 && payload && payload.sign_in) {
+    window.location.replace(payload.sign_in + window.location.hash);
+    throw new Error("Sign in first.");
+  }
+
   if (!response.ok) {
     const reason = payload && payload.detail ? payload.detail : response.statusText;
     const error = new Error(typeof reason === "string" ? reason : JSON.stringify(reason));

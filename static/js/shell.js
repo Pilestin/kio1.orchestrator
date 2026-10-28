@@ -1,7 +1,7 @@
 // The frame around the pages: the menu, the tabs and the address that
 // names them, the theme, and the token button.
 
-import { $, TOKEN_KEY, ask, hooks, state, toast, token } from "./core.js";
+import { $, TOKEN_KEY, api, ask, hooks, state, toast, token } from "./core.js";
 
 // ── shell ───────────────────────────────────────────────────────────────────
 
@@ -111,6 +111,17 @@ export function setRailCollapsed(collapsed) {
 
 $("rail-collapse").addEventListener("click", function () {
   setRailCollapsed(document.documentElement.dataset.rail !== "collapsed");
+});
+
+// ── signing out ─────────────────────────────────────────────────────────────
+
+api("/auth").then(function (auth) {
+  $("sign-out").classList.toggle("hidden", !(auth && auth.password));
+}).catch(function () { /* an older server: no password, no button */ });
+
+$("sign-out").addEventListener("click", async function () {
+  try { await api("/logout", { method: "POST" }); } catch { /* signed out anyway */ }
+  window.location.replace("/login");
 });
 
 // ── menu width ──────────────────────────────────────────────────────────────

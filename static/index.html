@@ -42,6 +42,7 @@
   <symbol id="i-empty" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M4 10h16M9 14.5h6"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
+  <symbol id="i-exit" viewBox="0 0 24 24"><path d="M14 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2H14"/><path d="M10 12h10m-3.5-3.5L20 12l-3.5 3.5"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z"/><path d="m13.5 6.5 4 4"/></symbol>
   <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></symbol>
   <symbol id="i-retry" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></symbol>
@@ -90,6 +91,8 @@
       <button role="radio" data-theme-choice="system" title="Follow the system" aria-label="Follow the system"><svg class="icon"><use href="#i-system"/></svg></button>
       <button role="radio" data-theme-choice="dark" title="Dark" aria-label="Dark"><svg class="icon"><use href="#i-moon"/></svg></button>
     </div>
+    <!-- Shown only when the console has a password. -->
+    <button class="rail-link hidden" id="sign-out" title="Sign out"><svg class="icon"><use href="#i-exit"/></svg><span class="label">Sign out</span></button>
   </div>
 </aside>
 

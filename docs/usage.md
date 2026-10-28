@@ -331,6 +331,35 @@ sent anywhere but this service.
 It is a shared secret over whatever transport you terminate. Put the service
 behind TLS if it is reachable from anywhere you do not control.
 
+### On a server
+
+`start.py` listens on `127.0.0.1`, so only the machine it runs on can open
+the console. The simplest way to reach a KIO1 on a server is still that
+address, through SSH:
+
+```bash
+ssh -L 8000:127.0.0.1:8000 you@server     # then open http://127.0.0.1:8000
+```
+
+To open it to the network instead, set a console password first:
+
+```bash
+python start.py --set-password            # asks twice, keeps only a hash in .env
+python start.py --host 0.0.0.0 --no-browser
+```
+
+Without a password `start.py` refuses any address but this machine's. With
+one, the console asks for it, and nothing else answers someone who has not
+signed in — no workflow, no conversation, no file — so a scanner looking for
+`/.env` or `/config.json` gets a refusal, and nobody runs models on your bill.
+A few wrong guesses and that address has to wait. Restarting KIO1 signs
+everyone out. Scripts can keep using the administration token as a bearer
+token.
+
+The password travels as typed: put HTTPS in front (Caddy or nginx) before you
+use it over the internet, and keep `.env` to yourself — `start.py` makes it
+readable by its owner only.
+
 ---
 
 ## 3. The terminal application
