@@ -4,7 +4,7 @@
 // that does it. The octopus is that picture — a head that decides and eight
 // arms that each reach for something. At every arm's tip a small node lights
 // up in turn, one after another around the arms, like a conductor bringing in
-// each section of the orchestra.
+// each section of the orchestra; each node carries the name of a KIO.
 //
 // It is drawn on a grid of character cells: the head and arms are stamped
 // into a density grid each frame, and a dense cell gets a dense character
@@ -22,6 +22,8 @@ const FPS = 30;
 const ARMS = 8;
 const SEGMENTS = 44;
 const BUBBLES = 22;
+// What each arm holds: the KIOs KIO1 hands steps to.
+const LABELS = ["KIO2", "KIO3", "KIO4", "KIO6", "KIO7", "KIO9", "KIO10", "KIO11"];
 
 const canvas = document.getElementById("ambient");
 const context = canvas ? canvas.getContext("2d") : null;
@@ -117,17 +119,20 @@ function mark(x, y, kind) {
   if (gx >= 0 && gx < columns && gy >= 0 && gy < rows) marks[gy * columns + gx] = kind;
 }
 
-/** Where the octopus is: under the question, and sized to the room. */
+/** Where the octopus is: between the question and the message box, sized
+ * so neither covers it — head to arm tips it is about five heads tall. */
 function body(width, height) {
+  const frameBox = canvas.getBoundingClientRect();
   const empty = document.getElementById("chat-empty");
   const box = empty ? empty.getBoundingClientRect() : null;
-  const frameBox = canvas.getBoundingClientRect();
-  const size = Math.max(34, Math.min(78, Math.min(width, height) * 0.085));
-  const below = box && box.height ? box.bottom - frameBox.top + size * 1.6 : height * 0.55;
+  const composer = document.querySelector(".conversation > .composer-bar");
+  const top = box && box.height ? box.bottom - frameBox.top + 12 : height * 0.35;
+  const bottom = composer ? composer.getBoundingClientRect().top - frameBox.top - 8 : height;
+  const size = Math.max(26, Math.min(78, width * 0.07, (bottom - top) / 5.4));
   return {
     size: size,
     x: width / 2 + Math.sin(time * 0.23) * size * 0.4,
-    y: Math.min(height - size * 2.2, below) + Math.sin(time * 0.5) * size * 0.12,
+    y: top + size * 1.9 + Math.sin(time * 0.5) * size * 0.12,
   };
 }
 
@@ -188,7 +193,7 @@ function build(width, height) {
         mark(x - Math.sin(angle) * radius * 0.4 * curl, y + Math.cos(angle) * radius * 0.4 * curl, 1);
       }
     }
-    tips.push({ x: x, y: y, arm: arm });
+    tips.push({ x: x, y: y, arm: arm, out: Math.atan2(y - octopus.y, x - octopus.x) });
   }
   return tips;
 }
@@ -239,6 +244,16 @@ function draw() {
     [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(function (offset) {
       context.fillText(glow > 0.4 ? "o" : ".", tip.x + offset[0] * CELL * 1.4, tip.y + offset[1] * CELL * 1.4);
     });
+  });
+
+  // Each node's name, just beyond it, away from the octopus.
+  context.font = "600 10px ui-monospace, Consolas, monospace";
+  tips.forEach(function (tip) {
+    const beat = ((time * 0.45 - tip.arm / ARMS) % 1 + 1) % 1;
+    const glow = Math.exp(-Math.pow(beat * 7, 2)) + Math.exp(-Math.pow((1 - beat) * 7, 2));
+    const alpha = (colours.light ? 0.45 : 0.4) + glow * 0.5;
+    context.fillStyle = "rgba(" + colours.ink + "," + alpha.toFixed(2) + ")";
+    context.fillText(LABELS[tip.arm % LABELS.length], tip.x + Math.cos(tip.out) * 24, tip.y + Math.sin(tip.out) * 16);
   });
 
   // The glow behind the question and the examples, wherever they sit, so

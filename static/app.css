@@ -2049,6 +2049,8 @@ pre.output.bad { color: var(--bad); }
 /* While the octopus conducts, the composer floats over it instead of a bar. */
 .conversation:has(.ambient.on) > .composer-bar { background: transparent; border-top-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .conversation:has(.ambient.on) .composer-box { box-shadow: var(--shadow); }
+/* Narrower while the chat is empty, so it does not cover the octopus. */
+.conversation:has(.ambient.on) > .composer-bar .lane { max-width: 600px; }
 
 .chat-empty p strong { font-size: clamp(1.5rem, 2.6vw, 2.1rem); font-weight: 500; letter-spacing: -0.03em; }
 .chat-empty .icon.big { opacity: 0.85; }
