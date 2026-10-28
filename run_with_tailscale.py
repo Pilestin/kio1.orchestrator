@@ -6,15 +6,17 @@ No options, no questions. It:
 
 1. Points the planner at Ollama on the model machine (`MODEL_MACHINE`, over
    Tailscale), unless `.env` already names another `KIO1_PROVIDER_ENDPOINT`.
-2. Makes sure there is a console password. If there is none it makes one,
-   prints it, and keeps it in `data/console-password` (readable by this user
-   only) — `.env` holds only its hash. `python3 start.py --set-password`
+2. Makes sure there is a console password. If there is none it makes one
+   and prints it. Either way it is in `data/console-password`, readable by
+   this user only (`.env` holds its hash); `python3 start.py --set-password`
    chooses another.
-3. Publishes KIO1 with Tailscale Funnel at `https://<machine>.<tailnet>.ts.net`,
+3. Stops a KIO1 already running from this folder, which would still hold the
+   old password.
+4. Publishes KIO1 with Tailscale Funnel at `https://<machine>.<tailnet>.ts.net`,
    a link anyone can open, with a certificate Tailscale manages. KIO1 itself
    listens on 127.0.0.1 only. If Tailscale lets only root publish, it makes
    this user Tailscale's operator first (sudo may ask for your password).
-4. Starts KIO1, and takes the link down again when KIO1 stops.
+5. Starts KIO1, and takes the link down again when KIO1 stops.
 
 Anyone with the link reaches the sign-in page and nothing else; the session
 cookie only travels over HTTPS. See docs/deploy.md.
@@ -27,8 +29,10 @@ import json
 import os
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -42,7 +46,6 @@ from core.dotenv import load_dotenv, save_dotenv_value
 MODEL_MACHINE = "100.71.36.18"
 OLLAMA_PORT = 11434
 DOTENV = ROOT / ".env"
-PASSWORD_FILE = ROOT / "data" / "console-password"
 
 
 def tailscale() -> str:
@@ -85,17 +88,49 @@ def remember(name: str, value: str) -> None:
 
 def ensure_password() -> None:
     """Make a console password if there is none, and say where it is."""
-    if os.environ.get(PASSWORD_HASH_ENV, "").strip():
+    if not os.environ.get(PASSWORD_HASH_ENV, "").strip():
+        password = secrets.token_urlsafe(12)
+        start.keep_password(password)
+        os.environ[PASSWORD_HASH_ENV] = hash_password(password)
+        start.say(f"Console password: {password}")
+    if start.PASSWORD_FILE.exists():
+        start.say(f"Console password: cat {start.PASSWORD_FILE.relative_to(ROOT)}")
+    else:
+        start.say("Forgot the console password? python3 start.py --set-password")
+
+
+def stop_earlier_runs() -> None:
+    """Stop a KIO1 already running from this folder, as a new start replaces it.
+
+    One left running — in another terminal, in tmux — keeps the password it
+    read when it started, so a password set since would be refused; and it
+    holds the port. Only processes of this checkout's `uvicorn app:app` are
+    touched, read from /proc on Linux.
+    """
+    proc = Path("/proc")
+    if not proc.is_dir():
         return
-    password = secrets.token_urlsafe(12)
-    remember(PASSWORD_HASH_ENV, hash_password(password))
-    PASSWORD_FILE.parent.mkdir(exist_ok=True)
-    PASSWORD_FILE.write_text(password + "\n", encoding="utf-8")
-    if os.name == "posix":
-        os.chmod(PASSWORD_FILE, 0o600)
-    start.say(f"Console password: {password}")
-    start.say(f"  (kept in {PASSWORD_FILE.relative_to(ROOT)}; change it with")
-    start.say("   python3 start.py --set-password)")
+    for entry in proc.iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        try:
+            command = (entry / "cmdline").read_bytes().split(b"\0")
+            folder = (entry / "cwd").resolve()
+        except OSError:
+            continue
+        if (
+            b"uvicorn" in b" ".join(command)
+            and b"app:app" in command
+            and folder == ROOT
+        ):
+            try:
+                os.kill(int(entry.name), signal.SIGTERM)
+                start.say(
+                    f"Stopped the KIO1 that was already running (process {entry.name})."
+                )
+            except OSError:
+                pass
+    time.sleep(1)
 
 
 def funnel(port: int) -> tuple[bool, str]:
@@ -167,6 +202,7 @@ def check_model_machine(endpoint: str) -> None:
 
 def main() -> None:
     os.chdir(ROOT)
+    stop_earlier_runs()
     load_dotenv(DOTENV)
     status = tailscale_status()
     dns_name = str(status["Self"]["DNSName"]).rstrip(".")

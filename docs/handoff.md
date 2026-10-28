@@ -20,7 +20,7 @@
 
 ## Bugünkü durum
 
-1096 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler); bunların bir kısmı `kio-mocks/tests`'ten.
+1097 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler); bunların bir kısmı `kio-mocks/tests`'ten.
 
 2026-10-27'de eklenenler: açılışta yarım kalan çalışmalar kapatılıyor
 (`EmbeddedSessionClient.close_interrupted`); hedef gerektirmeyen istekler

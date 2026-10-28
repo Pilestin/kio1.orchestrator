@@ -56,7 +56,7 @@ What `run_with_tailscale.py` does:
 - points the planner at Ollama on the model machine, `100.71.36.18:11434`
   (`MODEL_MACHINE` at the top of the file), unless `.env` names another
   `KIO1_PROVIDER_ENDPOINT`;
-- if there is no console password, makes one, prints it, and keeps it in
+- if there is no console password, makes one and prints it; either way it is in
   `data/console-password`, readable by this user only (`.env` holds only its
   hash; `python3 start.py --set-password` chooses another);
 - publishes KIO1 with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel),

@@ -259,8 +259,27 @@ def wait_until_up(url: str, process: subprocess.Popen, seconds: float) -> bool:
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
+PASSWORD_FILE = DATA / "console-password"
+
+
+def keep_password(password: str) -> None:
+    """Keep the console password where its owner can read it back.
+
+    Its hash goes in `.env`, which is what KIO1 checks; the password itself in
+    `data/console-password`, readable by this user only — like the
+    administration token beside it — so a forgotten password is a `cat`
+    away rather than a reset.
+    """
+    save_dotenv_value(PASSWORD_HASH_ENV, hash_password(password), ROOT / ".env")
+    protect_dotenv()
+    DATA.mkdir(exist_ok=True)
+    PASSWORD_FILE.write_text(password + "\n", encoding="utf-8")
+    if os.name == "posix":
+        os.chmod(PASSWORD_FILE, 0o600)
+
+
 def set_password() -> None:
-    """Ask for the console password twice and keep only its hash in `.env`."""
+    """Ask for the console password twice and keep it (see `keep_password`)."""
     import getpass
 
     first = getpass.getpass("New console password (12+ characters): ")
@@ -271,9 +290,9 @@ def set_password() -> None:
         say("The two did not match.")
         sys.exit(1)
 
-    save_dotenv_value(PASSWORD_HASH_ENV, hash_password(first), ROOT / ".env")
-    protect_dotenv()
-    say("Saved. The console asks for this password from the next start.")
+    keep_password(first)
+    say(f"Saved, and kept in {PASSWORD_FILE.relative_to(ROOT)}.")
+    say("Restart KIO1 for it to take effect: python3 run_with_tailscale.py")
 
 
 def protect_dotenv() -> None:

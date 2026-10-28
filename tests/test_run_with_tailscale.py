@@ -32,9 +32,10 @@ KEPT = ("KIO1_HOST", "KIO1_PROVIDER_ENDPOINT", "KIO1_CONSOLE_NAME", "KIO1_PUBLIC
 def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[dict]:
     seen: dict[str, Any] = {"funnel": [], "off": 0, "operator": 0}
     monkeypatch.setattr(launcher, "DOTENV", tmp_path / ".env")
-    monkeypatch.setattr(
-        launcher, "PASSWORD_FILE", tmp_path / "data" / "console-password"
-    )
+    monkeypatch.setattr(start, "ROOT", tmp_path)
+    monkeypatch.setattr(start, "DATA", tmp_path / "data")
+    monkeypatch.setattr(start, "PASSWORD_FILE", tmp_path / "data" / "console-password")
+    monkeypatch.setattr(launcher, "stop_earlier_runs", lambda: None)
     monkeypatch.setattr(launcher, "ROOT", tmp_path)
     monkeypatch.setattr(launcher, "tailscale_status", lambda: STATUS)
     monkeypatch.setattr(
@@ -115,18 +116,18 @@ def test_a_missing_password_is_made_and_kept_for_this_user(
 
     launcher.main()
 
-    password = launcher.PASSWORD_FILE.read_text(encoding="utf-8").strip()
+    password = start.PASSWORD_FILE.read_text(encoding="utf-8").strip()
     assert verify_password(password, kept(launched)[PASSWORD_HASH_ENV])
     assert any(password in line for line in launched["said"])
     if os.name == "posix":
-        assert launcher.PASSWORD_FILE.stat().st_mode & 0o077 == 0
+        assert start.PASSWORD_FILE.stat().st_mode & 0o077 == 0
 
 
 def test_an_existing_password_is_left_alone(launched: dict) -> None:
     launcher.main()
 
     assert PASSWORD_HASH_ENV not in kept(launched)
-    assert not launcher.PASSWORD_FILE.exists()
+    assert not start.PASSWORD_FILE.exists()
 
 
 def test_the_planner_points_at_the_model_machine(launched: dict) -> None:
@@ -184,3 +185,12 @@ def test_visitors_without_an_address_cannot_lock_each_other_out() -> None:
         gate.failed("")
 
     assert gate.wait_before_trying("") == 0
+
+
+def test_a_password_set_by_hand_can_be_read_back(launched: dict) -> None:
+    start.keep_password("chosen by a person")
+
+    assert (
+        start.PASSWORD_FILE.read_text(encoding="utf-8").strip() == "chosen by a person"
+    )
+    assert verify_password("chosen by a person", kept(launched)[PASSWORD_HASH_ENV])
