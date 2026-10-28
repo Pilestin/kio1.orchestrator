@@ -20,7 +20,7 @@
 
 ## Bugünkü durum
 
-1097 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler); bunların bir kısmı `kio-mocks/tests`'ten.
+1096 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler); bunların bir kısmı `kio-mocks/tests`'ten.
 
 2026-10-27'de eklenenler: açılışta yarım kalan çalışmalar kapatılıyor
 (`EmbeddedSessionClient.close_interrupted`); hedef gerektirmeyen istekler
@@ -49,9 +49,8 @@ ve `/login` dışında her istek oturum çerezi ya da yönetim token'ı ister;
 Hesaplar ve LiteLLM ile ücretlendirme: [plans/accounts.md](plans/accounts.md).
 Sunucuda çalıştırma ve modelin Tailscale'deki başka makinede olması: [deploy.md](deploy.md)
 (`KIO1_PROVIDER_ENDPOINT`; `core/endpoints.py` uzak sunucuya model indirmeyi engeller).
-Sunucuda tek komut: `python3 run_with_tailscale.py` (model makinesi `100.71.36.18`;
-konsol droplet'in Tailscale adresinde ya da `--funnel` ile herkese açık https://…ts.net
-bağlantısında; seçimler `.env`'de `KIO1_SHARE`, `KIO1_HOST`, `KIO1_PUBLIC_URL`, `KIO1_PROVIDER_ENDPOINT`).
+Sunucuda tek komut: `python3 run_with_tailscale.py` — Funnel ile herkese açık https://…ts.net
+bağlantısı, model makinesi `100.71.36.18`, şifre yoksa üretip `data/console-password`'a yazar.
 
 | Özellik | Dosyalar | Doküman |
 |---|---|---|

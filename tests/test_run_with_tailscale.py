@@ -1,13 +1,14 @@
-"""Tests for run_with_tailscale.py: one command, no options, two ways to share.
+"""Tests for run_with_tailscale.py: one command, a public link, no questions.
 
-The properties that matter: on the tailnet the console listens on this
-machine's Tailscale address under its Tailscale name; through Funnel it
-listens on 127.0.0.1 only, is published at the machine's https://…ts.net
-address, and the Funnel comes down when KIO1 stops; the choice is asked once
-and kept in .env; the planner points at the model machine unless .env says
-otherwise; and nothing starts without a password when nobody can be asked.
+The properties that matter: KIO1 listens on 127.0.0.1 only and is published
+at the machine's https://…ts.net address, which comes down when KIO1 stops;
+a user Tailscale refuses is made its operator and the link tried again; a
+missing console password is made, and kept where only this user reads it;
+the planner points at the model machine unless .env says otherwise; and
+start.py will not publish without a password.
 """
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -17,48 +18,50 @@ import pytest
 import run_with_tailscale as launcher
 import start
 from core import console_auth
-from core.console_auth import PASSWORD_HASH_ENV, hash_password
+from core.console_auth import PASSWORD_HASH_ENV, hash_password, verify_password
 from core.dotenv import parse_dotenv
 
-HERE = "100.75.109.86"
 DNS_NAME = "opeva-cloud-server.tail1234.ts.net"
-KEPT = (
-    "KIO1_HOST",
-    "KIO1_PROVIDER_ENDPOINT",
-    "KIO1_CONSOLE_NAME",
-    "KIO1_PUBLIC_URL",
-    "KIO1_SHARE",
-)
+STATUS = {
+    "Self": {"DNSName": DNS_NAME + ".", "TailscaleIPs": ["100.75.109.86", "fd7a::1"]}
+}
+KEPT = ("KIO1_HOST", "KIO1_PROVIDER_ENDPOINT", "KIO1_CONSOLE_NAME", "KIO1_PUBLIC_URL")
 
 
 @pytest.fixture
 def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[dict]:
-    seen: dict[str, Any] = {"funnel": [], "off": 0}
-    dotenv = tmp_path / ".env"
-    monkeypatch.setattr(launcher, "DOTENV", dotenv)
-    monkeypatch.setattr(launcher, "tailscale_address", lambda: HERE)
-    monkeypatch.setattr(launcher, "tailscale_dns_name", lambda: DNS_NAME)
+    seen: dict[str, Any] = {"funnel": [], "off": 0, "operator": 0}
+    monkeypatch.setattr(launcher, "DOTENV", tmp_path / ".env")
+    monkeypatch.setattr(
+        launcher, "PASSWORD_FILE", tmp_path / "data" / "console-password"
+    )
+    monkeypatch.setattr(launcher, "ROOT", tmp_path)
+    monkeypatch.setattr(launcher, "tailscale_status", lambda: STATUS)
     monkeypatch.setattr(
         launcher, "funnel", lambda port: (seen["funnel"].append(port) or True, "")
     )
     monkeypatch.setattr(
         launcher, "funnel_off", lambda: seen.update(off=seen["off"] + 1)
     )
-    monkeypatch.setattr(start, "say", lambda text: None)
+    monkeypatch.setattr(
+        launcher, "make_operator", lambda: seen.update(operator=1) or True
+    )
+    monkeypatch.setattr(
+        start, "say", lambda text: seen.setdefault("said", []).append(text)
+    )
     monkeypatch.setattr(start, "free_port", lambda host, first: first)
     monkeypatch.setattr(start, "_get_json", lambda url, timeout: {"models": []})
     monkeypatch.setattr(
         start, "main", lambda: seen.update(argv=list(launcher.sys.argv))
     )
-    monkeypatch.setattr(launcher.sys.stdin, "isatty", lambda: False)
     # Set, then removed, so monkeypatch undoes what the launcher writes.
-    for name in KEPT:
+    for name in (*KEPT, PASSWORD_HASH_ENV):
         monkeypatch.setenv(name, "")
         monkeypatch.delenv(name)
     monkeypatch.setenv(PASSWORD_HASH_ENV, hash_password("a long enough password"))
     # The launcher rewrites sys.argv for start.main; put it back afterwards.
     monkeypatch.setattr(launcher.sys, "argv", ["run_with_tailscale.py"])
-    seen["dotenv"] = dotenv
+    seen["dotenv"] = tmp_path / ".env"
     yield seen
 
 
@@ -66,27 +69,68 @@ def kept(seen: dict) -> dict[str, str]:
     return parse_dotenv(seen["dotenv"].read_text(encoding="utf-8"))
 
 
-def run(*arguments: str) -> None:
-    launcher.sys.argv = ["run_with_tailscale.py", *arguments]
+def test_kio1_listens_on_this_machine_only_and_is_published(launched: dict) -> None:
     launcher.main()
 
-
-# ── on the tailnet ──────────────────────────────────────────────────────────
-
-
-def test_on_the_tailnet_the_console_listens_on_the_tailscale_address(
-    launched: dict,
-) -> None:
-    run()
-
-    assert kept(launched)["KIO1_HOST"] == HERE
-    assert kept(launched)["KIO1_CONSOLE_NAME"] == "opeva-cloud-server"
+    assert kept(launched)["KIO1_HOST"] == "127.0.0.1"
+    assert kept(launched)["KIO1_PUBLIC_URL"] == f"https://{DNS_NAME}"
+    assert launched["funnel"] == [8101]
     assert launched["argv"][1:] == ["--no-browser", "--port", "8101"]
-    assert launched["funnel"] == []
+
+
+def test_the_link_comes_down_when_kio1_stops(launched: dict) -> None:
+    launcher.main()
+
+    # Once before, for whatever an earlier run left; once after.
+    assert launched["off"] == 2
+
+
+def test_a_refused_user_is_made_operator_and_the_link_tried_again(
+    launched: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answers = iter([(False, "Access denied: serve config denied"), (True, "")])
+    monkeypatch.setattr(launcher, "funnel", lambda port: next(answers))
+
+    launcher.main()
+
+    assert launched["operator"] == 1
+    assert "argv" in launched
+
+
+def test_a_link_that_cannot_be_published_stops_kio1_too(
+    launched: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(launcher, "funnel", lambda port: (False, "not allowed"))
+
+    with pytest.raises(SystemExit):
+        launcher.main()
+
+    assert "argv" not in launched
+
+
+def test_a_missing_password_is_made_and_kept_for_this_user(
+    launched: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(PASSWORD_HASH_ENV)
+
+    launcher.main()
+
+    password = launcher.PASSWORD_FILE.read_text(encoding="utf-8").strip()
+    assert verify_password(password, kept(launched)[PASSWORD_HASH_ENV])
+    assert any(password in line for line in launched["said"])
+    if os.name == "posix":
+        assert launcher.PASSWORD_FILE.stat().st_mode & 0o077 == 0
+
+
+def test_an_existing_password_is_left_alone(launched: dict) -> None:
+    launcher.main()
+
+    assert PASSWORD_HASH_ENV not in kept(launched)
+    assert not launcher.PASSWORD_FILE.exists()
 
 
 def test_the_planner_points_at_the_model_machine(launched: dict) -> None:
-    run()
+    launcher.main()
 
     assert kept(launched)["KIO1_PROVIDER_ENDPOINT"] == "http://100.71.36.18:11434"
 
@@ -96,94 +140,9 @@ def test_an_endpoint_already_in_dotenv_is_kept(
 ) -> None:
     monkeypatch.setenv("KIO1_PROVIDER_ENDPOINT", "http://100.99.0.1:11434")
 
-    run()
+    launcher.main()
 
     assert "KIO1_PROVIDER_ENDPOINT" not in kept(launched)
-
-
-def test_without_a_password_and_nobody_to_ask_it_stops(
-    launched: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv(PASSWORD_HASH_ENV)
-
-    with pytest.raises(SystemExit):
-        run()
-
-    assert "argv" not in launched
-
-
-# ── through Funnel ──────────────────────────────────────────────────────────
-
-
-def test_through_funnel_kio1_listens_on_this_machine_only(launched: dict) -> None:
-    run("--funnel")
-
-    assert kept(launched)["KIO1_HOST"] == "127.0.0.1"
-    assert kept(launched)["KIO1_PUBLIC_URL"] == f"https://{DNS_NAME}"
-    assert launched["funnel"] == [8101]
-
-
-def test_the_funnel_comes_down_when_kio1_stops(launched: dict) -> None:
-    run("--funnel")
-
-    # Once before, for whatever an earlier run left; once after.
-    assert launched["off"] == 2
-
-
-def test_the_choice_is_kept_so_the_next_start_needs_no_option(
-    launched: dict,
-) -> None:
-    run("--funnel")
-    launched["funnel"].clear()
-
-    run()
-
-    assert kept(launched)["KIO1_SHARE"] == "funnel"
-    assert launched["funnel"] == [8101]
-
-
-def test_switching_back_to_the_tailnet_unpublishes_the_link(launched: dict) -> None:
-    run("--funnel")
-    run("--tailnet")
-
-    assert kept(launched)["KIO1_PUBLIC_URL"] == ""
-    assert kept(launched)["KIO1_HOST"] == HERE
-
-
-def test_a_funnel_that_cannot_start_stops_kio1_too(
-    launched: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(launcher, "funnel", lambda port: (False, "not allowed"))
-
-    with pytest.raises(SystemExit):
-        run("--funnel")
-
-    assert "argv" not in launched
-
-
-def test_a_refused_user_is_allowed_once_and_the_funnel_tried_again(
-    launched: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    answers = iter([(False, "Access denied: serve config denied"), (True, "")])
-    monkeypatch.setattr(launcher, "funnel", lambda port: next(answers))
-    monkeypatch.setattr(launcher, "allow_this_user", lambda: True)
-
-    run("--funnel")
-
-    assert "argv" in launched
-
-
-def test_without_the_persons_yes_nothing_runs_as_root(
-    launched: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        launcher.subprocess,
-        "run",
-        lambda *args, **kwargs: pytest.fail("ran a command without asking"),
-    )
-
-    # Nobody at the keyboard: no question, no sudo.
-    assert launcher.allow_this_user() is False
 
 
 # ── start.py and the service ────────────────────────────────────────────────
@@ -201,7 +160,7 @@ def start_main_up_to_the_password_check(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_start_listens_where_dotenv_says(monkeypatch: pytest.MonkeyPatch) -> None:
     start_main_up_to_the_password_check(monkeypatch)
-    monkeypatch.setenv("KIO1_HOST", HERE)
+    monkeypatch.setenv("KIO1_HOST", "100.75.109.86")
 
     # No password: it refuses — which shows the host came from KIO1_HOST.
     with pytest.raises(SystemExit):

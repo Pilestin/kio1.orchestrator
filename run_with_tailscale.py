@@ -1,33 +1,31 @@
-"""Start KIO1 on this server with Tailscale, planning with the shared model machine.
+"""Start KIO1 on this server and publish it at a public HTTPS link.
 
-    python3 run_with_tailscale.py              # every time; no options needed
-    python3 run_with_tailscale.py --funnel     # once, to switch to a public link
-    python3 run_with_tailscale.py --tailnet    # once, to switch back
+    python3 run_with_tailscale.py
 
-The first time, it asks what it cannot know — who should reach the console,
-and a console password — and keeps the answers in `.env`, so every later start
-is the same command. Two ways to share:
+No options, no questions. It:
 
-- **tailnet** — the console listens on this machine's Tailscale address and
-  nowhere else: devices signed in to your tailnet reach it at
-  `http://<name>:8101`; the internet sees no open port.
-- **funnel** — for people without Tailscale. KIO1 listens on 127.0.0.1 only,
-  and Tailscale Funnel publishes it at `https://<name>.<tailnet>.ts.net`, with
-  a certificate Tailscale manages. Anyone with the link reaches the sign-in
-  page, so the password is required, the session cookie is HTTPS-only, and
-  the Funnel is switched off again when KIO1 stops.
+1. Points the planner at Ollama on the model machine (`MODEL_MACHINE`, over
+   Tailscale), unless `.env` already names another `KIO1_PROVIDER_ENDPOINT`.
+2. Makes sure there is a console password. If there is none it makes one,
+   prints it, and keeps it in `data/console-password` (readable by this user
+   only) — `.env` holds only its hash. `python3 start.py --set-password`
+   chooses another.
+3. Publishes KIO1 with Tailscale Funnel at `https://<machine>.<tailnet>.ts.net`,
+   a link anyone can open, with a certificate Tailscale manages. KIO1 itself
+   listens on 127.0.0.1 only. If Tailscale lets only root publish, it makes
+   this user Tailscale's operator first (sudo may ask for your password).
+4. Starts KIO1, and takes the link down again when KIO1 stops.
 
-Either way the planner uses Ollama on the model machine (`MODEL_MACHINE`, over
-Tailscale), unless `.env` already names another `KIO1_PROVIDER_ENDPOINT`.
-
-See docs/deploy.md for the model machine's side and for running this as a
-service.
+Anyone with the link reaches the sign-in page and nothing else; the session
+cookie only travels over HTTPS. See docs/deploy.md.
 """
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -37,15 +35,14 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 import start
-from core.console_auth import PASSWORD_HASH_ENV
+from core.console_auth import PASSWORD_HASH_ENV, hash_password
 from core.dotenv import load_dotenv, save_dotenv_value
 
 # The shared machine that serves the models, by its Tailscale address.
 MODEL_MACHINE = "100.71.36.18"
 OLLAMA_PORT = 11434
 DOTENV = ROOT / ".env"
-SHARE_ENV = "KIO1_SHARE"
-MODES = ("tailnet", "funnel")
+PASSWORD_FILE = ROOT / "data" / "console-password"
 
 
 def tailscale() -> str:
@@ -60,30 +57,8 @@ def tailscale() -> str:
     return executable
 
 
-def tailscale_address() -> str:
-    """This machine's Tailscale IPv4 address, or exit saying how to get one."""
-    try:
-        found = subprocess.run(
-            [tailscale(), "ip", "-4"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        found = None
-
-    address = (
-        found.stdout.strip().splitlines()[0] if found and found.stdout.strip() else ""
-    )
-    if not address:
-        start.say("Tailscale is installed but not connected. Run:  sudo tailscale up")
-        sys.exit(1)
-    return address
-
-
-def tailscale_dns_name() -> str:
-    """This machine's full name on the tailnet (`opeva-cloud-server.tail1234.ts.net`), or ""."""
+def tailscale_status() -> dict:
+    """`tailscale status --json`, or exit saying Tailscale is not connected."""
     try:
         found = subprocess.run(
             [tailscale(), "status", "--json"],
@@ -92,10 +67,13 @@ def tailscale_dns_name() -> str:
             timeout=10,
             check=False,
         )
-        dns_name = json.loads(found.stdout).get("Self", {}).get("DNSName", "")
-    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
-        return ""
-    return str(dns_name).rstrip(".")
+        status = json.loads(found.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        status = {}
+    if not isinstance(status, dict) or not status.get("Self", {}).get("DNSName"):
+        start.say("Tailscale is not connected. Run:  sudo tailscale up")
+        sys.exit(1)
+    return status
 
 
 def remember(name: str, value: str) -> None:
@@ -105,25 +83,19 @@ def remember(name: str, value: str) -> None:
         os.environ[name] = value
 
 
-def choose_mode(arguments: list[str]) -> str:
-    """`--funnel` or `--tailnet` if given; else what .env says; else ask once."""
-    for mode in MODES:
-        if f"--{mode}" in arguments:
-            return mode
-
-    kept = os.environ.get(SHARE_ENV, "").strip()
-    if kept in MODES:
-        return kept
-
-    if not sys.stdin.isatty():
-        return "tailnet"
-
-    start.say("Who should reach the console?")
-    start.say("  1) Only devices on my tailnet (Tailscale needed; nothing is public)")
-    start.say(
-        "  2) Anyone I send the link to (Tailscale Funnel; public HTTPS + password)"
-    )
-    return "funnel" if input("Choose 1 or 2 [1]: ").strip() == "2" else "tailnet"
+def ensure_password() -> None:
+    """Make a console password if there is none, and say where it is."""
+    if os.environ.get(PASSWORD_HASH_ENV, "").strip():
+        return
+    password = secrets.token_urlsafe(12)
+    remember(PASSWORD_HASH_ENV, hash_password(password))
+    PASSWORD_FILE.parent.mkdir(exist_ok=True)
+    PASSWORD_FILE.write_text(password + "\n", encoding="utf-8")
+    if os.name == "posix":
+        os.chmod(PASSWORD_FILE, 0o600)
+    start.say(f"Console password: {password}")
+    start.say(f"  (kept in {PASSWORD_FILE.relative_to(ROOT)}; change it with")
+    start.say("   python3 start.py --set-password)")
 
 
 def funnel(port: int) -> tuple[bool, str]:
@@ -131,7 +103,7 @@ def funnel(port: int) -> tuple[bool, str]:
 
     Tailscale's output is shown as it comes — the first time it may print a
     link to approve Funnel for the tailnet, and wait for it — and kept, so a
-    refusal can be read. Returns whether it worked, and what it said.
+    refusal can be read.
     """
     try:
         process = subprocess.Popen(
@@ -144,10 +116,10 @@ def funnel(port: int) -> tuple[bool, str]:
         return False, str(error)
 
     said = []
-    assert process.stdout is not None
-    for line in process.stdout:
-        print(line, end="", flush=True)
-        said.append(line)
+    if process.stdout is not None:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            said.append(line)
     try:
         process.wait(timeout=300)
     except subprocess.TimeoutExpired:
@@ -156,29 +128,20 @@ def funnel(port: int) -> tuple[bool, str]:
     return process.returncode == 0, "".join(said)
 
 
-def allow_this_user() -> bool:
-    """Let this user change Tailscale's settings, with the person's yes and sudo.
+def make_operator() -> bool:
+    """Let this user change Tailscale's settings, as `tailscale funnel` needs.
 
-    By default only root may publish with Funnel; `tailscale set --operator`
-    lets one named user do it from then on. Asked once, never assumed.
+    Tailscale lets only root publish until a user is named its operator.
     """
-    import getpass
-
-    user = getpass.getuser()
-    if not sys.stdin.isatty():
-        return False
-    start.say(f"Tailscale lets only root publish with Funnel. Allow '{user}' to, once?")
-    start.say(f"  This runs: sudo tailscale set --operator={user}")
-    if input("Allow? [Y/n]: ").strip().lower() not in ("", "y", "yes", "e", "evet"):
-        return False
+    start.say("Letting this user publish with Tailscale (sudo may ask for a password).")
     done = subprocess.run(
-        ["sudo", tailscale(), "set", f"--operator={user}"], check=False
+        ["sudo", tailscale(), "set", f"--operator={getpass.getuser()}"], check=False
     )
     return done.returncode == 0
 
 
 def funnel_off() -> None:
-    """Take the public address down, so nothing points at a stopped KIO1."""
+    """Take the public link down, so it never points at a stopped KIO1."""
     try:
         subprocess.run(
             [tailscale(), "funnel", "--https=443", "off"],
@@ -193,10 +156,10 @@ def funnel_off() -> None:
 def check_model_machine(endpoint: str) -> None:
     tags = start._get_json(f"{endpoint.rstrip('/')}/api/tags", timeout=5)
     if tags is None:
-        start.say(f"The model machine at {endpoint} did not answer. Check that:")
-        start.say("  - it is on (tailscale status lists it as online),")
-        start.say("  - Ollama there listens on its Tailscale address (docs/deploy.md).")
-        start.say("Starting anyway; the console will say when it can plan.")
+        start.say(f"The model machine at {endpoint} did not answer; check that it is")
+        start.say(
+            "on and that Ollama listens on its Tailscale address. Starting anyway."
+        )
         return
     names = [str(m.get("name")) for m in tags.get("models", []) if isinstance(m, dict)]
     start.say(f"Models on {endpoint}: {', '.join(names) or 'none yet'}")
@@ -205,72 +168,42 @@ def check_model_machine(endpoint: str) -> None:
 def main() -> None:
     os.chdir(ROOT)
     load_dotenv(DOTENV)
-    here = tailscale_address()
-    dns_name = tailscale_dns_name()
-    short_name = dns_name.split(".")[0]
-
-    mode = choose_mode(sys.argv[1:])
-    remember(SHARE_ENV, mode)
+    status = tailscale_status()
+    dns_name = str(status["Self"]["DNSName"]).rstrip(".")
+    here = next((ip for ip in status["Self"].get("TailscaleIPs", []) if "." in ip), "")
 
     if not os.environ.get("KIO1_PROVIDER_ENDPOINT", "").strip():
         # The models may live on this very machine.
         host = "127.0.0.1" if here == MODEL_MACHINE else MODEL_MACHINE
         remember("KIO1_PROVIDER_ENDPOINT", f"http://{host}:{OLLAMA_PORT}")
 
-    if not os.environ.get(PASSWORD_HASH_ENV, "").strip():
-        if not sys.stdin.isatty():
-            start.say("No console password yet. Run this once by hand to set one:")
-            start.say("    python3 run_with_tailscale.py")
-            sys.exit(1)
-        start.say("First start: choose the password the console will ask for.")
-        start.set_password()
-        load_dotenv(DOTENV)
+    ensure_password()
 
-    if mode == "funnel":
-        if not dns_name:
-            start.say("Tailscale did not say this machine's name; Funnel needs it.")
-            sys.exit(1)
-        # Only Tailscale's Funnel reaches KIO1; nothing listens on the network.
-        remember("KIO1_HOST", "127.0.0.1")
-        remember("KIO1_CONSOLE_NAME", "")
-        remember("KIO1_PUBLIC_URL", f"https://{dns_name}")
-    else:
-        remember("KIO1_HOST", here)
-        remember("KIO1_CONSOLE_NAME", short_name)
-        remember("KIO1_PUBLIC_URL", "")
+    # Only Funnel reaches KIO1; nothing listens on the network itself.
+    public_url = f"https://{dns_name}"
+    remember("KIO1_HOST", "127.0.0.1")
+    remember("KIO1_CONSOLE_NAME", "")
+    remember("KIO1_PUBLIC_URL", public_url)
 
     check_model_machine(os.environ["KIO1_PROVIDER_ENDPOINT"])
-    port = start.free_port(os.environ["KIO1_HOST"], 8101)
+    port = start.free_port("127.0.0.1", 8101)
 
-    if mode == "funnel":
-        funnel_off()  # whatever an earlier run left published
+    funnel_off()  # whatever an earlier run left published
+    published, said = funnel(port)
+    if not published and "access denied" in said.lower() and make_operator():
         published, said = funnel(port)
-        if not published and "access denied" in said.lower() and allow_this_user():
-            published, said = funnel(port)
-        if not published:
-            start.say("Tailscale Funnel could not be switched on. Usually one of:")
-            start.say(
-                "  - Funnel is not allowed for this machine yet: approve it at the"
-            )
-            start.say("    link Tailscale printed above, or in the admin console")
-            start.say("    (Access controls → Funnel), and turn on HTTPS certificates.")
-            start.say("  - This user may not change Tailscale's settings; once, run:")
-            start.say("      sudo tailscale set --operator=$USER")
-            sys.exit(1)
-        start.say(
-            f"Public link: https://{dns_name} — anyone with it sees the sign-in page."
-        )
-    else:
-        start.say(
-            f"The console is on http://{short_name or here}:{port}, for your tailnet."
-        )
+    if not published:
+        start.say("Tailscale Funnel could not be switched on. If Tailscale printed a")
+        start.say("link above, open it to allow Funnel for this tailnet, then run")
+        start.say("this again.")
+        sys.exit(1)
 
+    start.say(f"Public link: {public_url}")
     sys.argv = [sys.argv[0], "--no-browser", "--port", str(port)]
     try:
         start.main()
     finally:
-        if mode == "funnel":
-            funnel_off()
+        funnel_off()
 
 
 if __name__ == "__main__":
