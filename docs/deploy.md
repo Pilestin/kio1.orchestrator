@@ -19,10 +19,10 @@ Ollama has no password. Let it listen on its Tailscale address only, never
 on `0.0.0.0`:
 
 ```bash
-tailscale ip -4                       # say 100.101.102.103
+tailscale ip -4                       # say 100.71.36.18
 sudo systemctl edit ollama            # then add:
 #   [Service]
-#   Environment="OLLAMA_HOST=100.101.102.103:11434"
+#   Environment="OLLAMA_HOST=100.71.36.18:11434"
 sudo systemctl restart ollama
 ollama pull qwen3.5:4b                # models are pulled here, not from KIO1
 ```
@@ -43,38 +43,40 @@ controls:
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up --advertise-tags=tag:kio1
-curl -s http://100.101.102.103:11434/api/tags      # the model machine answers
 
 adduser --disabled-password kio1 && su - kio1      # not as root
 git clone <repository> kio1 && cd kio1
-python3 start.py --set-password                    # asks twice; only a hash is kept
+python3 run_with_tailscale.py
 ```
 
-Tell KIO1 where the models are, in `.env` (which `start.py` makes readable by
-its owner only):
+That is the whole start, every time — no options. `run_with_tailscale.py`:
 
-```bash
-KIO1_PROVIDER_ENDPOINT="http://100.101.102.103:11434"
-```
+- finds the droplet's Tailscale address and listens there only, so the
+  console is reachable from your devices on the tailnet (phones too) and the
+  internet sees no open port;
+- points the planner at Ollama on the model machine, `100.71.36.18:11434`
+  (the address is `MODEL_MACHINE` at the top of the file);
+- the first time, asks for the console password and keeps only its hash;
+- checks the model machine answers, lists its models, and starts KIO1.
 
-and set `"provider": "ollama"` and a model the machine has in `config.json`.
-`KIO1_PROVIDER_ENDPOINT` wins over the file, for the service and for
-`start.py`, which checks the model server before starting and, if it does not
-answer, says to check Tailscale rather than trying to start Ollama on the
-droplet. An endpoint on the public internet over plain HTTP gets a warning.
+It keeps its choices in `.env` (`KIO1_HOST`, `KIO1_PROVIDER_ENDPOINT`), which
+`start.py` makes readable by its owner only — so a plain `python3 start.py`
+starts the same way afterwards. To use another model machine, change
+`KIO1_PROVIDER_ENDPOINT` there. Pick a model the machine has in the
+console's Settings, or in `config.json` (`"provider": "ollama"`).
+
+If the model machine does not answer, KIO1 starts anyway and says to check
+Tailscale; it never tries to start Ollama on the droplet. An endpoint on the
+public internet over plain HTTP gets a warning.
 
 In DigitalOcean, add a **Cloud Firewall** to the droplet that allows only SSH
 (22) inbound — and 80/443 if you choose HTTPS below.
 
 ## 3. Reaching the console
 
-**On the tailnet (recommended).** Listen on the droplet's Tailscale address;
-only your own devices, signed in to Tailscale, can reach it — phones too:
-
-```bash
-python3 start.py --host "$(tailscale ip -4)" --no-browser
-# open http://<droplet's Tailscale IP>:8101 from any device on the tailnet
-```
+**On the tailnet (recommended).** What `run_with_tailscale.py` does: open
+`http://<droplet's Tailscale IP>:8101` from any device signed in to the
+tailnet.
 
 **On the internet, with HTTPS.** For people not on your tailnet. KIO1 stays on
 `127.0.0.1:8101` and [Caddy](https://caddyserver.com) answers on 443 with a
@@ -86,7 +88,7 @@ echo 'kio1.example.com {
     reverse_proxy 127.0.0.1:8101
 }' | sudo tee /etc/caddy/Caddyfile
 sudo systemctl reload caddy
-python3 start.py --no-browser
+python3 start.py --host 127.0.0.1 --no-browser
 ```
 
 Either way the console password is asked for; a stranger reaches nothing but
@@ -108,7 +110,7 @@ Wants=network-online.target
 [Service]
 User=kio1
 WorkingDirectory=/home/kio1/kio1
-ExecStart=/usr/bin/python3 start.py --no-browser --skip-install
+ExecStart=/usr/bin/python3 run_with_tailscale.py
 Restart=on-failure
 
 [Install]
@@ -120,9 +122,9 @@ sudo systemctl daemon-reload && sudo systemctl enable --now kio1
 journalctl -u kio1 -f
 ```
 
-For the tailnet option, add `--host <droplet's Tailscale IP>` to `ExecStart`.
-Run `python3 start.py` once by hand first, so it creates `.venv` and the
-`--skip-install` start has everything it needs.
+Run `python3 run_with_tailscale.py` once by hand first: it creates `.venv`
+and asks for the password, which a service cannot do. For the HTTPS option,
+use `start.py --host 127.0.0.1 --no-browser` in `ExecStart` instead.
 
 ## Checklist
 

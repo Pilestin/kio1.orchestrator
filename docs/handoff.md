@@ -49,6 +49,8 @@ ve `/login` dışında her istek oturum çerezi ya da yönetim token'ı ister;
 Hesaplar ve LiteLLM ile ücretlendirme: [plans/accounts.md](plans/accounts.md).
 Sunucuda çalıştırma ve modelin Tailscale'deki başka makinede olması: [deploy.md](deploy.md)
 (`KIO1_PROVIDER_ENDPOINT`; `core/endpoints.py` uzak sunucuya model indirmeyi engeller).
+Sunucuda tek komut: `python3 run_with_tailscale.py` (model makinesi `100.71.36.18`;
+konsol droplet'in Tailscale adresinde; seçimler `.env`'de `KIO1_HOST`, `KIO1_PROVIDER_ENDPOINT`).
 
 | Özellik | Dosyalar | Doküman |
 |---|---|---|

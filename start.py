@@ -290,7 +290,11 @@ def main() -> None:
     """Prepare everything and run KIO1 until interrupted."""
     parser = argparse.ArgumentParser(description="Start the KIO1 console.")
     parser.add_argument("--port", type=int, default=8101, help="first port to try")
-    parser.add_argument("--host", default="127.0.0.1", help="address to listen on")
+    parser.add_argument(
+        "--host",
+        default="",
+        help="address to listen on (default: KIO1_HOST in .env, else 127.0.0.1)",
+    )
     parser.add_argument(
         "--no-browser", action="store_true", help="do not open a browser"
     )
@@ -316,6 +320,11 @@ def main() -> None:
     # Before the token is decided, so a KIO1_REGISTRY_TOKEN in .env is the
     # one used rather than a generated one.
     load_dotenv(ROOT / ".env")
+    # Chosen once and kept in .env — run_with_tailscale.py writes it — so a
+    # plain `python3 start.py` opens where it opened last time.
+    arguments.host = (
+        arguments.host or os.environ.get("KIO1_HOST", "").strip() or "127.0.0.1"
+    )
     python = ensure_environment(arguments.skip_install)
     config = ensure_config()
     token = ensure_token()

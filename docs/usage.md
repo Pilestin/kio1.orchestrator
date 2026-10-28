@@ -362,7 +362,7 @@ readable by its owner only.
 
 [Running on a server](deploy.md) walks through a whole deployment: a
 DigitalOcean droplet, HTTPS or Tailscale in front, and the model on another
-machine over Tailscale (`KIO1_PROVIDER_ENDPOINT`).
+machine over Tailscale — started with one command, `python3 run_with_tailscale.py`.
 
 ---
 
