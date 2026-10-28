@@ -12,9 +12,14 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from app import app
+from app import _State, app, get_state
 from core import console_auth
 from core.console_auth import Gate, hash_password, verify_password
+from core.session_client import NullSessionClient
+from dispatch.agent_registry import AgentRegistry
+from dispatch.directory import AgentDirectory
+from dispatch.scoreboard import Scoreboard
+from tests.test_settings_api import make_config
 
 PASSWORD = "a long enough password"
 
@@ -36,9 +41,20 @@ def client(monkeypatch: pytest.MonkeyPatch, stored: str) -> Iterator[TestClient]
 
 @pytest.fixture
 def started(client: TestClient) -> Iterator[TestClient]:
-    """The same, with the service started: for pages that read its state."""
-    with client:
-        yield client
+    """The same, with a service state behind it: for pages that read one.
+
+    A state made here rather than the real startup, which would read this
+    machine's config.json and .env and fail wherever a key is missing.
+    """
+    state = _State(
+        runner=type("Runner", (), {"config": make_config()})(),  # type: ignore[arg-type]
+        session_client=NullSessionClient(),
+        directory=AgentDirectory(AgentRegistry({})),
+        scoreboard=Scoreboard(),
+    )
+    app.dependency_overrides[get_state] = lambda: state
+    yield client
+    app.dependency_overrides.clear()
 
 
 def sign_in(client: TestClient, password: str = PASSWORD) -> int:

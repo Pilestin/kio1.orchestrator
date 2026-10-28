@@ -6,9 +6,10 @@ No options. The first time, it asks for what it cannot know — a console
 password — and keeps the answers in `.env`, so every later start is the same
 command, and so is a plain `python3 start.py`. What it does:
 
-1. Finds this machine's Tailscale address. The console listens there and
-   nowhere else, so only devices signed in to the tailnet can reach it; the
-   internet sees no open port.
+1. Finds this machine's Tailscale address and name. The console listens on
+   the address and nowhere else, so only devices signed in to the tailnet
+   can reach it — at `http://<name>:8101` — and the internet sees no open
+   port.
 2. Points the planner at Ollama on the model machine (`MODEL_MACHINE`, over
    Tailscale), unless `.env` already names another `KIO1_PROVIDER_ENDPOINT`.
 3. Makes sure a console password is set, asking for one if not.
@@ -20,6 +21,7 @@ service.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -69,6 +71,29 @@ def tailscale_address() -> str:
     return address
 
 
+def tailscale_name() -> str:
+    """This machine's name on the tailnet (`opeva-cloud-server`), or "".
+
+    Devices with MagicDNS on — Tailscale's default — reach it by this name,
+    which is easier to remember and survives a change of address.
+    """
+    executable = shutil.which("tailscale")
+    if executable is None:
+        return ""
+    try:
+        found = subprocess.run(
+            [executable, "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        dns_name = json.loads(found.stdout).get("Self", {}).get("DNSName", "")
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        return ""
+    return str(dns_name).rstrip(".").split(".")[0]
+
+
 def remember(name: str, value: str) -> None:
     """Keep a value in .env and in this process."""
     save_dotenv_value(name, value, DOTENV)
@@ -83,6 +108,10 @@ def main() -> None:
     # Listen on the tailnet only; a plain start.py will do the same from now on.
     if os.environ.get("KIO1_HOST", "").strip() != here:
         remember("KIO1_HOST", here)
+
+    name = tailscale_name()
+    if name and os.environ.get("KIO1_CONSOLE_NAME", "").strip() != name:
+        remember("KIO1_CONSOLE_NAME", name)
 
     if not os.environ.get("KIO1_PROVIDER_ENDPOINT", "").strip():
         # The models may live on this very machine.
@@ -111,7 +140,7 @@ def main() -> None:
         ]
         start.say(f"Models on {endpoint}: {', '.join(names) or 'none yet'}")
 
-    start.say(f"The console will be on {here}, for devices on your tailnet.")
+    start.say(f"The console will be on {name or here}, for devices on your tailnet.")
     sys.argv = [sys.argv[0], "--no-browser"]
     start.main()
 

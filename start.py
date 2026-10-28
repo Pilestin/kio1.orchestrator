@@ -368,7 +368,15 @@ def main() -> None:
             process.wait()
             sys.exit(process.returncode or 1)
 
-        console = f"{url}/#token={token}"
+        # The name people type — a Tailscale machine name, say — rather than
+        # the address bound to; both reach the same place.
+        name = os.environ.get("KIO1_CONSOLE_NAME", "").strip()
+        console = f"http://{name}:{port}" if name else url
+        # Behind a password the token stays out of the address: it would sit
+        # in the terminal's scrollback and the browser's history, and signing
+        # in already opens the administration pages.
+        if not os.environ.get(PASSWORD_HASH_ENV, "").strip():
+            console = f"{console}/#token={token}"
         say("")
         say(f"KIO1 is running. Console: {console}")
         say("Press Ctrl+C here to stop it.")

@@ -26,13 +26,16 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[dict]:
     dotenv = tmp_path / ".env"
     monkeypatch.setattr(launcher, "DOTENV", dotenv)
     monkeypatch.setattr(launcher, "tailscale_address", lambda: HERE)
+    monkeypatch.setattr(launcher, "tailscale_name", lambda: "opeva-cloud-server")
     monkeypatch.setattr(start, "say", lambda text: None)
     monkeypatch.setattr(start, "_get_json", lambda url, timeout: {"models": []})
     monkeypatch.setattr(
         start, "main", lambda: seen.update(argv=list(launcher.sys.argv))
     )
-    for name in ("KIO1_HOST", "KIO1_PROVIDER_ENDPOINT"):
-        monkeypatch.delenv(name, raising=False)
+    # Set, then removed, so monkeypatch undoes what the launcher writes.
+    for name in ("KIO1_HOST", "KIO1_PROVIDER_ENDPOINT", "KIO1_CONSOLE_NAME"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
     monkeypatch.setenv(PASSWORD_HASH_ENV, hash_password("a long enough password"))
     # The launcher rewrites sys.argv for start.main; put it back afterwards.
     monkeypatch.setattr(launcher.sys, "argv", list(launcher.sys.argv))
@@ -49,6 +52,14 @@ def test_the_console_listens_on_the_tailnet_and_remembers_it(launched: dict) -> 
 
     assert kept(launched)["KIO1_HOST"] == HERE
     assert launched["argv"][1:] == ["--no-browser"]
+
+
+def test_the_console_is_named_as_the_tailnet_names_the_machine(
+    launched: dict,
+) -> None:
+    launcher.main()
+
+    assert kept(launched)["KIO1_CONSOLE_NAME"] == "opeva-cloud-server"
 
 
 def test_the_planner_points_at_the_model_machine(launched: dict) -> None:

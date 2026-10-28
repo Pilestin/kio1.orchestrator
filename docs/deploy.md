@@ -53,13 +53,14 @@ That is the whole start, every time — no options. `run_with_tailscale.py`:
 
 - finds the droplet's Tailscale address and listens there only, so the
   console is reachable from your devices on the tailnet (phones too) and the
-  internet sees no open port;
+  internet sees no open port — at `http://<machine name>:8101`, the name
+  Tailscale gives the droplet (`opeva-cloud-server`, say);
 - points the planner at Ollama on the model machine, `100.71.36.18:11434`
   (the address is `MODEL_MACHINE` at the top of the file);
 - the first time, asks for the console password and keeps only its hash;
 - checks the model machine answers, lists its models, and starts KIO1.
 
-It keeps its choices in `.env` (`KIO1_HOST`, `KIO1_PROVIDER_ENDPOINT`), which
+It keeps its choices in `.env` (`KIO1_HOST`, `KIO1_CONSOLE_NAME`, `KIO1_PROVIDER_ENDPOINT`), which
 `start.py` makes readable by its owner only — so a plain `python3 start.py`
 starts the same way afterwards. To use another model machine, change
 `KIO1_PROVIDER_ENDPOINT` there. Pick a model the machine has in the
@@ -75,8 +76,13 @@ In DigitalOcean, add a **Cloud Firewall** to the droplet that allows only SSH
 ## 3. Reaching the console
 
 **On the tailnet (recommended).** What `run_with_tailscale.py` does: open
-`http://<droplet's Tailscale IP>:8101` from any device signed in to the
-tailnet.
+`http://opeva-cloud-server:8101` (the droplet's Tailscale name) from any
+device signed in to the tailnet. The address KIO1 prints has no token in it:
+with a password, signing in is all it takes.
+
+The password is the one typed at the first start; only its hash is kept, so
+it cannot be read back. To choose a new one: `python3 start.py --set-password`,
+then restart KIO1.
 
 **On the internet, with HTTPS.** For people not on your tailnet. KIO1 stays on
 `127.0.0.1:8101` and [Caddy](https://caddyserver.com) answers on 443 with a
