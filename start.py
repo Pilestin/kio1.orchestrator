@@ -36,6 +36,7 @@ from pathlib import Path
 
 from core.console_auth import PASSWORD_HASH_ENV, hash_password
 from core.dotenv import load_dotenv, save_dotenv_value
+from core.endpoints import exposed, is_local
 
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
@@ -163,11 +164,28 @@ def check_ollama(config: dict) -> None:
     Problems are reported rather than fatal: the console opens either way and
     shows what is wrong, which is a better place to fix it than a terminal.
     """
-    endpoint = str(
-        config.get("provider_options", {}).get("endpoint", "http://127.0.0.1:11434")
+    # KIO1_PROVIDER_ENDPOINT wins, as it does for the service itself: on a
+    # server it points at the model machine, often over Tailscale.
+    endpoint = (
+        os.environ.get("KIO1_PROVIDER_ENDPOINT", "").strip()
+        or str(
+            config.get("provider_options", {}).get("endpoint", "http://127.0.0.1:11434")
+        )
     ).rstrip("/")
     model = str(config.get("model", ""))
-    tags = _get_json(f"{endpoint}/api/tags", timeout=3)
+
+    if exposed(endpoint):
+        say(f"Warning: {endpoint} is on the internet without HTTPS — every prompt")
+        say("crosses it readable. Reach it over Tailscale or a VPN instead.")
+
+    tags = _get_json(f"{endpoint}/api/tags", timeout=5)
+
+    # Ollama on another machine is not ours to start.
+    if tags is None and not is_local(endpoint):
+        say(f"The model server at {endpoint} did not answer.")
+        say("If it is on your tailnet: is Tailscale up here (tailscale status), and")
+        say("is Ollama there listening on its Tailscale address? Starting anyway.")
+        return
 
     if tags is None:
         executable = shutil.which("ollama")

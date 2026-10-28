@@ -190,6 +190,7 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 - [Failover](docs/failover.md) — Running a step on another target when the one the plan named cannot
 - [Choosing by history](docs/selection.md) — Asking the target that has actually been working, not the one listed first
 - [The console](docs/console.md) — The chat, the agents, and the settings, in your browser
+- [Running on a server](docs/deploy.md) — A droplet, a password, and a model machine reached over Tailscale
 - [First-time setup](docs/setup.md) — Choosing and downloading a model that suits the computer
 - [Approving a plan](docs/approval.md) — Plans that wait for a person, and questions KIO1 asks first
 - [Reviewing and answering](docs/review.md) — How a run reads its results and writes the answer

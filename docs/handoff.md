@@ -20,7 +20,7 @@
 
 ## Bugünkü durum
 
-1071 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler); bunların bir kısmı `kio-mocks/tests`'ten.
+1085 test geçiyor, 26 atlanıyor (PostgreSQL/NATS gerektirenler); bunların bir kısmı `kio-mocks/tests`'ten.
 
 2026-10-27'de eklenenler: açılışta yarım kalan çalışmalar kapatılıyor
 (`EmbeddedSessionClient.close_interrupted`); hedef gerektirmeyen istekler
@@ -47,6 +47,8 @@ Konsol şifresi (2026-10-28): `KIO1_CONSOLE_PASSWORD_HASH` ayarlıysa `/health`
 ve `/login` dışında her istek oturum çerezi ya da yönetim token'ı ister;
 `start.py --set-password` yazar, şifresiz `--host` yalnızca yerel adres olabilir.
 Hesaplar ve LiteLLM ile ücretlendirme: [plans/accounts.md](plans/accounts.md).
+Sunucuda çalıştırma ve modelin Tailscale'deki başka makinede olması: [deploy.md](deploy.md)
+(`KIO1_PROVIDER_ENDPOINT`; `core/endpoints.py` uzak sunucuya model indirmeyi engeller).
 
 | Özellik | Dosyalar | Doküman |
 |---|---|---|

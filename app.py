@@ -33,7 +33,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from core import console_auth
+from core import console_auth, endpoints
 from core.agent_store import (
     ACTION_RESTORED,
     STORE_FILE,
@@ -2320,6 +2320,18 @@ def pull_model(
     _require_registry_token(request)
 
     endpoint = _ollama_endpoint(state.runner.config)
+
+    # A model server on another machine — a shared GPU box on the tailnet —
+    # is filled by whoever runs it: a download from here would take its disk
+    # and bandwidth from everyone else on it.
+    if not endpoints.is_local(endpoint):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"The models are served from another machine ({endpoint}). "
+                "Download a model there, with `ollama pull`, and pick it here."
+            ),
+        )
 
     if not ollama_status(endpoint)["running"]:
         raise HTTPException(

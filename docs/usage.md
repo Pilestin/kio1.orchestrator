@@ -360,6 +360,10 @@ The password travels as typed: put HTTPS in front (Caddy or nginx) before you
 use it over the internet, and keep `.env` to yourself — `start.py` makes it
 readable by its owner only.
 
+[Running on a server](deploy.md) walks through a whole deployment: a
+DigitalOcean droplet, HTTPS or Tailscale in front, and the model on another
+machine over Tailscale (`KIO1_PROVIDER_ENDPOINT`).
+
 ---
 
 ## 3. The terminal application
