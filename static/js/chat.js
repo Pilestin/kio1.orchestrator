@@ -8,6 +8,7 @@
 import { attachmentIds, clearAttachments, readyCapabilities, uploading } from "./composer.js";
 import { $, addCopyButtons, api, ask, copyText, esc, hooks, relativeTime, setRows, state, statusChip, toast } from "./core.js";
 import { followRun, live, loadSteps, setDrawer, subscribe } from "./live.js";
+import { setAmbient } from "./ambient.js";
 import { renderMarkdown } from "./markdown.js";
 import { addressDetail, setAddress, setTitle, showTab } from "./shell.js";
 
@@ -328,6 +329,7 @@ function renderTurns() {
   while (box.children.length > turns.length) box.lastElementChild.remove();
 
   $("chat-empty").classList.toggle("hidden", turns.length > 0);
+  setAmbient(!turns.length);
   if (chat.stopping && chat.stopping !== activeRun()) chat.stopping = null;
   renderSendButton();
   if (!turns.length) showUsableExamples();

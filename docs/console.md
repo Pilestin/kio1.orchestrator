@@ -66,7 +66,10 @@ its answer is cut off at once, a step already with an agent finishes and the
 ones after it are not sent, a wait for an approval or an answer ends now. It
 is shown as *stopped*, not failed (`POST /workflow/{id}/cancel`).
 
-The examples on an empty chat are only the ones a ready agent can do.
+The examples on an empty chat are only the ones a ready agent can do. Behind
+them, sharks drawn in characters drift across the page — only while the chat
+is empty, still when the system asks for less motion, and paused while the
+tab is hidden.
 
 Below an answer: copy it, ask the same again, or open the run details.
 
