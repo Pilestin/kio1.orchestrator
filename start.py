@@ -332,11 +332,15 @@ def main() -> None:
 
     # Beyond this machine, a KIO1 without a password runs workflows — paid
     # model calls, commands on the server — for anyone who finds the port.
-    if (
-        arguments.host not in LOOPBACK
-        and not os.environ.get(PASSWORD_HASH_ENV, "").strip()
-    ):
-        say(f"Not starting on {arguments.host}: there is no console password.")
+    # A public address (Tailscale Funnel, a proxy) reaches KIO1 through
+    # 127.0.0.1, so the address alone does not show it is exposed.
+    public = os.environ.get("KIO1_PUBLIC_URL", "").strip()
+    if (arguments.host not in LOOPBACK or public) and not os.environ.get(
+        PASSWORD_HASH_ENV, ""
+    ).strip():
+        say(
+            f"Not starting on {public or arguments.host}: there is no console password."
+        )
         say("Set one with:  python start.py --set-password")
         sys.exit(1)
 
@@ -371,7 +375,8 @@ def main() -> None:
         # The name people type — a Tailscale machine name, say — rather than
         # the address bound to; both reach the same place.
         name = os.environ.get("KIO1_CONSOLE_NAME", "").strip()
-        console = f"http://{name}:{port}" if name else url
+        public = os.environ.get("KIO1_PUBLIC_URL", "").strip().rstrip("/")
+        console = public or (f"http://{name}:{port}" if name else url)
         # Behind a password the token stays out of the address: it would sit
         # in the terminal's scrollback and the browser's history, and signing
         # in already opens the administration pages.

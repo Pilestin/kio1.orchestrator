@@ -471,7 +471,13 @@ def login(body: SignInRequest, request: Request) -> JSONResponse:
     if not console_auth.enabled():
         return JSONResponse({"signed_in": True})
 
-    address = request.client.host if request.client else "unknown"
+    address = request.client.host if request.client else ""
+    # Through a local proxy that names no client (Tailscale Funnel may not),
+    # every visitor looks like 127.0.0.1: counting them as one would let a
+    # stranger's wrong guesses lock everyone out, so only the overall limit
+    # applies to them.
+    if address in ("127.0.0.1", "::1", "localhost"):
+        address = ""
     wait = console_auth.GATE.wait_before_trying(address)
     if wait:
         return JSONResponse(
@@ -492,6 +498,8 @@ def login(body: SignInRequest, request: Request) -> JSONResponse:
     secure = (
         request.url.scheme == "https"
         or request.headers.get("X-Forwarded-Proto", "") == "https"
+        # Published over HTTPS (Funnel): the cookie must never travel in clear.
+        or os.environ.get("KIO1_PUBLIC_URL", "").startswith("https://")
     )
     response.set_cookie(
         console_auth.COOKIE,

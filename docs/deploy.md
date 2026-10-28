@@ -84,7 +84,32 @@ The password is the one typed at the first start; only its hash is kept, so
 it cannot be read back. To choose a new one: `python3 start.py --set-password`,
 then restart KIO1.
 
-**On the internet, with HTTPS.** For people not on your tailnet. KIO1 stays on
+**With a link, for people without Tailscale (Funnel).** Once:
+
+```bash
+python3 run_with_tailscale.py --funnel
+```
+
+and every later `python3 run_with_tailscale.py` starts the same way (the first
+start also asks which of the two you want). KIO1 then listens on 127.0.0.1
+only, and [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) publishes it
+at `https://opeva-cloud-server.<tailnet>.ts.net` with a certificate Tailscale
+manages — send that link. Anyone who has it reaches the sign-in page and
+nothing else; the session cookie only travels over HTTPS; and the Funnel is
+switched off when KIO1 stops, so the link never points at a stopped server.
+`python3 run_with_tailscale.py --tailnet` goes back to the tailnet only.
+
+The first time, Funnel has to be allowed for the tailnet: Tailscale prints a
+link to approve it (HTTPS certificates and the `funnel` attribute in the
+access controls). If the droplet's user may not change Tailscale's settings,
+run `sudo tailscale set --operator=$USER` once.
+
+Everyone shares the one password, sees every conversation, and plans on the
+same model machine; per-person accounts are [planned](plans/accounts.md).
+Turn the command agents (Pytest, GitHistory) off before sharing: they run on
+the droplet.
+
+**On the internet, with your own domain.** For people not on your tailnet. KIO1 stays on
 `127.0.0.1:8101` and [Caddy](https://caddyserver.com) answers on 443 with a
 certificate it obtains itself. Point a domain's A record at the droplet, then:
 

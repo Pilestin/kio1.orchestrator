@@ -50,7 +50,8 @@ Hesaplar ve LiteLLM ile ücretlendirme: [plans/accounts.md](plans/accounts.md).
 Sunucuda çalıştırma ve modelin Tailscale'deki başka makinede olması: [deploy.md](deploy.md)
 (`KIO1_PROVIDER_ENDPOINT`; `core/endpoints.py` uzak sunucuya model indirmeyi engeller).
 Sunucuda tek komut: `python3 run_with_tailscale.py` (model makinesi `100.71.36.18`;
-konsol droplet'in Tailscale adresinde; seçimler `.env`'de `KIO1_HOST`, `KIO1_PROVIDER_ENDPOINT`).
+konsol droplet'in Tailscale adresinde ya da `--funnel` ile herkese açık https://…ts.net
+bağlantısında; seçimler `.env`'de `KIO1_SHARE`, `KIO1_HOST`, `KIO1_PUBLIC_URL`, `KIO1_PROVIDER_ENDPOINT`).
 
 | Özellik | Dosyalar | Doküman |
 |---|---|---|

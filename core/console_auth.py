@@ -134,7 +134,8 @@ class Gate:
                 ]
                 if not self.failures[key]:
                     del self.failures[key]
-            mine = self.failures.get(address, [])
+            # An address of "" is a visitor whose address is not known.
+            mine = self.failures.get(address, []) if address else []
             overall = sum(len(times) for times in self.failures.values())
             if len(mine) >= FAILURES_PER_ADDRESS:
                 return int(FAILURE_WINDOW_SECONDS - (now - mine[0])) + 1
