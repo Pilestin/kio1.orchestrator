@@ -1,11 +1,16 @@
-// Sharks made of characters, drifting behind an empty chat.
+// An octopus made of characters, conducting behind an empty chat.
 //
-// Each shark is a shape described by a few curves — a tapered body, a forked
-// tail, a dorsal and a pectoral fin — sampled on a grid of character cells:
-// where the shape is solid and shaded the character is dense (# %), where it
-// thins or turns to the belly it is light (. :). The tail sways, the path
-// meanders, and a few bubbles rise. A soft glow in the middle keeps the
-// question and the examples readable over it.
+// KIO1 orchestrates: one request, many agents, each step handed to the one
+// that does it. The octopus is that picture — a head that decides and eight
+// arms that each reach for something. At every arm's tip a small node lights
+// up in turn, one after another around the arms, like a conductor bringing in
+// each section of the orchestra.
+//
+// It is drawn on a grid of character cells: the head and arms are stamped
+// into a density grid each frame, and a dense cell gets a dense character
+// (# %), a thin one a light character (. :). Suckers are small o's along the
+// arms. A soft glow in the middle keeps the question and the examples
+// readable over it.
 //
 // It only runs while the chat is empty and visible, stops when the tab is
 // hidden, and draws one still frame for anyone who asked for less motion.
@@ -14,82 +19,28 @@
 const CELL = 8;                 // px per character cell
 const RAMP = " .:-=+*#%@";      // light to dense
 const FPS = 30;
-const SHARKS = 3;
-const BUBBLES = 26;
+const ARMS = 8;
+const SEGMENTS = 44;
+const BUBBLES = 22;
 
 const canvas = document.getElementById("ambient");
 const context = canvas ? canvas.getContext("2d") : null;
 const still = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-let sharks = [];
 let bubbles = [];
+let grid = new Float32Array(0);
+let marks = new Uint8Array(0);   // 1: a sucker, 2: an eye
+let columns = 0;
+let rows = 0;
+let time = 0;
 let frame = 0;
 let last = 0;
 let colours = { ink: "0,0,0", bg: "255,255,255", light: true };
 
 function random(min, max) { return min + Math.random() * (max - min); }
 
-function newShark(width, height, entering) {
-  // Sized to the room they swim in: big on a wide screen, small in a narrow one.
-  const length = Math.max(120, Math.min(360, Math.min(width, height) * random(0.3, 0.45)));
-  const heading = random(-0.5, 0.5) + (Math.random() < 0.5 ? 0 : Math.PI);
-  return {
-    x: entering ? (Math.cos(heading) > 0 ? -length : width + length) : random(0, width),
-    y: random(height * 0.12, height * 0.88),
-    heading: heading,
-    turn: random(-0.0025, 0.0025),
-    speed: random(0.35, 0.8),
-    length: length,
-    phase: random(0, Math.PI * 2),
-    sway: random(0.05, 0.08),
-  };
-}
-
 function newBubble(width, height) {
   return { x: random(0, width), y: random(0, height), rise: random(0.15, 0.45), drift: random(0, Math.PI * 2) };
-}
-
-/** Half the body's thickness at `t` (0 at the tail, 1 at the nose), as a
- * share of half its length: a stalk at the tail, fullest ahead of the middle,
- * a pointed nose. */
-function body(t) {
-  if (t <= 0 || t >= 1) return 0;
-  return 0.6 * Math.pow(t, 0.62) * Math.pow(1 - t, 0.95);
-}
-
-/** How dense the shark is at body coordinates — u from tail (-1) to nose (1),
- * v across it, back up — or 0 outside it. */
-function shade(u, v) {
-  const t = (u + 1) / 2;
-  const half = body(t);
-
-  // The body, counter-shaded: a dark back, a pale belly.
-  if (u > -1 && u < 1 && Math.abs(v) < half) {
-    return 0.42 + 0.48 * ((v / half) + 1) / 2;
-  }
-
-  // Dorsal fin: tall, its leading edge steep, its trailing edge swept back.
-  if (v > 0 && u > -0.12 && u < 0.3) {
-    const apex = 0.06;
-    const rise = u < apex ? (u + 0.12) / (apex + 0.12) : Math.pow((0.3 - u) / (0.3 - apex), 1.6);
-    if (v < half + 0.3 * rise) return 0.85;
-  }
-
-  // Pectoral fin, below and behind the head.
-  if (v < 0 && u > 0.14 && u < 0.46) {
-    const reach = Math.max(0, 1 - Math.abs(u - 0.2) / 0.26);
-    if (-v < half + 0.2 * reach) return 0.6;
-  }
-
-  // Tail: a long upper lobe and a shorter lower one, forked.
-  if (u <= -0.86 && u > -1.32) {
-    const back = -0.86 - u;
-    if (v >= -0.02 && v < back * 1.45 && v > back * 0.55 - 0.03) return 0.8;
-    if (v < 0.02 && -v < back * 0.95 && -v > back * 0.45 - 0.03) return 0.62;
-    if (Math.abs(v) < 0.035) return 0.7;
-  }
-
-  return 0;
 }
 
 function readColours() {
@@ -114,7 +65,7 @@ function readColours() {
 }
 
 /** Pick up a new theme at once: until it is read, the old ink is drawn on
- * the new page — light on light, and the sharks are gone. */
+ * the new page — light on light, and the octopus is gone. */
 function themeChanged() {
   if (!canvas) return;
   readColours();
@@ -130,64 +81,123 @@ function resize() {
     canvas.width = Math.round(width * ratio);
     canvas.height = Math.round(height * ratio);
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    sharks = Array.from({ length: SHARKS }, function () { return newShark(width, height, false); });
+    columns = Math.ceil(width / CELL);
+    rows = Math.ceil(height / CELL);
+    grid = new Float32Array(columns * rows);
+    marks = new Uint8Array(columns * rows);
     bubbles = Array.from({ length: BUBBLES }, function () { return newBubble(width, height); });
   }
   return true;
 }
 
-function drawShark(shark, width, height) {
-  const cos = Math.cos(shark.heading);
-  const sin = Math.sin(shark.heading);
-  const reach = shark.length * 0.8;
-  const minX = Math.max(0, Math.floor((shark.x - reach) / CELL));
-  const maxX = Math.min(Math.ceil(width / CELL), Math.ceil((shark.x + reach) / CELL));
-  const minY = Math.max(0, Math.floor((shark.y - reach) / CELL));
-  const maxY = Math.min(Math.ceil(height / CELL), Math.ceil((shark.y + reach) / CELL));
-  // A shark swimming left is drawn mirrored, so its back stays up.
-  const flip = cos < 0 ? -1 : 1;
-
-  for (let gy = minY; gy < maxY; gy++) {
-    for (let gx = minX; gx < maxX; gx++) {
-      const dx = gx * CELL + CELL / 2 - shark.x;
-      const dy = gy * CELL + CELL / 2 - shark.y;
-      const u = (dx * cos + dy * sin) / (shark.length / 2);
-      let v = (-dx * sin + dy * cos) / (shark.length / 2) * -flip;
-      // The tail sways more than the head.
-      v -= Math.sin(shark.phase - u * 2.6) * shark.sway * Math.pow((1 - u) / 2, 1.6);
-      const density = shade(u, v);
-      if (density <= 0.05) continue;
-
-      const grain = 0.85 + 0.15 * Math.sin(gx * 12.9898 + gy * 78.233);
-      const index = Math.min(RAMP.length - 1, Math.max(1, Math.round(density * grain * (RAMP.length - 1))));
-      const alpha = colours.light ? 0.3 + density * 0.6 : 0.22 + density * 0.5;
-      context.fillStyle = "rgba(" + colours.ink + "," + alpha.toFixed(2) + ")";
-      context.fillText(RAMP[index], gx * CELL + CELL / 2, gy * CELL + CELL / 2);
+/** Fill the cells within `radius` px of a point, keeping the denser value. */
+function stamp(x, y, radius, density, edge) {
+  const reach = Math.ceil(radius / CELL);
+  const cx = Math.floor(x / CELL);
+  const cy = Math.floor(y / CELL);
+  for (let gy = cy - reach; gy <= cy + reach; gy++) {
+    if (gy < 0 || gy >= rows) continue;
+    for (let gx = cx - reach; gx <= cx + reach; gx++) {
+      if (gx < 0 || gx >= columns) continue;
+      const dx = gx * CELL + CELL / 2 - x;
+      const dy = gy * CELL + CELL / 2 - y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance > radius) continue;
+      // Rounder in the middle of a limb than at its edge.
+      const value = density * (1 - edge * distance / radius);
+      const index = gy * columns + gx;
+      if (value > grid[index]) grid[index] = value;
     }
   }
 }
 
-function step(width, height) {
-  sharks.forEach(function (shark, index) {
-    shark.heading += shark.turn + Math.sin(frame * 0.004 + index) * 0.0012;
-    shark.x += Math.cos(shark.heading) * shark.speed;
-    shark.y += Math.sin(shark.heading) * shark.speed;
-    shark.phase += 0.09 * shark.speed + 0.02;
-    // Keep away from the top and bottom edges; leave by the sides.
-    if (shark.y < height * 0.08 || shark.y > height * 0.92) shark.turn = -shark.turn - Math.sign(shark.y - height / 2) * 0.002;
-    const margin = shark.length;
-    if (shark.x < -margin * 1.2 || shark.x > width + margin * 1.2) sharks[index] = newShark(width, height, true);
+function mark(x, y, kind) {
+  const gx = Math.floor(x / CELL);
+  const gy = Math.floor(y / CELL);
+  if (gx >= 0 && gx < columns && gy >= 0 && gy < rows) marks[gy * columns + gx] = kind;
+}
+
+/** Where the octopus is: under the question, and sized to the room. */
+function body(width, height) {
+  const empty = document.getElementById("chat-empty");
+  const box = empty ? empty.getBoundingClientRect() : null;
+  const frameBox = canvas.getBoundingClientRect();
+  const size = Math.max(34, Math.min(78, Math.min(width, height) * 0.085));
+  const below = box && box.height ? box.bottom - frameBox.top + size * 1.6 : height * 0.55;
+  return {
+    size: size,
+    x: width / 2 + Math.sin(time * 0.23) * size * 0.4,
+    y: Math.min(height - size * 2.2, below) + Math.sin(time * 0.5) * size * 0.12,
+  };
+}
+
+/** Stamp the head, the eyes and the eight arms; return where the arms end. */
+function build(width, height) {
+  grid.fill(0);
+  marks.fill(0);
+  const octopus = body(width, height);
+  const size = octopus.size;
+  const tips = [];
+
+  // The head: a dome, darker on top, with the eyes low on it.
+  const headX = octopus.x;
+  const headY = octopus.y - size * 0.6;
+  const rx = size * 0.95;
+  const ry = size * 1.15;
+  for (let gy = Math.floor((headY - ry) / CELL); gy <= Math.ceil((headY + ry) / CELL); gy++) {
+    for (let gx = Math.floor((headX - rx) / CELL); gx <= Math.ceil((headX + rx) / CELL); gx++) {
+      if (gx < 0 || gx >= columns || gy < 0 || gy >= rows) continue;
+      const nx = (gx * CELL + CELL / 2 - headX) / rx;
+      const ny = (gy * CELL + CELL / 2 - headY) / ry;
+      // Narrower at the bottom, where the arms begin.
+      const squeeze = ny > 0 ? 1 + ny * 0.35 : 1;
+      if (nx * nx * squeeze * squeeze + ny * ny > 1) continue;
+      grid[gy * columns + gx] = 0.5 + 0.4 * (1 - (ny + 1) / 2);
+    }
+  }
+  [-1, 1].forEach(function (side) {
+    const eyeX = headX + side * size * 0.42;
+    const eyeY = headY + size * 0.3;
+    mark(eyeX, eyeY, 2);
+    mark(eyeX, eyeY - CELL, 2);
   });
-  bubbles.forEach(function (bubble) {
-    bubble.y -= bubble.rise;
-    bubble.x += Math.sin(frame * 0.02 + bubble.drift) * 0.15;
-    if (bubble.y < -CELL) Object.assign(bubble, newBubble(width, height), { y: height + CELL });
-  });
+
+  // The arms: they fan out below the head and curl up at the ends, each
+  // waving on its own beat.
+  const length = size * 3.6;
+  const step = length / SEGMENTS;
+  for (let arm = 0; arm < ARMS; arm++) {
+    const share = arm / (ARMS - 1);
+    const start = Math.PI * (0.02 + 0.96 * share);
+    const curl = (share < 0.5 ? -1 : 1) * (0.8 + Math.abs(share - 0.5) * 1.6);
+    const phase = arm * 0.9;
+    let x = octopus.x + Math.cos(start) * size * 0.55;
+    let y = octopus.y + Math.sin(start) * size * 0.25;
+
+    for (let s = 0; s <= SEGMENTS; s++) {
+      const along = s / SEGMENTS;
+      const angle = start
+        + curl * Math.pow(along, 1.6) * (1.3 + 0.5 * Math.sin(time * 0.6 + phase))
+        + 0.3 * Math.sin(time * 1.1 + phase - along * 5);
+      x += Math.cos(angle) * step;
+      y += Math.sin(angle) * step;
+      const radius = Math.max(CELL * 0.6, size * 0.3 * Math.pow(1 - along, 0.9));
+      stamp(x, y, radius, 0.85 - along * 0.25, 0.45);
+      // Suckers along the inside of the curl.
+      if (s % 4 === 2 && along < 0.85) {
+        mark(x - Math.sin(angle) * radius * 0.4 * curl, y + Math.cos(angle) * radius * 0.4 * curl, 1);
+      }
+    }
+    tips.push({ x: x, y: y, arm: arm });
+  }
+  return tips;
 }
 
 function draw() {
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
+  const tips = build(width, height);
+
   context.clearRect(0, 0, width, height);
   context.font = (CELL + 1) + "px ui-monospace, Consolas, monospace";
   context.textAlign = "center";
@@ -197,21 +207,62 @@ function draw() {
     context.fillStyle = "rgba(" + colours.ink + "," + (colours.light ? 0.26 : 0.18) + ")";
     context.fillText(bubble.y % 40 < 20 ? "o" : ".", Math.round(bubble.x / CELL) * CELL, Math.round(bubble.y / CELL) * CELL);
   });
-  sharks.forEach(function (shark) { drawShark(shark, width, height); });
 
-  // The glow behind the question and the examples, wherever they sit: what
-  // swims through it fades away, so they stay readable.
+  for (let gy = 0; gy < rows; gy++) {
+    for (let gx = 0; gx < columns; gx++) {
+      const index = gy * columns + gx;
+      const density = grid[index];
+      if (density <= 0.05) continue;
+      const x = gx * CELL + CELL / 2;
+      const y = gy * CELL + CELL / 2;
+      const alpha = colours.light ? 0.3 + density * 0.6 : 0.22 + density * 0.5;
+      context.fillStyle = "rgba(" + colours.ink + "," + alpha.toFixed(2) + ")";
+      if (marks[index] === 2) {
+        context.fillStyle = "rgba(" + colours.ink + ",0.95)";
+        context.fillText("@", x, y);
+        continue;
+      }
+      if (marks[index] === 1) { context.fillText("o", x, y); continue; }
+      const grain = 0.85 + 0.15 * Math.sin(gx * 12.9898 + gy * 78.233);
+      const level = Math.min(RAMP.length - 1, Math.max(1, Math.round(density * grain * (RAMP.length - 1))));
+      context.fillText(RAMP[level], x, y);
+    }
+  }
+
+  // The nodes the arms hold: each lights up in turn, around the arms.
+  tips.forEach(function (tip) {
+    const beat = ((time * 0.45 - tip.arm / ARMS) % 1 + 1) % 1;
+    const glow = Math.exp(-Math.pow(beat * 7, 2)) + Math.exp(-Math.pow((1 - beat) * 7, 2));
+    const alpha = (colours.light ? 0.3 : 0.22) + glow * 0.6;
+    context.fillStyle = "rgba(" + colours.ink + "," + alpha.toFixed(2) + ")";
+    context.fillText(glow > 0.4 ? "*" : "+", tip.x, tip.y);
+    [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(function (offset) {
+      context.fillText(glow > 0.4 ? "o" : ".", tip.x + offset[0] * CELL * 1.4, tip.y + offset[1] * CELL * 1.4);
+    });
+  });
+
+  // The glow behind the question and the examples, wherever they sit, so
+  // they stay readable.
   const empty = document.getElementById("chat-empty");
   const box = empty ? empty.getBoundingClientRect() : null;
-  const frame = canvas.getBoundingClientRect();
-  const cx = box && box.width ? box.left + box.width / 2 - frame.left : width / 2;
-  const cy = box && box.height ? box.top + box.height / 2 - frame.top : height * 0.4;
-  const glow = context.createRadialGradient(cx, cy, 0, cx, cy, Math.max(220, Math.min(width, height) * 0.42));
+  const frameBox = canvas.getBoundingClientRect();
+  const cx = box && box.width ? box.left + box.width / 2 - frameBox.left : width / 2;
+  const cy = box && box.height ? box.top + box.height / 2 - frameBox.top : height * 0.4;
+  const glow = context.createRadialGradient(cx, cy, 0, cx, cy, Math.max(200, Math.min(width, height) * 0.32));
   glow.addColorStop(0, "rgba(" + colours.bg + ",0.94)");
-  glow.addColorStop(0.5, "rgba(" + colours.bg + ",0.6)");
+  glow.addColorStop(0.55, "rgba(" + colours.bg + ",0.55)");
   glow.addColorStop(1, "rgba(" + colours.bg + ",0)");
   context.fillStyle = glow;
   context.fillRect(0, 0, width, height);
+}
+
+function step(width, height) {
+  time += 1 / FPS;
+  bubbles.forEach(function (bubble) {
+    bubble.y -= bubble.rise;
+    bubble.x += Math.sin(frame * 0.02 + bubble.drift) * 0.15;
+    if (bubble.y < -CELL) Object.assign(bubble, newBubble(width, height), { y: height + CELL });
+  });
 }
 
 function visible() {
@@ -229,7 +280,7 @@ function loop(now) {
   frame += 1;
 }
 
-/** Show the sharks or put them away, as the chat empties and fills. */
+/** Show the octopus or put it away, as the chat empties and fills. */
 export function setAmbient(on) {
   if (!canvas) return;
   canvas.classList.toggle("on", on);
