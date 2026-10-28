@@ -70,6 +70,15 @@
     <button id="tab-settings" aria-selected="false" title="Settings"><svg class="icon"><use href="#i-settings"/></svg><span class="label">Settings</span></button>
   </nav>
 
+  <!-- The chat history lives in the menu, under the pages, on every page. -->
+  <section class="threads" id="threads" aria-label="Chat history">
+    <div class="threads-head">
+      <span class="label">Chat history</span>
+      <button class="icon-button" id="new-chat" title="New chat" aria-label="New chat"><svg class="icon"><use href="#i-plus"/></svg></button>
+    </div>
+    <div id="thread-list" class="thread-list"></div>
+  </section>
+
   <div class="foot">
     <div class="theme-switch" role="radiogroup" aria-label="Colour theme">
       <button role="radio" data-theme-choice="light" title="Light" aria-label="Light"><svg class="icon"><use href="#i-sun"/></svg></button>
@@ -99,11 +108,6 @@
 <main>
   <!-- ── Run: the chat ───────────────────────────────────────────────── -->
   <div id="view-workflows" class="view chat">
-    <aside class="threads" id="threads" aria-label="Conversations">
-      <button class="action primary new-chat" id="new-chat"><svg class="icon"><use href="#i-plus"/></svg>New chat</button>
-      <div id="thread-list" class="thread-list"></div>
-    </aside>
-
     <section class="conversation">
       <!-- Sharks of characters behind an empty chat; see js/ambient.js. -->
       <canvas id="ambient" class="ambient" aria-hidden="true"></canvas>

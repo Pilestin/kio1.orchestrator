@@ -741,22 +741,39 @@ td.actions .icon-button .icon { width: 16px; height: 16px; }
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
 
+/* The chat history, in the menu under the pages: one panel, not two. */
 .threads {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  min-height: 0;
-  overflow: auto;
-  padding: 1rem 0.75rem;
-  border-right: 1px solid var(--line);
-  background: var(--rail-bg);
+  gap: 0.4rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
 }
 
-.threads .new-chat { justify-content: flex-start; }
+.threads-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 0 0.7rem;
+}
+
+.threads-head .label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.thread-list { flex: 1; min-height: 0; overflow: auto; margin-right: -0.4rem; padding-right: 0.4rem; }
+
+:root[data-rail="collapsed"] .threads { display: none; }
 
 .thread-list ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 
@@ -1209,10 +1226,16 @@ td.actions .icon-button .icon { width: 16px; height: 16px; }
 :root[data-drawer="docked"] .drawer { box-shadow: none; }
 
 @media (max-width: 900px) {
-  .view.chat { grid-template-columns: minmax(0, 1fr); }
+  .thread-delete { opacity: 1; }
+  .lane { padding: 0 1rem; }
+  .msg-user { max-width: 90%; }
+}
+
+/* Once the menu is a bar across the top, the history comes in over the
+   chat from the left, opened by the list button. */
+@media (max-width: 820px) {
   #threads-toggle { display: inline-grid; }
 
-  /* The list comes in over the chat, from the side the menu is on. */
   .threads {
     position: fixed;
     z-index: 45;
@@ -1220,6 +1243,9 @@ td.actions .icon-button .icon { width: 16px; height: 16px; }
     bottom: 0;
     left: 0;
     width: min(300px, 85vw);
+    padding: 1rem 0.75rem;
+    border-top: 0;
+    background: var(--rail-bg);
     box-shadow: var(--shadow-lg);
     transform: translateX(-100%);
     visibility: hidden;
@@ -1227,9 +1253,7 @@ td.actions .icon-button .icon { width: 16px; height: 16px; }
   }
 
   .threads.open { transform: none; visibility: visible; transition: transform 0.2s ease; }
-  .thread-delete { opacity: 1; }
-  .lane { padding: 0 1rem; }
-  .msg-user { max-width: 90%; }
+  .rail .threads-head .label { display: inline; }
 }
 
 /* ── live view of a run ─────────────────────────────────────────────────── */

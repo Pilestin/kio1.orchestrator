@@ -317,7 +317,7 @@ function placeDrawer() {
     return;
   }
 
-  const chatStart = $("threads").getBoundingClientRect().right;
+  const chatStart = document.querySelector(".column").getBoundingClientRect().left;
   const fits = window.innerWidth >= DOCK_FROM
     && window.innerWidth - chatStart - $("drawer").getBoundingClientRect().width >= CHAT_MIN;
 

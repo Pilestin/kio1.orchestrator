@@ -70,7 +70,7 @@ function renderThreads() {
     || '<p class="small muted thread-empty">No conversations yet.</p>');
 }
 
-async function loadConversations() {
+export async function loadConversations() {
   try {
     const data = await api("/conversations?limit=50");
     chat.conversations = data.conversations || [];
@@ -772,7 +772,8 @@ $("run-examples").addEventListener("click", function (event) {
   $("request").focus();
 });
 
-$("new-chat").addEventListener("click", newChat);
+// The history sits in the menu, so it is clicked from any page.
+$("new-chat").addEventListener("click", function () { showTab("workflows"); newChat(); });
 $("threads-toggle").addEventListener("click", function () {
   setThreadsOpen(!$("threads").classList.contains("open"));
 });
@@ -803,13 +804,17 @@ $("thread-list").addEventListener("click", async function (event) {
   }
 
   const item = event.target.closest("[data-conversation]");
-  if (item) openConversation(item.dataset.conversation);
+  if (item) {
+    showTab("workflows");
+    openConversation(item.dataset.conversation);
+  }
 });
 
 $("thread-list").addEventListener("keydown", function (event) {
   const item = event.target.closest("[data-conversation]");
   if (item && event.target === item && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
+    showTab("workflows");
     openConversation(item.dataset.conversation);
   }
 });

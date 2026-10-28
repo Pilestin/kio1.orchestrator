@@ -12,7 +12,7 @@
 //   js/setup.js     first-run setup
 //   js/palette.js   the command palette (Ctrl+K)
 
-import { loadChat } from "./js/chat.js";
+import { loadChat, loadConversations } from "./js/chat.js";
 import { $, REFRESH_MS, addCopyButtons, hooks, state } from "./js/core.js";
 import "./js/examples.js";
 import { loadSteps } from "./js/live.js";
@@ -35,6 +35,9 @@ function refresh() {
   } else if (state.tab === "settings") {
     loadSettings({ quiet: true });
   }
+
+  // The chat history sits in the menu, so it is kept current on every page.
+  if (state.tab !== "workflows") loadConversations();
 
   // The top bar shows which model will write the plan on every page: it is
   // the setting a run most often goes wrong on.

@@ -35,8 +35,9 @@ corner, rather than as browser pop-ups.
 
 The page is still addressed as `#/run`.
 
-A chat. The conversations are on the left, newest first; **New chat** starts
-one. On a narrow screen the list is behind the button at the top left.
+A chat. Past conversations are under **Chat history** in the menu, newest
+first, on every page; **+** starts a new one. On a narrow screen the list is
+behind the button at the top left.
 
 Each message is one run. What you write goes to the planning model together
 with a generated catalog of the usable targets and the rules in the system
