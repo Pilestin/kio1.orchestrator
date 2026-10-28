@@ -107,7 +107,7 @@
             "KIO6": {
                 "endpoint": "http://127.0.0.1:8106",
                 "path": "/execute",
-                "description": "Data validation and quality analysis.",
+                "description": "Data validation and quality analysis: checks that code is aligned with its requirements (where each one is implemented, whether it is tested, whether its acceptance criteria hold) and validates datasets.",
                 "capabilities": [
                     "data_validation",
                     "quality_analysis"

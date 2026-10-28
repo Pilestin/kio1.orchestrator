@@ -139,6 +139,16 @@ a small shop whose average price divides by zero for an empty cart — and ask:
 KIO11 runs the tests and reports the failure, KIO2 records it and names the
 line and the values that broke it, KIO7 writes a guard and checks it against
 every test on a copy of the project, and KIO10 compares the energy of the two.
+
+Or ask for something new:
+
+> Customers want bulk discounts: 5 or more items get 5%. Write the
+> requirements, design it and check the code against them.
+
+KIO3 writes the requirements and the criteria on both sides of the threshold,
+KIO4 designs the parts and says which requirement each one serves, and KIO6
+looks for them in the shop: the discount is there, but no test tries 4 items.
+
 Every result comes from a real run; every output says `simulator: kio-mocks`
 so it is never taken for the real KIO's. What each stand-in does is in
 [their README](../kio-mocks/README.md).

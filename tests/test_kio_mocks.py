@@ -4,8 +4,10 @@ The stand-ins are only worth having if KIO1 cannot tell them from the real
 services. So this drives them with KIO1's own executor and transports, not
 with calls of their own: a plan of UC-UC1-03 — KIO11 runs the tests, KIO2
 localises from what KIO11 reported, KIO7 fixes from what KIO2 found — goes
-through `execute_workflow`, results passed on as `data.upstream`; and a job
-KIO is polled by KIO1's `KioJobTransport` exactly as KIO9 is.
+through `execute_workflow`, results passed on as `data.upstream`; so does
+one of UC-UC1-01/02 — KIO3 writes requirements, KIO4 designs, KIO7 writes
+the skeleton, KIO6 checks it against the requirements; and a job KIO is
+polled by KIO1's `KioJobTransport` exactly as KIO9 is.
 
 kio-mocks imports nothing from KIO1; only this test reaches the other way.
 """
@@ -40,10 +42,13 @@ def start(kio: Kio) -> tuple[Any, str]:
 @pytest.fixture
 def fleet() -> Iterator[dict[str, str]]:
     from kio_mocks.kio2 import KIO as KIO2
+    from kio_mocks.kio3 import KIO as KIO3
+    from kio_mocks.kio4 import KIO as KIO4
+    from kio_mocks.kio6 import KIO as KIO6
     from kio_mocks.kio7 import KIO as KIO7
     from kio_mocks.kio11 import KIO as KIO11
 
-    running = {kio.kio_id: start(kio) for kio in (KIO2, KIO7, KIO11)}
+    running = {kio.kio_id: start(kio) for kio in (KIO2, KIO3, KIO4, KIO6, KIO7, KIO11)}
     yield {kio_id: address for kio_id, (_, address) in running.items()}
 
     for server, _ in running.values():
@@ -112,6 +117,67 @@ def test_uc1_03_runs_through_kio1s_own_executor(
     assert diagnosis.output is not None and diagnosis.output["fault"]["line"] == 25
     assert fix.output is not None and fix.output["verified"]["failed"] == []
     assert fix.verdict == "clean"
+
+
+def test_uc1_01_02_runs_through_kio1s_own_executor(fleet: dict[str, str]) -> None:
+    registry = load_agent_registry(
+        {
+            "KIO3": {
+                "endpoint": fleet["KIO3"],
+                "capabilities": ["requirements_engineering"],
+            },
+            "KIO4": {
+                "endpoint": fleet["KIO4"],
+                "capabilities": ["architecture_design"],
+            },
+            "KIO7": {"endpoint": fleet["KIO7"], "capabilities": ["code_generation"]},
+            "KIO6": {"endpoint": fleet["KIO6"], "capabilities": ["quality_analysis"]},
+        }
+    )
+    steps = [
+        (
+            "KIO3",
+            "requirements_engineering",
+            "Customers want bulk discounts: 5 or more items get 5%.",
+        ),
+        ("KIO4", "architecture_design", "Design the architecture"),
+        ("KIO7", "code_generation", "Write the skeleton"),
+        ("KIO6", "quality_analysis", "Check the code against the requirements"),
+    ]
+    plan = parse_plan(
+        {
+            "workflow_id": "wf-uc1-01",
+            "execution_mode": "sequential",
+            "steps": [
+                {
+                    "step_id": f"s{index}",
+                    "agent_id": agent,
+                    "capability": capability,
+                    "task": task,
+                    **({"depends_on": [f"s{index - 1}"]} if index > 1 else {}),
+                }
+                for index, (agent, capability, task) in enumerate(steps, 1)
+            ],
+        }
+    )
+
+    result = execute_workflow(
+        plan,
+        registry,
+        build_transport(DispatchConfig(enabled=True, registry=registry)),
+        timeout=120,
+        max_parallel_steps=1,
+    )
+
+    _, design, skeleton, check = result.results
+    assert [step.status for step in result.results] == [STATUS_OK] * 4
+    assert design.output is not None
+    assert design.output["traceability"]["untraced_requirements"] == []
+    assert skeleton.output is not None
+    assert "Traces: FR-01." in skeleton.output["files"][0]["content"]
+    assert check.output is not None
+    assert [row["status"] for row in check.output["alignment"]] == ["stub"]
+    assert check.verdict == "inconclusive"
 
 
 def slow_review(request: Any) -> dict[str, Any]:

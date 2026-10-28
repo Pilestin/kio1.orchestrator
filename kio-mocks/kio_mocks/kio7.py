@@ -407,10 +407,15 @@ def _from_components(
                 f"def test_{function_name}_exists():\n    assert callable({name}.{function_name})\n"
             )
 
+        # The requirement ids stay in the code, so KIO6 can trace each
+        # requirement to where it lives without guessing from names.
+        traces = ", ".join(str(item) for item in component.get("requirements") or [])
         files.append(
             {
                 "path": f"{name}.py",
-                "content": f'"""{component.get("responsibility", component.get("name", ""))}"""\n\n\n'
+                "content": f'"""{component.get("responsibility", component.get("name", ""))}'
+                + (f"\n\nTraces: {traces}.\n" if traces else "")
+                + '"""\n\n\n'
                 + "\n\n".join(stubs),
             }
         )
@@ -420,7 +425,13 @@ def _from_components(
                 "content": f"import {name}\n\n\n" + "\n\n".join(tests),
             }
         )
+    # An empty conftest.py at the root puts the root on pytest's path, so
+    # the tests in tests/ import the modules beside them.
+    files.append({"path": "conftest.py", "content": ""})
 
+    # The same step asked again starts clean: a module the new design dropped
+    # must not linger and pass as part of it.
+    shutil.rmtree(folder, ignore_errors=True)
     for file in files:
         path = folder / file["path"]
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -431,6 +442,10 @@ def _from_components(
         "verdict": "clean",
         "output_dir": str(folder),
         "files": files,
+        # Passed on, so KIO6 can check the code against what it answers to.
+        "components": components,
+        "requirements": request.find_upstream("requirements") or [],
+        "acceptance_criteria": request.find_upstream("acceptance_criteria") or [],
         "method": "skeleton from the architecture (no model)",
     }
 

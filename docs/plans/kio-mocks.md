@@ -1,6 +1,6 @@
 # Plan — Göreve uygun çalışan sahte KIO'lar
 
-> Durum: **1–2. adımlar bitti (KIO2, KIO7, KIO10, KIO11)** · Hazırlanma: 2026-10-28
+> Durum: **1–3. adımlar bitti (KIO2, KIO3, KIO4, KIO6 uyum, KIO7, KIO10, KIO11)** · Hazırlanma: 2026-10-28
 > Dayanak: DoA Annex 1 Part B (§1.1, KIO tanımları) ve **D2.6** (§4.1 KIO
 > gereksinimleri, §5.2–5.3 use case akışları). İkisi çeliştiğinde D2.6 geçerli:
 > **KIO2 hata düzeltmez, yerini bulur**; düzeltmeyi UC-UC1-03'te KIO7 önerir.
@@ -86,7 +86,7 @@ Her adım tek commit; testler geçer; KIO1 ile canlı denenir.
 |---|---|---|
 | 1 ✅ | İskelet: protokol, iş arayüzü, çalışma klasörü, filo; uygunluk testleri | 12 KIO ayağa kalkar, KIO1 hepsini "ready" görür; bilinmeyen yetenek açık hatayla döner |
 | 2 ✅ | UC-UC1-03 zinciri: KIO11 (test, fuzz), KIO2 (iz, dilim, yer bulma), KIO7 (anlama, düzeltme önerisi), KIO10 (enerji) | Gerçek bir hatalı fonksiyonda KIO2 doğru dosya:satırı verir, KIO7 yamayı önerir, KIO11 düzeltmeden sonra yeşil der |
-| 3 | UC-UC1-01/02: KIO3, KIO4, KIO7 (üretim), KIO6 (uyum) | Bir özellik isteği gereksinim → mimari → iskelet → uyum zincirinden geçer |
+| 3 ✅ | UC-UC1-01/02: KIO3, KIO4, KIO7 (üretim), KIO6 (uyum) | Bir özellik isteği gereksinim → mimari → iskelet → uyum zincirinden geçer |
 | 4 | Güvenlik ve uyum: KIO12, KIO9 (iş arayüzü) | KIO9 `block` dediğinde politika kapısı dağıtımı durdurur |
 | 5 | KIO8, KIO5, KIO6 (veri), KIO10 (TinyML), KIO13 | UC-UC1-04 uçtan uca; KIO5'in ürettiğini KIO6 doğrular |
 | 6 | İsteğe bağlı model | Model açıkken KIO3/KIO4/KIO7/KIO13 metni zenginleşir; kapalıyken her şey çalışır |
@@ -98,6 +98,30 @@ hatasının yerini bul, bir düzeltme öner ve enerji etkisini ölç" → KIO11 
 kopyada 5/5) → KIO10 (−%20 J), 61 sn. Not: KIO1'in kendi `Pytest` komut agent'ı
 açıkken planlayıcı onu seçti ve KIO1 deposunun testlerini çalıştırdı; demo
 yapılandırmasında (7. adım) kapalı olmalı.
+
+**3. adım (2026-10-28):** KIO3 isteği FR/NFR, hikâye ve eşiğin iki yanındaki
+kriterlere ayırıyor; "hızlı" gibi ölçülemeyen sözcükleri tahmin etmek yerine
+soruyor. KIO4 her kavrama bir servis, her kaliteye bir bileşen veriyor ve iki
+yönlü izlenebilirlik kuruyor; var olan kodda import grafiğinden mimariyi ve
+döngüleri çıkarıyor. KIO7 iskeletin her modülüne izlediği gereksinimleri
+yazıyor. KIO6 gereksinimi kodda buluyor, taslağı uygulamadan ayırıyor ve
+kriterlerdeki sayıları koddaki sabitlerle ve testlerin argümanlarıyla
+karşılaştırıyor. Örnek dükkânda "5 ve üzeri ürüne %5" isteğine karşı: eşikler
+kodda var, ama 4 ve 9 adetlik sınırları test eden yok. KIO6'nın veri
+doğrulaması 5. adımda.
+
+**Canlı (2026-10-28, openrouter/free):** "Customers want bulk discounts: 5 or more
+items get 5%, 10 or more items get 10%. Write the requirements, design it and
+check the code against them." → KIO3 (1 FR, 5 kriter) → KIO4 → KIO6: eşikler
+`shop/pricing.py`'de, AC-03 (4 adet) ve AC-05 (9 adet) test edilmiyor; 76 sn.
+Öğrenilenler: KIO6'nın yapılandırmadaki tanımı uyum kontrolünden söz etmeyince
+planlayıcı KIO7'yi seçti (`config.example.json` güncellendi; kendi
+`config.json`'ınızda da güncellenmeli). Planlayıcı görevi yeniden yazıyor
+("Write natural-language requirements for…", "Include acceptance criteria in
+the format…", "customers buying 5 or more items get…", oran önce eşik sonra);
+KIO3 bunları artık tanıyor. Bir denemede model plan yazarken token sınırına
+takıldı; tekrarında geçti. Türkçe istekte cevap modeli iskeletin kuralları
+"uyguladığını" söyledi; KIO6'nın çıktısı doğru (yalnızca taslak).
 
 `tools/dummy_agent.py`, KIO1'in kendi protokol testlerinde kullanıldığı için
 kalır. `examples/uc1/agents.py`'nin gerçek iş mantığı buraya taşınır.

@@ -105,7 +105,7 @@ Düzen: **sol** sohbetler ve projeler · **orta** sohbet · **sağ** canlı çal
 - [ ] Türkçe/İngilizce arayüz, açık/koyu tema, klavye kısayolları, mobil genişlikte kullanılabilirlik.
 - [ ] Teknik karar: derleme adımı olmayan hafif bir yapı (yerel dosyalardan Preact + htm ya da Alpine.js); internetsiz çalışmaya devam eder, Node.js gerektirmez.
 
-- [x] **Sahte KIO'lar (`kio-mocks/`)** — 2026-10-28: KIO'lar hazır olana kadar yerlerini tutan, D2.6'daki görevlerini küçük ölçekte gerçekten yapan hizmetler. KIO2, KIO7, KIO10, KIO11 hazır; UC-UC1-03 gerçek modelle uçtan uca çalıştı. Plan: [plans/kio-mocks.md](plans/kio-mocks.md).
+- [x] **Sahte KIO'lar (`kio-mocks/`)** — 2026-10-28: KIO'lar hazır olana kadar yerlerini tutan, D2.6'daki görevlerini küçük ölçekte gerçekten yapan hizmetler. KIO2, KIO3, KIO4, KIO6, KIO7, KIO10, KIO11 hazır; UC-UC1-03 (hata düzeltme) ve UC-UC1-01/02 (özellik) zincirleri uçtan uca çalışıyor. Plan: [plans/kio-mocks.md](plans/kio-mocks.md).
 
 ### Adım 6 — Kodsuz agent oluşturucu  `L`
 

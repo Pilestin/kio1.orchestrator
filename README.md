@@ -98,8 +98,10 @@ KIO1 sends the steps of a generated plan to whatever carries them out. A target 
 Most KIOs are not running as services yet. Until they are, `kio-mocks/` stands in for
 them — and each stand-in does its job rather than answering with a canned reply: KIO11 runs
 the tests, KIO2 records the failing one and names the line that broke, KIO7 proposes a fix
-and checks it on a copy, KIO10 measures what the fix costs. They speak the same protocol as
-the real services, so a real KIO takes a stand-in's place by changing an address.
+and checks it on a copy, KIO10 measures what the fix costs. For a new feature, KIO3 writes
+the requirements, KIO4 designs the parts, KIO7 writes the skeleton and KIO6 checks the code
+against the requirements. They speak the same protocol as the real services, so a real KIO
+takes a stand-in's place by changing an address.
 
 ```bash
 cd kio-mocks && python -m kio_mocks

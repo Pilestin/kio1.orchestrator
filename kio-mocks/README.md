@@ -29,11 +29,19 @@ stops.
 | KIO | Capabilities | What it really does |
 |---|---|---|
 | KIO2 | `bug_localization`, `diagnosis`, `replay`, `trace_alignment` | Records the failing test under `sys.settrace`, names the line that raised and the values it saw, and slices back to where they came from. Replays and aligns recordings. **Does not fix** (D2.6: that is KIO7's step). |
-| KIO7 | `code_generation`, `code_understanding` | Explains modules and flags risky code. Proposes a fix from KIO2's diagnosis and runs the tests on a copy; changes the workspace only with `arguments.apply: true`. Writes code skeletons with tests from KIO4's components. |
+| KIO3 | `requirements_engineering`, `user_stories`, `acceptance_criteria` | Turns a request into numbered requirements, user stories and Given/When/Then criteria — on both sides of every threshold it reads. Asks about vague words ("fast") instead of guessing. Writes it all as Markdown. |
+| KIO4 | `architecture_design`, `component_design` | Gives each thing the requirements talk about its own service, behind an API, with a component for each quality asked for; traces requirements to components both ways and says why. Writes operation contracts from the criteria. Reads the architecture of existing code from its imports. |
+| KIO6 | `quality_analysis` | Checks code against requirements: where each one lives, whether it is written or only a stub, which tests exercise it, and whether the numbers in its criteria are in the code and the tests. Data validation follows. |
+| KIO7 | `code_generation`, `code_understanding` | Explains modules and flags risky code. Proposes a fix from KIO2's diagnosis and runs the tests on a copy; changes the workspace only with `arguments.apply: true`. Writes code skeletons with tests from KIO4's components, each module naming the requirements it answers to. |
 | KIO10 | `energy_efficiency`, `tinyml` | Measures the CPU time and energy of the tests (or entry point), and of KIO7's fix to compare. Places a model on an edge board within its limits, falling back to one that fits (simulated). |
 | KIO11 | `test_automation`, `validation` | Runs the tests and reports what failed and where. Generates and runs edge-value tests for functions, to confirm a failure without being told where it is. Checks acceptance criteria against the tests. |
 
-KIO3, KIO4, KIO5, KIO6, KIO8, KIO9, KIO12 and KIO13 follow; the plan is in
+Two chains work end to end. **Fixing a bug** (UC-UC1-03): KIO11 → KIO2 →
+KIO7 → KIO10. **Building a feature** (UC-UC1-01/02): KIO3 → KIO4 → KIO7 →
+KIO6 — try "Customers want bulk discounts: 5 or more items get 5%" on the
+sample, and KIO6 notices that no test checks 4 items.
+
+KIO5, KIO8, KIO9, KIO12 and KIO13 follow; the plan is in
 `../docs/plans/kio-mocks.md`.
 
 Every output carries `"simulator": "kio-mocks"`, so no run's history

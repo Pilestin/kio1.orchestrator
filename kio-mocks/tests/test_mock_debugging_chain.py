@@ -219,7 +219,7 @@ def test_kio7_writes_a_skeleton_from_an_architecture(shared: Path) -> None:
     )
 
     paths = [file["path"] for file in output["files"]]
-    assert paths == ["cart.py", "tests/test_cart.py"]
+    assert paths == ["cart.py", "tests/test_cart.py", "conftest.py"]
     assert "def add_item(cart, item):" in output["files"][0]["content"]
 
 
