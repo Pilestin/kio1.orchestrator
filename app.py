@@ -263,21 +263,26 @@ def _build_state() -> _State:
     provider = load_provider(config.provider, config.allowed_providers)
     provider_client = provider.create_client(config)
 
-    try:
-        with trace_provider_preload(provider=config.provider, model=config.model):
-            provider.preload(config, provider_client)
-    except Exception:
-        # Preloading only warms the model. A service that refuses to start
-        # because the provider is momentarily unreachable takes the whole API
-        # down with it, including the status endpoint someone would use to
-        # find out why. Requests surface the real error individually.
-        logger.warning(
-            "Could not preload %s model %s; the service will start anyway and "
-            "requests will fail until the provider is reachable",
-            config.provider,
-            config.model,
-            exc_info=True,
-        )
+    def preload() -> None:
+        try:
+            with trace_provider_preload(provider=config.provider, model=config.model):
+                provider.preload(config, provider_client)
+        except Exception:
+            # Preloading only warms the model. A service that refuses to start
+            # because the provider is momentarily unreachable takes the whole
+            # API down with it, including the status endpoint someone would
+            # use to find out why. Requests surface the real error individually.
+            logger.warning(
+                "Could not preload %s model %s; the service will start anyway and "
+                "requests will fail until the provider is reachable",
+                config.provider,
+                config.model,
+            )
+
+    # In the background: a model machine that does not answer (over Tailscale,
+    # say) would otherwise hold the whole service — the sign-in page with it —
+    # until the request timed out, minutes later.
+    threading.Thread(target=preload, name="provider-preload", daemon=True).start()
 
     session_manager_url = os.environ.get(SESSION_MANAGER_URL_ENV, "").strip()
 
