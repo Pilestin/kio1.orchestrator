@@ -39,7 +39,7 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[dict]:
     monkeypatch.setattr(launcher, "tailscale_address", lambda: HERE)
     monkeypatch.setattr(launcher, "tailscale_dns_name", lambda: DNS_NAME)
     monkeypatch.setattr(
-        launcher, "funnel", lambda port: seen["funnel"].append(port) or True
+        launcher, "funnel", lambda port: (seen["funnel"].append(port) or True, "")
     )
     monkeypatch.setattr(
         launcher, "funnel_off", lambda: seen.update(off=seen["off"] + 1)
@@ -153,12 +153,37 @@ def test_switching_back_to_the_tailnet_unpublishes_the_link(launched: dict) -> N
 def test_a_funnel_that_cannot_start_stops_kio1_too(
     launched: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(launcher, "funnel", lambda port: False)
+    monkeypatch.setattr(launcher, "funnel", lambda port: (False, "not allowed"))
 
     with pytest.raises(SystemExit):
         run("--funnel")
 
     assert "argv" not in launched
+
+
+def test_a_refused_user_is_allowed_once_and_the_funnel_tried_again(
+    launched: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answers = iter([(False, "Access denied: serve config denied"), (True, "")])
+    monkeypatch.setattr(launcher, "funnel", lambda port: next(answers))
+    monkeypatch.setattr(launcher, "allow_this_user", lambda: True)
+
+    run("--funnel")
+
+    assert "argv" in launched
+
+
+def test_without_the_persons_yes_nothing_runs_as_root(
+    launched: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("ran a command without asking"),
+    )
+
+    # Nobody at the keyboard: no question, no sudo.
+    assert launcher.allow_this_user() is False
 
 
 # ── start.py and the service ────────────────────────────────────────────────

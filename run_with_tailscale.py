@@ -126,20 +126,54 @@ def choose_mode(arguments: list[str]) -> str:
     return "funnel" if input("Choose 1 or 2 [1]: ").strip() == "2" else "tailnet"
 
 
-def funnel(port: int) -> bool:
+def funnel(port: int) -> tuple[bool, str]:
     """Publish 127.0.0.1:<port> at this machine's https://…ts.net address.
 
-    Runs in the foreground of this terminal: the first time, Tailscale may
-    print a link to approve Funnel for the tailnet, and waits for it.
+    Tailscale's output is shown as it comes — the first time it may print a
+    link to approve Funnel for the tailnet, and wait for it — and kept, so a
+    refusal can be read. Returns whether it worked, and what it said.
     """
     try:
-        done = subprocess.run(
+        process = subprocess.Popen(
             [tailscale(), "funnel", "--bg", f"http://127.0.0.1:{port}"],
-            timeout=300,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError as error:
+        return False, str(error)
+
+    said = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(line, end="", flush=True)
+        said.append(line)
+    try:
+        process.wait(timeout=300)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return False, "".join(said)
+    return process.returncode == 0, "".join(said)
+
+
+def allow_this_user() -> bool:
+    """Let this user change Tailscale's settings, with the person's yes and sudo.
+
+    By default only root may publish with Funnel; `tailscale set --operator`
+    lets one named user do it from then on. Asked once, never assumed.
+    """
+    import getpass
+
+    user = getpass.getuser()
+    if not sys.stdin.isatty():
         return False
+    start.say(f"Tailscale lets only root publish with Funnel. Allow '{user}' to, once?")
+    start.say(f"  This runs: sudo tailscale set --operator={user}")
+    if input("Allow? [Y/n]: ").strip().lower() not in ("", "y", "yes", "e", "evet"):
+        return False
+    done = subprocess.run(
+        ["sudo", tailscale(), "set", f"--operator={user}"], check=False
+    )
     return done.returncode == 0
 
 
@@ -210,7 +244,10 @@ def main() -> None:
 
     if mode == "funnel":
         funnel_off()  # whatever an earlier run left published
-        if not funnel(port):
+        published, said = funnel(port)
+        if not published and "access denied" in said.lower() and allow_this_user():
+            published, said = funnel(port)
+        if not published:
             start.say("Tailscale Funnel could not be switched on. Usually one of:")
             start.say(
                 "  - Funnel is not allowed for this machine yet: approve it at the"
