@@ -23,6 +23,7 @@ uvicorn app:app --port 8000
 | **Status** | The dot at the top right is green when the service answers, red when it does not; beside it, the model that plans. Hover for the provider and the workspace; click to change the model. |
 | **Theme** | Light, dark, or *follow the system*, from the switch at the bottom of the menu. Remembered in this browser and applied before the page paints, so there is no white flash in dark mode. |
 | **Collapse** | The button beside the logo collapses the menu to icons; also remembered. |
+| **Menu width** | Drag the menu's right edge to widen it for long conversation titles; remembered. A double click puts it back. |
 | **Ctrl K** | Opens the command palette: go to a page, start a new chat, open a conversation, add or edit a target, switch theme. Type to filter, arrows to choose, Enter to run. |
 | **Enter** | Sends the message; Shift+Enter starts a new line. |
 | **Addresses** | Each page has its own — `#/run`, `#/targets`, `#/settings`, `#/help` — and an open conversation adds its id, `#/run/<id>`, so a reload or a shared link opens the same place. |

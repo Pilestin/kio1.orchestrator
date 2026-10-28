@@ -113,6 +113,63 @@ $("rail-collapse").addEventListener("click", function () {
   setRailCollapsed(document.documentElement.dataset.rail !== "collapsed");
 });
 
+// ── menu width ──────────────────────────────────────────────────────────────
+
+const RAIL_WIDTH_KEY = "kio1.rail.width";
+const RAIL_MIN = 200;
+const RAIL_MAX = 480;
+
+/** Widen or narrow the open menu, within what leaves the page room. */
+function setRailWidth(width, remember) {
+  const max = Math.max(RAIL_MIN, Math.min(RAIL_MAX, window.innerWidth * 0.45));
+  const clamped = Math.round(Math.min(max, Math.max(RAIL_MIN, width)));
+
+  document.documentElement.style.setProperty("--rail-open-width", clamped + "px");
+  if (remember) {
+    try { localStorage.setItem(RAIL_WIDTH_KEY, String(clamped)); } catch { /* storage blocked */ }
+  }
+}
+
+function railWidth() {
+  return document.querySelector(".rail").getBoundingClientRect().width;
+}
+
+$("rail-resize").addEventListener("pointerdown", function (event) {
+  event.preventDefault();
+  const handle = event.currentTarget;
+  // Captured so the drag keeps going when the pointer leaves the thin edge.
+  try { handle.setPointerCapture(event.pointerId); } catch { /* a synthetic event */ }
+  document.documentElement.classList.add("rail-resizing");
+
+  function move(moved) { setRailWidth(moved.clientX, false); }
+  function stop() {
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", stop);
+    handle.removeEventListener("pointercancel", stop);
+    document.documentElement.classList.remove("rail-resizing");
+    setRailWidth(railWidth(), true);
+    // The chat is narrower or wider now: the run drawer re-decides where it sits.
+    window.dispatchEvent(new Event("resize"));
+  }
+
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+});
+
+$("rail-resize").addEventListener("keydown", function (event) {
+  const step = event.shiftKey ? 80 : 24;
+  if (event.key === "ArrowRight") setRailWidth(railWidth() + step, true);
+  else if (event.key === "ArrowLeft") setRailWidth(railWidth() - step, true);
+  else return;
+  event.preventDefault();
+});
+
+$("rail-resize").addEventListener("dblclick", function () {
+  document.documentElement.style.removeProperty("--rail-open-width");
+  try { localStorage.removeItem(RAIL_WIDTH_KEY); } catch { /* storage blocked */ }
+});
+
 $("set-token").addEventListener("click", async function () {
   const value = await ask({
     title: "Administration token",

@@ -9,6 +9,7 @@
 //
 // It only runs while the chat is empty and visible, stops when the tab is
 // hidden, and draws one still frame for anyone who asked for less motion.
+// Its colours follow the theme the moment it changes.
 
 const CELL = 8;                 // px per character cell
 const RAMP = " .:-=+*#%@";      // light to dense
@@ -24,7 +25,7 @@ let sharks = [];
 let bubbles = [];
 let frame = 0;
 let last = 0;
-let colours = { ink: "0,0,0", bg: "255,255,255" };
+let colours = { ink: "0,0,0", bg: "255,255,255", light: true };
 
 function random(min, max) { return min + Math.random() * (max - min); }
 
@@ -101,10 +102,23 @@ function readColours() {
     probe.remove();
     return rgb.slice(0, 3).join(",");
   };
+  const bg = toRgb(style.getPropertyValue("--bg").trim(), "#fff");
+  const [r, g, b] = bg.split(",").map(Number);
   colours = {
     ink: toRgb(style.getPropertyValue("--ink").trim(), "#000"),
-    bg: toRgb(style.getPropertyValue("--bg").trim(), "#fff"),
+    bg: bg,
+    // Dark ink on a light page reads fainter than light ink on a dark one,
+    // so the light theme draws a little stronger.
+    light: 0.299 * r + 0.587 * g + 0.114 * b > 128,
   };
+}
+
+/** Pick up a new theme at once: until it is read, the old ink is drawn on
+ * the new page — light on light, and the sharks are gone. */
+function themeChanged() {
+  if (!canvas) return;
+  readColours();
+  if (still.matches && canvas.classList.contains("on") && resize()) draw();
 }
 
 function resize() {
@@ -146,7 +160,8 @@ function drawShark(shark, width, height) {
 
       const grain = 0.85 + 0.15 * Math.sin(gx * 12.9898 + gy * 78.233);
       const index = Math.min(RAMP.length - 1, Math.max(1, Math.round(density * grain * (RAMP.length - 1))));
-      context.fillStyle = "rgba(" + colours.ink + "," + (0.22 + density * 0.5).toFixed(2) + ")";
+      const alpha = colours.light ? 0.3 + density * 0.6 : 0.22 + density * 0.5;
+      context.fillStyle = "rgba(" + colours.ink + "," + alpha.toFixed(2) + ")";
       context.fillText(RAMP[index], gx * CELL + CELL / 2, gy * CELL + CELL / 2);
     }
   }
@@ -179,7 +194,7 @@ function draw() {
   context.textBaseline = "middle";
 
   bubbles.forEach(function (bubble) {
-    context.fillStyle = "rgba(" + colours.ink + ",0.18)";
+    context.fillStyle = "rgba(" + colours.ink + "," + (colours.light ? 0.26 : 0.18) + ")";
     context.fillText(bubble.y % 40 < 20 ? "o" : ".", Math.round(bubble.x / CELL) * CELL, Math.round(bubble.y / CELL) * CELL);
   });
   sharks.forEach(function (shark) { drawShark(shark, width, height); });
@@ -226,4 +241,9 @@ export function setAmbient(on) {
   }
 }
 
-if (canvas && context && !still.matches) window.requestAnimationFrame(loop);
+if (canvas && context) {
+  // The theme is `data-theme` on <html>, or the system's when that is unset.
+  new MutationObserver(themeChanged).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeChanged);
+  if (!still.matches) window.requestAnimationFrame(loop);
+}

@@ -14,6 +14,8 @@
       var theme = localStorage.getItem("kio1.theme");
       if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
       if (localStorage.getItem("kio1.rail") === "collapsed") document.documentElement.dataset.rail = "collapsed";
+      var railWidth = Number(localStorage.getItem("kio1.rail.width"));
+      if (railWidth) document.documentElement.style.setProperty("--rail-open-width", railWidth + "px");
     } catch (e) { /* storage blocked: follow the system */ }
   })();
 </script>
@@ -56,6 +58,9 @@
 <div class="shell">
 
 <aside class="rail" aria-label="Main navigation">
+  <!-- Drag to widen the menu; arrows do the same, a double click resets it. -->
+  <div class="rail-resize" id="rail-resize" role="separator" aria-orientation="vertical"
+       aria-label="Resize the menu" title="Drag to resize" tabindex="0"></div>
   <div class="brand">
     <span class="mark" aria-hidden="true">K1</span>
     <span class="name">KIO1<span class="role">Orchestrator</span></span>
