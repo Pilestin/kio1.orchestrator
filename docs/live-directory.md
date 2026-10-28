@@ -77,7 +77,7 @@ The Workflow API exposes a small registry API so an agent can push its own
 manifest instead of waiting to be asked.
 
 ```bash
-curl -X POST http://localhost:8000/registry/agents \
+curl -X POST http://localhost:8101/registry/agents \
   -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"manifest": {"agent_id": "KIO7", "endpoint": "http://10.0.0.5:8107",
@@ -133,7 +133,7 @@ The [console](console.md) at `/` shows all of this in a table. For a
 terminal:
 
 ```bash
-curl -s localhost:8000/registry/agents -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" | jq
+curl -s localhost:8101/registry/agents -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" | jq
 ```
 
 Each record carries `status`, `origin`, `failures`, `last_checked` and

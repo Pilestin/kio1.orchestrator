@@ -198,7 +198,7 @@ It answered.
 From the command line:
 
 ```bash
-curl -s -X POST http://localhost:8000/registry/agents/probe -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" -H "Content-Type: application/json" -d '{"agent_id":"Workspace","entry":{"type":"mcp","command":["npx","-y","@modelcontextprotocol/server-filesystem","/work"]}}'
+curl -s -X POST http://localhost:8101/registry/agents/probe -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" -H "Content-Type: application/json" -d '{"agent_id":"Workspace","entry":{"type":"mcp","command":["npx","-y","@modelcontextprotocol/server-filesystem","/work"]}}'
 ```
 
 ## In a container

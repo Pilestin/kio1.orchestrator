@@ -5,7 +5,7 @@
 `run.py` drives the dispatch layer directly, which is the right shape for a
 test. This instead stands up everything a person would use: the UC1 fleet, a
 Session Manager, the Workflow API, and the console at
-`http://127.0.0.1:8000/`.
+`http://127.0.0.1:8101/`.
 
 Requests are planned by a **scripted planner** rather than a model, so the
 demonstration works without one installed. It matches on what you type; the
@@ -121,7 +121,7 @@ def main() -> int:
             )
         ),
     )
-    parser.add_argument("--port", type=int, default=8000, help="Console port.")
+    parser.add_argument("--port", type=int, default=8101, help="Console port.")
     parser.add_argument(
         "--token",
         default=os.environ.get("KIO1_REGISTRY_TOKEN", DEFAULT_TOKEN),

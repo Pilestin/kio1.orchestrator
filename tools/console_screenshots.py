@@ -185,7 +185,7 @@ def main() -> None:
     )
     parser.add_argument("shots", nargs="+", help="PAGE:THEME[:WIDTH[:SCRIPT]]")
     parser.add_argument(
-        "--base", default="http://127.0.0.1:8000", help="KIO1's address"
+        "--base", default="http://127.0.0.1:8101", help="KIO1's address"
     )
     parser.add_argument("--out", default="shots", help="directory for the PNGs")
     parser.add_argument(

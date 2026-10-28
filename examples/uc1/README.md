@@ -132,7 +132,7 @@ python examples/uc1/serve.py
 ```
 
 That stands up the fleet, a Session Manager, the Workflow API, and the
-[console](../../docs/console.md) at `http://127.0.0.1:8000/`. The banner
+[console](../../docs/console.md) at `http://127.0.0.1:8101/`. The banner
 prints the registry token to paste in.
 
 Requests are planned by a **scripted planner** that matches on what you type,

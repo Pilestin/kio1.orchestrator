@@ -6,13 +6,13 @@ at `/`.
 
 ```bash
 docker compose -f deploy/compose.yaml up -d --build
-# then open http://localhost:8000/
+# then open http://localhost:8101/
 ```
 
 Or from source, without containers:
 
 ```bash
-uvicorn app:app --port 8000
+uvicorn app:app --port 8101
 ```
 
 ## Finding your way around

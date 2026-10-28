@@ -11,7 +11,8 @@ Everything a first run needs, in order, each step skipped when already done:
    console can manage agents without anyone choosing or typing a secret.
 4. The model provider: for Ollama, the server is started if it is installed
    but not running, and a missing model is named with the command to get it.
-5. The web service, on the first free port from 8000, and a browser opened
+5. The web service, on 8101 (the next free port past the KIOs' if it is
+   taken), and a browser opened
    on it with the token already handed over.
 
 Only the standard library is used here, because this runs before any
@@ -204,9 +205,16 @@ def check_ollama(config: dict) -> None:
         say("Or pick an installed model on the console's Settings tab.")
 
 
+# KIO<N> listens on 81NN — KIO1 on 8101, KIO2 on 8102, … KIO13 on 8113 — so a
+# busy 8101 must not push KIO1 onto a port a KIO is about to take.
+KIO_PORTS = range(8102, 8114)
+
+
 def free_port(host: str, start: int) -> int:
-    """Return the first port from `start` nothing is listening on."""
+    """Return the first port from `start` nothing is listening on, past the KIOs' own."""
     for port in range(start, start + 50):
+        if port in KIO_PORTS:
+            continue
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             if probe.connect_ex((host, port)) != 0:
                 return port
@@ -263,7 +271,7 @@ def protect_dotenv() -> None:
 def main() -> None:
     """Prepare everything and run KIO1 until interrupted."""
     parser = argparse.ArgumentParser(description="Start the KIO1 console.")
-    parser.add_argument("--port", type=int, default=8000, help="first port to try")
+    parser.add_argument("--port", type=int, default=8101, help="first port to try")
     parser.add_argument("--host", default="127.0.0.1", help="address to listen on")
     parser.add_argument(
         "--no-browser", action="store_true", help="do not open a browser"

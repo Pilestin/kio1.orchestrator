@@ -19,7 +19,7 @@ Double-click **`start.cmd`** on Windows, or run `./start.sh` (or
 3. generates an administration token in `data/registry-token`,
 4. starts Ollama if it is installed but not running, and names the
    `ollama pull` command if the configured model is missing,
-5. starts KIO1 on the first free port from 8000 and opens the console with
+5. starts KIO1 on the first free port from 8101 and opens the console with
    the token already filled in.
 
 Later runs skip whatever is already done. History is kept in
@@ -57,7 +57,7 @@ The fastest honest answer to "what does this thing do":
 python examples/uc1/serve.py
 ```
 
-Open **http://127.0.0.1:8000/**. The banner in your terminal prints a
+Open **http://127.0.0.1:8101/**. The banner in your terminal prints a
 registry token; paste it under **Settings → Advanced → Administration token**.
 
 ### What you are looking at
@@ -181,14 +181,14 @@ registry API, and the console, all in one process.
 # PowerShell
 $env:KIO1_REGISTRY_TOKEN = "choose-a-secret"
 $env:KIO1_SESSION_MANAGER_URL = "http://localhost:8001"   # optional
-.venv\Scripts\uvicorn app:app --port 8000 --reload
+.venv\Scripts\uvicorn app:app --port 8101 --reload
 ```
 
 ```bash
 # bash
 export KIO1_REGISTRY_TOKEN=choose-a-secret
 export KIO1_SESSION_MANAGER_URL=http://localhost:8001     # optional
-.venv/bin/uvicorn app:app --port 8000 --reload
+.venv/bin/uvicorn app:app --port 8101 --reload
 ```
 
 Runs still execute without a Session Manager; nothing is written down, and
@@ -200,7 +200,7 @@ the console's Recent runs stays empty. To record them, start it too:
 docker compose -f deploy/compose.yaml up -d postgres
 
 uvicorn services.session_manager.app:app --port 8001    # in one terminal
-uvicorn app:app --port 8000 --reload                    # in another
+uvicorn app:app --port 8101 --reload                    # in another
 ```
 
 **In containers**, which brings up everything at once — PostgreSQL, the
@@ -215,15 +215,15 @@ docker compose -f deploy/compose.yaml down          # keeps the database
 Put your `KIO1_REGISTRY_TOKEN` in the `workflow-api` service's `environment:`
 block in `deploy/compose.yaml`, next to the other settings there.
 
-Either way the console is at **http://localhost:8000/**. Without
+Either way the console is at **http://localhost:8101/**. Without
 `KIO1_REGISTRY_TOKEN` the registry is closed and the console says so — see
 [the console](console.md).
 
 | Address | What |
 |---------|------|
-| `http://localhost:8000/` | The console |
-| `http://localhost:8000/docs` | The API, as OpenAPI |
-| `http://localhost:8000/health` | Liveness |
+| `http://localhost:8101/` | The console |
+| `http://localhost:8101/docs` | The API, as OpenAPI |
+| `http://localhost:8101/health` | Liveness |
 | `http://localhost:8001/health` | The Session Manager, when it is running |
 
 ### Tell it what it can use
@@ -300,7 +300,7 @@ mandatory before deployment is your decision, not a model's.
 From the console, or:
 
 ```bash
-curl -X POST http://localhost:8000/workflow/run \
+curl -X POST http://localhost:8101/workflow/run \
   -H 'Content-Type: application/json' \
   -d '{"request": "The checkout total is wrong for empty carts. Find and fix it."}'
 ```
@@ -338,7 +338,7 @@ the console. The simplest way to reach a KIO1 on a server is still that
 address, through SSH:
 
 ```bash
-ssh -L 8000:127.0.0.1:8000 you@server     # then open http://127.0.0.1:8000
+ssh -L 8101:127.0.0.1:8101 you@server     # then open http://127.0.0.1:8101
 ```
 
 To open it to the network instead, set a console password first:

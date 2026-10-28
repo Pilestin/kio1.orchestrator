@@ -118,7 +118,7 @@ short terminal session mostly does not.
 The registry listing carries each target's record per capability:
 
 ```bash
-curl -s localhost:8000/registry/agents -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" | jq
+curl -s localhost:8101/registry/agents -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" | jq
 ```
 
 ```json

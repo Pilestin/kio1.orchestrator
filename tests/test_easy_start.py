@@ -216,6 +216,25 @@ def test_a_busy_port_is_skipped() -> None:
         assert start.free_port("127.0.0.1", taken) != taken
 
 
+def test_kio1_never_steps_onto_a_kios_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    class Busy:
+        """A probe that finds everything below 8114 taken."""
+
+        def __init__(self, *args: object) -> None: ...
+        def __enter__(self) -> "Busy":
+            return self
+
+        def __exit__(self, *args: object) -> None: ...
+        def connect_ex(self, address: tuple[str, int]) -> int:
+            return 0 if address[1] < 8114 else 1
+
+    monkeypatch.setattr(socket, "socket", Busy)
+
+    assert start.free_port("127.0.0.1", 8101) == 8114
+
+
 # ── the model ───────────────────────────────────────────────────────────────
 
 

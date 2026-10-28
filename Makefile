@@ -85,7 +85,7 @@ run-session-manager: ## Run the Session Manager from source (needs make postgres
 
 .PHONY: run-workflow-api
 run-workflow-api: ## Run the Workflow API and console (needs the Session Manager)
-	KIO1_SESSION_MANAGER_URL=http://localhost:8001 		$(BINDIR)/uvicorn app:app --port 8000 --reload
+	KIO1_SESSION_MANAGER_URL=http://localhost:8001 		$(BINDIR)/uvicorn app:app --port 8101 --reload
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
@@ -94,7 +94,7 @@ example: ## Run the Use-Case 1 example end to end
 	$(PYTHON) examples/uc1/run.py
 
 .PHONY: example-console
-example-console: ## Serve Use-Case 1 at http://127.0.0.1:8000/
+example-console: ## Serve Use-Case 1 at http://127.0.0.1:8101/
 	$(PYTHON) examples/uc1/serve.py
 
 .PHONY: test

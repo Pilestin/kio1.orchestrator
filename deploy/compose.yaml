@@ -76,7 +76,7 @@ services:
       # closed rather than open to anyone who can reach the port.
       KIO1_REGISTRY_TOKEN: ${KIO1_REGISTRY_TOKEN:-}
     ports:
-      - "8000:8000"
+      - "8101:8101"
     volumes:
       # config.json and the prompt are baked into the image by the Dockerfile,
       # which would mean rebuilding to change a setting. Mounting them means an

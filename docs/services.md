@@ -41,14 +41,14 @@ unreachable the request is refused with `503` and nothing runs: starting work
 the caller cannot track would leave results no one can find.
 
 ```bash
-curl -s -X POST http://localhost:8000/workflow/run -H 'Content-Type: application/json' -d '{"request":"there is a null pointer exception in the payment module"}'
+curl -s -X POST http://localhost:8101/workflow/run -H 'Content-Type: application/json' -d '{"request":"there is a null pointer exception in the payment module"}'
 ```
 
 ```json
 {
   "session_id": "0e4d1f0c-9a1e-4c22-9d20-6f3a5c8b1e77",
   "status": "pending",
-  "status_url": "http://localhost:8000/workflow/0e4d1f0c-9a1e-4c22-9d20-6f3a5c8b1e77"
+  "status_url": "http://localhost:8101/workflow/0e4d1f0c-9a1e-4c22-9d20-6f3a5c8b1e77"
 }
 ```
 
@@ -139,20 +139,20 @@ There is no prompt in a container. The Workflow API takes the place of the
 terminal's input line, and there are three ways to use it.
 
 **A browser form.** The API publishes an interactive page at
-`http://localhost:8000/docs`. Open `POST /workflow/run`, press *Try it out*,
+`http://localhost:8101/docs`. Open `POST /workflow/run`, press *Try it out*,
 type the request, and send it. Nothing to install.
 
 **One command.**
 
 ```bash
-curl -X POST http://localhost:8000/workflow/run -H 'Content-Type: application/json' -d '{"request":"build a medical shift scheduling app and deploy it"}'
+curl -X POST http://localhost:8101/workflow/run -H 'Content-Type: application/json' -d '{"request":"build a medical shift scheduling app and deploy it"}'
 ```
 
 It answers immediately with a session id and keeps working in the background:
 
 ```json
 { "session_id": "a0503eac-…", "status": "pending",
-  "status_url": "http://localhost:8000/workflow/a0503eac-…" }
+  "status_url": "http://localhost:8101/workflow/a0503eac-…" }
 ```
 
 **Then read the result** from that `status_url`. It returns the same thing the
@@ -186,7 +186,7 @@ docker compose -f deploy/compose.yaml up -d --build
 ```
 
 That brings up PostgreSQL, NATS, the Session Manager on `8001`, and the
-Workflow API on `8000`. Stop it with `docker compose -f deploy/compose.yaml down`; the database volume
+Workflow API on `8101`. Stop it with `docker compose -f deploy/compose.yaml down`; the database volume
 survives.
 
 NATS is started with JetStream enabled and its monitoring port on `8222`, so

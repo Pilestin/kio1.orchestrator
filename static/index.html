@@ -606,7 +606,7 @@
         <p>Pasting a definition is the manual path. If your service can serve one
           more URL, it can describe itself and skip this form entirely — publish a
           manifest and point KIO1 at it, or push it to the registry API:</p>
-        <pre class="sample">curl -X POST http://localhost:8000/registry/agents \
+        <pre class="sample">curl -X POST http://localhost:8101/registry/agents \
   -H "Authorization: Bearer $KIO1_REGISTRY_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"manifest": {"agent_id": "MyAgent",

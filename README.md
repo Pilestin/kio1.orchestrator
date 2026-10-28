@@ -119,7 +119,7 @@ Steps can declare dependencies with an optional `depends_on` field, and a step's
 
 ```bash
 python main.py                                        # terminal orchestrator
-uvicorn app:app --port 8000                           # web service and console
+uvicorn app:app --port 8101                           # web service and console
 docker compose -f deploy/compose.yaml up -d --build   # both, plus a database
 ```
 
@@ -153,12 +153,12 @@ Alongside the terminal application, KIO1 exposes a Workflow API and a Session Ma
 make services
 ```
 
-That starts PostgreSQL, the Session Manager on port 8001, and the Workflow API on port 8000.
+That starts PostgreSQL, the Session Manager on port 8001, and the Workflow API on port 8101.
 
-There is no prompt in a container: `http://localhost:8000/docs` gives a browser form, or
+There is no prompt in a container: `http://localhost:8101/docs` gives a browser form, or
 
 ```bash
-curl -X POST http://localhost:8000/workflow/run -H 'Content-Type: application/json' -d '{"request":"fix the null pointer exception in the payment module"}'
+curl -X POST http://localhost:8101/workflow/run -H 'Content-Type: application/json' -d '{"request":"fix the null pointer exception in the payment module"}'
 ```
 
 which answers with a session id to poll for the result.
